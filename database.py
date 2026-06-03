@@ -31,41 +31,48 @@ def create_logs_table():
 def add_request_log(request_id, request_number, action, status_from, status_to, 
                     comment, performed_by, performed_by_role, performed_by_dept, details=None):
     """Add a log entry for a request action"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO request_logs (
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO request_logs (
+                request_id, request_number, action, status_from, status_to,
+                comment, performed_by, performed_by_role, performed_by_dept,
+                timestamp, details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
             request_id, request_number, action, status_from, status_to,
             comment, performed_by, performed_by_role, performed_by_dept,
-            timestamp, details
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        request_id, request_number, action, status_from, status_to,
-        comment, performed_by, performed_by_role, performed_by_dept,
-        datetime.now().isoformat(), details
-    ))
-    conn.commit()
-    conn.close()
+            datetime.now().isoformat(), details
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error adding log: {e}")
 
 
 def get_request_logs(request_id):
     """Get all logs for a specific request"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM request_logs 
-        WHERE request_id = ? 
-        ORDER BY timestamp ASC
-    ''', (request_id,))
-    logs = cursor.fetchall()
-    conn.close()
-    
-    if logs:
-        columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
-                   'status_to', 'comment', 'performed_by', 'performed_by_role', 
-                   'performed_by_dept', 'timestamp', 'details']
-        return [dict(zip(columns, log)) for log in logs]
-    return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM request_logs 
+            WHERE request_id = ? 
+            ORDER BY timestamp ASC
+        ''', (request_id,))
+        logs = cursor.fetchall()
+        conn.close()
+        
+        if logs:
+            columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
+                       'status_to', 'comment', 'performed_by', 'performed_by_role', 
+                       'performed_by_dept', 'timestamp', 'details']
+            return [dict(zip(columns, log)) for log in logs]
+        return []
+    except Exception as e:
+        print(f"Error getting logs: {e}")
+        return []
 
 
 def get_returned_requests(department_name):
@@ -563,15 +570,19 @@ def save_request(data):
     placeholders = ', '.join(['?' for _ in data])
     
     cursor.execute(f"INSERT INTO requests ({columns}) VALUES ({placeholders})", list(data.values()))
-    
-    # Add log for submission
-    add_request_log(
-        cursor.lastrowid, request_number, "SUBMITTED", None, "SUBMITTED",
-        "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name')
-    )
-    
+    request_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    
+    # Add log for submission (with error handling)
+    try:
+        add_request_log(
+            request_id, request_number, "SUBMITTED", None, "SUBMITTED",
+            "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name')
+        )
+    except Exception as e:
+        print(f"Could not add log: {e}")
+    
     return request_number
 
 
@@ -631,16 +642,18 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     
     params.append(request_id)
     cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
     
     # Add log entry
     if action:
-        add_request_log(
-            request_id, request_number, action, old_status, status,
-            comment, performed_by, performed_by_role, performed_by_dept
-        )
-    
-    conn.commit()
-    conn.close()
+        try:
+            add_request_log(
+                request_id, request_number, action, old_status, status,
+                comment, performed_by, performed_by_role, performed_by_dept
+            )
+        except Exception as e:
+            print(f"Could not add log: {e}")
 
 
 def update_payment_details(request_id, payment_reference):
