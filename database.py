@@ -219,9 +219,6 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Run migration
-    migrate_database()
-    
     # Insert default users
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -244,34 +241,6 @@ def init_database():
             "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
             default_users
         )
-    
-    conn.commit()
-    conn.close()
-
-
-def migrate_database():
-    """Add new columns to existing tables if they don't exist"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("PRAGMA table_info(requests)")
-    columns = [column[1] for column in cursor.fetchall()]
-    
-    new_columns = {
-        'date_received': 'TEXT',
-        'date_returned': 'TEXT',
-        'payment_date': 'TEXT',
-        'payment_reference': 'TEXT',
-        'completed_by': 'TEXT',
-        'completion_notes': 'TEXT'
-    }
-    
-    for col_name, col_type in new_columns.items():
-        if col_name not in columns:
-            try:
-                cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
-            except Exception as e:
-                print(f"Error adding {col_name}: {e}")
     
     conn.commit()
     conn.close()
@@ -496,9 +465,18 @@ def update_user_password(username, new_password):
     return True
 
 
-def get_working_days_between(start_date, end_date):
-    from utils.holidays_ke import working_days_between
-    return working_days_between(start_date, end_date)
+def get_user_by_username(username):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        WHERE u.username = ?
+    ''', (username,))
+    user = cursor.fetchone()
+    conn.close()
+    return user
 
 
 def get_pending_duration(request_date):
@@ -508,28 +486,14 @@ def get_pending_duration(request_date):
     return working_days_between(submitted_date, today)
 
 
-def get_sla_status(request_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT request_type, submission_date, payment_date, status FROM requests WHERE id = ?", (request_id,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if result and result[2] and result[3] == 'PAID':
-        from utils.holidays_ke import working_days_between
-        submitted = datetime.strptime(result[1], '%Y-%m-%d').date()
-        paid = datetime.strptime(result[2], '%Y-%m-%d').date()
-        days_taken = working_days_between(submitted, paid)
-        
-        sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
-                   'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
-        sla_days = sla_map.get(result[0], 5)
-        
-        return "Breached" if days_taken > sla_days else "Within SLA", days_taken, sla_days
-    return "Pending", None, None
+def get_working_days_between(start_date, end_date):
+    from utils.holidays_ke import working_days_between
+    return working_days_between(start_date, end_date)
 
 
 def get_dashboard_stats(financial_year=None, quarter=None):
+    from utils.holidays_ke import working_days_between
+    
     df = get_requests()
     
     if financial_year and financial_year != "All":
@@ -557,7 +521,6 @@ def get_dashboard_stats(financial_year=None, quarter=None):
     completion_times = []
     for _, row in df.iterrows():
         if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-            from utils.holidays_ke import working_days_between
             submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
             paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
             days = working_days_between(submitted, paid)
@@ -586,6 +549,8 @@ def get_dashboard_stats(financial_year=None, quarter=None):
 
 
 def get_department_performance(financial_year=None):
+    from utils.holidays_ke import working_days_between
+    
     df = get_requests()
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
@@ -599,7 +564,6 @@ def get_department_performance(financial_year=None):
         breaches = 0
         for _, row in dept_df.iterrows():
             if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-                from utils.holidays_ke import working_days_between
                 submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
                 paid_date = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
                 days = working_days_between(submitted, paid_date)
@@ -638,6 +602,8 @@ def get_trend_data(financial_year=None):
 
 
 def get_breach_analysis(financial_year=None):
+    from utils.holidays_ke import working_days_between
+    
     df = get_requests()
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
@@ -645,7 +611,6 @@ def get_breach_analysis(financial_year=None):
     breach_data = []
     for _, row in df.iterrows():
         if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-            from utils.holidays_ke import working_days_between
             submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
             paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
             days = working_days_between(submitted, paid)
