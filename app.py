@@ -3,9 +3,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from database import init_database, get_requests, save_request, update_request_status, authenticate_user
+from database import (
+    init_database, get_requests, save_request, update_request_status, 
+    authenticate_user, get_user_department, get_products, get_funders,
+    get_all_users, create_user, create_department, get_departments
+)
 from utils.holidays_ke import working_days_between
-import streamlit_option_menu as option_menu
+from streamlit_option_menu import option_menu
 
 # Page config
 st.set_page_config(
@@ -38,6 +42,11 @@ st.markdown("""
         color: white;
     }
     
+    .stButton > button:active {
+        background-color: #FFB81C;
+        color: #1E1E1E;
+    }
+    
     .success-box {
         background-color: #00843D10;
         border-left: 4px solid #00843D;
@@ -49,6 +58,14 @@ st.markdown("""
     .warning-box {
         background-color: #FFB81C10;
         border-left: 4px solid #FFB81C;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    
+    .info-box {
+        background-color: #00529B10;
+        border-left: 4px solid #00529B;
         padding: 1rem;
         border-radius: 5px;
         margin: 1rem 0;
@@ -73,6 +90,15 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         font-weight: 600;
     }
+    
+    div[data-testid="stExpander"] details summary p {
+        font-weight: 600;
+        color: #00843D;
+    }
+    
+    .stAlert {
+        border-radius: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,17 +112,28 @@ if 'user_role' not in st.session_state:
     st.session_state.user_role = None
 if 'username' not in st.session_state:
     st.session_state.username = None
+if 'user_dept' not in st.session_state:
+    st.session_state.user_dept = None
+if 'user_dept_id' not in st.session_state:
+    st.session_state.user_dept_id = None
+if 'is_finance' not in st.session_state:
+    st.session_state.is_finance = False
 
 # Login Screen
 if not st.session_state.authenticated:
-    st.markdown("<h1 style='text-align: center;'>🎓 HELB Loans Board</h1>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align: center; color: #00843D;'>Payment & Surrender Monitoring System</h3>", unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        st.markdown("""
+            <div style='text-align: center; padding: 2rem;'>
+                <h1 style='color: #00843D;'>🎓 HELB Loans Board</h1>
+                <h3 style='color: #FFB81C;'>Payment & Surrender Monitoring System</h3>
+                <hr>
+            </div>
+        """, unsafe_allow_html=True)
+        
         with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
             submitted = st.form_submit_button("Login", use_container_width=True)
             
             if submitted:
@@ -105,49 +142,99 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.session_state.user_role = user[1]
                     st.session_state.username = user[0]
-                    st.session_state.user_dept = user[2]
+                    st.session_state.user_dept = user[2] if user[2] else "No Department"
+                    st.session_state.user_dept_id = user[4] if user[4] else None
+                    st.session_state.is_finance = user[5] == 1 if len(user) > 5 else False
                     st.session_state.full_name = user[3]
                     st.rerun()
                 else:
-                    st.error("Invalid credentials. Use: dept_user/dept123, finance_officer/fin123, admin/admin123")
-    
-    st.markdown("---")
-    st.markdown("<p style='text-align: center; font-size: 0.8rem;'>© 2026 Higher Education Loans Board. All rights reserved.</p>", unsafe_allow_html=True)
+                    st.error("❌ Invalid credentials. Please try again.")
+        
+        st.markdown("---")
+        st.markdown("<p style='text-align: center; font-size: 0.8rem; color: gray;'>© 2026 Higher Education Loans Board. All rights reserved.</p>", unsafe_allow_html=True)
     st.stop()
 
 # Main App
 # Sidebar
 with st.sidebar:
-    st.image("https://via.placeholder.com/200x80/00843D/FFFFFF?text=HELB", use_column_width=True)
-    st.markdown(f"### Welcome, {st.session_state.full_name}")
-    st.markdown(f"**Role:** {st.session_state.user_role}")
-    st.markdown(f"**Department:** {st.session_state.user_dept if st.session_state.user_dept else 'N/A'}")
+    st.markdown("<h2 style='color: #00843D; text-align: center;'>HELB</h2>", unsafe_allow_html=True)
+    st.markdown(f"""
+        <div style='text-align: center; padding: 0.5rem;'>
+            <strong>{st.session_state.full_name}</strong><br>
+            <span style='color: #00843D;'>{st.session_state.user_role}</span><br>
+            <span style='font-size: 0.8rem;'>{st.session_state.user_dept}</span>
+        </div>
+    """, unsafe_allow_html=True)
     st.markdown("---")
     
-    menu_options = ["Dashboard", "New Request", "My Requests", "Approval Queue", "Reports"]
+    menu_options = ["📊 Dashboard", "📝 New Request", "📋 My Requests", "✅ Approval Queue", "📑 Reports"]
     if st.session_state.user_role == "ADMIN":
-        menu_options.append("Admin")
+        menu_options.append("⚙️ Admin Panel")
     
-    choice = option_menu.option_menu(
+    choice = option_menu(
         menu_title="Menu",
         options=menu_options,
-        icons=["house", "file-plus", "list-task", "check-circle", "bar-chart", "gear"],
         menu_icon="cast",
         default_index=0,
         styles={
-            "container": {"padding": "0!important", "background-color": "#fafafa"},
+            "container": {"padding": "0!important", "background-color": "#fafafa", "border-radius": "10px"},
             "icon": {"color": "#00843D", "font-size": "18px"},
-            "nav-link": {"font-size": "14px", "text-align": "left", "margin": "0px"},
-            "nav-link-selected": {"background-color": "#00843D"},
+            "nav-link": {"font-size": "14px", "text-align": "left", "margin": "0px", "padding": "10px"},
+            "nav-link-selected": {"background-color": "#00843D", "color": "white"},
         }
     )
     
-    if st.button("Logout", use_container_width=True):
+    st.markdown("---")
+    if st.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
 
+# Function to get allowed request types based on department
+def get_allowed_request_types():
+    if st.session_state.user_role == "FINANCE":
+        return ["Imprest", "Petty Cash"]
+    elif st.session_state.user_role == "ADMIN":
+        return ["Imprest", "Petty Cash", "Supplier", "Student Payment", "Surrender", "Refund"]
+    else:
+        dept_checks = get_user_department(st.session_state.username)
+        if dept_checks:
+            allowed = []
+            if dept_checks[2]: allowed.append("Imprest")
+            if dept_checks[3]: allowed.append("Petty Cash")
+            if dept_checks[4]: allowed.append("Supplier")
+            if dept_checks[5]: allowed.append("Student Payment")
+            if dept_checks[6]: allowed.append("Surrender")
+            if dept_checks[7]: allowed.append("Refund")
+            return allowed
+        return ["Imprest", "Petty Cash", "Surrender"]
+
+# Function to get department-specific form fields
+def get_department_form_config(request_type):
+    config = {
+        'show_product': False,
+        'show_payment_type': False,
+        'show_funder': False,
+        'show_supplier_fields': False,
+        'show_refund_fields': False,
+        'show_standard_payment_fields': True
+    }
+    
+    if st.session_state.user_dept == "Lending" and request_type == "Student Payment":
+        config['show_product'] = True
+        config['show_payment_type'] = True
+    elif st.session_state.user_dept == "External Resource Mobilization" and request_type == "Student Payment":
+        config['show_funder'] = True
+    elif st.session_state.user_dept == "Debt Management" and request_type == "Refund":
+        config['show_refund_fields'] = True
+    elif st.session_state.user_dept == "Supply Chain Management" and request_type == "Supplier":
+        config['show_supplier_fields'] = True
+    else:
+        config['show_standard_payment_fields'] = True
+    
+    return config
+
 # Main content area
-if choice == "Dashboard":
+if choice == "📊 Dashboard":
     st.markdown("<h1 style='color: #00843D;'>📊 Performance Dashboard</h1>", unsafe_allow_html=True)
     
     df = get_requests()
@@ -168,8 +255,8 @@ if choice == "Dashboard":
         if not completed_requests.empty:
             completion_times = []
             for _, row in completed_requests.iterrows():
-                submitted = datetime.fromisoformat(row['submission_date'])
-                completed_date = datetime.fromisoformat(row['completion_date'])
+                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d')
+                completed_date = datetime.strptime(row['completion_date'], '%Y-%m-%d')
                 days = working_days_between(submitted.date(), completed_date.date())
                 completion_times.append(days)
             avg_days = sum(completion_times) / len(completion_times) if completion_times else 0
@@ -177,32 +264,32 @@ if choice == "Dashboard":
         with col1:
             st.markdown(f"""
             <div class="metric-card">
-                <h3 style="color: #00843D; margin:0;">{total_requests}</h3>
-                <p style="margin:0;">Total Requests</p>
+                <h2 style="color: #00843D; margin:0;">{total_requests}</h2>
+                <p style="margin:0; color: gray;">Total Requests</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
             st.markdown(f"""
             <div class="metric-card">
-                <h3 style="color: #FFB81C; margin:0;">{pending}</h3>
-                <p style="margin:0;">Pending</p>
+                <h2 style="color: #FFB81C; margin:0;">{pending}</h2>
+                <p style="margin:0; color: gray;">Pending</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown(f"""
             <div class="metric-card">
-                <h3 style="color: #00529B; margin:0;">{completed}</h3>
-                <p style="margin:0;">Completed</p>
+                <h2 style="color: #00529B; margin:0;">{completed}</h2>
+                <p style="margin:0; color: gray;">Completed</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col4:
             st.markdown(f"""
             <div class="metric-card">
-                <h3 style="color: #00843D; margin:0;">{avg_days:.1f}</h3>
-                <p style="margin:0;">Avg Completion (Days)</p>
+                <h2 style="color: #00843D; margin:0;">{avg_days:.1f}</h2>
+                <p style="margin:0; color: gray;">Avg Days to Complete</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -216,16 +303,19 @@ if choice == "Dashboard":
             status_counts = df['status'].value_counts()
             fig = px.pie(values=status_counts.values, names=status_counts.index, 
                         color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#D3D3D3'])
-            fig.update_layout(showlegend=True)
+            fig.update_layout(showlegend=True, height=400)
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
-            st.subheader("💰 Total Amount by Type")
-            amount_by_type = df.groupby('request_type')['amount'].sum().reset_index()
-            fig = px.bar(amount_by_type, x='request_type', y='amount', 
-                        color='request_type', color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
-            fig.update_layout(showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("💰 Total Amount by Department")
+            amount_by_dept = df.groupby('department_name')['amount'].sum().reset_index()
+            if not amount_by_dept.empty:
+                fig = px.bar(amount_by_dept, x='department_name', y='amount', 
+                            color='department_name', color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
+                fig.update_layout(showlegend=False, height=400, xaxis_title="Department", yaxis_title="Amount (KES)")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No data available for chart")
         
         # SLA Compliance Table
         st.subheader("⏱️ SLA Compliance & Insights")
@@ -234,28 +324,22 @@ if choice == "Dashboard":
         sla_data = []
         for _, row in df.iterrows():
             if row['status'] == 'COMPLETED':
-                submitted = datetime.fromisoformat(row['submission_date'])
-                completed_date = datetime.fromisoformat(row['completion_date'])
+                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d')
+                completed_date = datetime.strptime(row['completion_date'], '%Y-%m-%d')
                 actual_days = working_days_between(submitted.date(), completed_date.date())
                 
-                # Get SLA days
-                if row['request_type'] == 'Imprest':
-                    sla_days = 5
-                elif row['request_type'] == 'Supplier':
-                    sla_days = 7
-                elif row['request_type'] == 'Student Payment':
-                    sla_days = 3
-                else:  # Surrender
-                    sla_days = 4
+                # Get SLA days based on request type
+                sla_map = {'Imprest': 5, 'Supplier': 7, 'Student Payment': 3, 'Surrender': 4, 'Petty Cash': 3, 'Refund': 10}
+                sla_days = sla_map.get(row['request_type'], 5)
                 
                 breached = actual_days > sla_days
                 sla_data.append({
                     'Request #': row['request_number'],
                     'Type': row['request_type'],
+                    'Department': row['department_name'],
                     'Actual Days': actual_days,
                     'SLA Days': sla_days,
                     'Breached': '⚠️ Yes' if breached else '✅ No',
-                    'Status': row['status']
                 })
         
         if sla_data:
@@ -264,70 +348,135 @@ if choice == "Dashboard":
             
             # Insights
             breach_rate = (sla_df['Breached'].str.contains('Yes').sum() / len(sla_df)) * 100
+            worst_dept = sla_df.groupby('Department')['Actual Days'].mean().idxmax() if not sla_df.empty else "N/A"
+            
+            insight_color = "#00843D" if breach_rate < 20 else "#FFB81C"
             st.markdown(f"""
             <div class="success-box">
-                <strong>📊 Intelligent Insights:</strong><br>
-                • Overall SLA breach rate: {breach_rate:.1f}%<br>
-                • Average processing time: {avg_days:.1f} working days<br>
-                • {sla_df['Type'].value_counts().index[0]} requests are the most common type<br>
-                • {'Finance department processing time is within acceptable range' if breach_rate < 20 else '⚠️ High breach rate detected - review workflow'}
+                <strong>💡 Intelligent Insights:</strong><br>
+                • Overall SLA breach rate: <span style='color: {insight_color}; font-weight: bold;'>{breach_rate:.1f}%</span><br>
+                • Average processing time: <strong>{avg_days:.1f}</strong> working days<br>
+                • Department with longest processing time: <strong>{worst_dept}</strong><br>
+                • {'✅ Finance department is performing within acceptable range' if breach_rate < 20 else '⚠️ High breach rate detected - review workflow and resource allocation'}
             </div>
             """, unsafe_allow_html=True)
+        else:
+            st.info("Complete some requests to see SLA insights.")
 
-elif choice == "New Request":
+elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
     
-    with st.form("request_form"):
-        request_type = st.selectbox("Request Type", ["Imprest", "Supplier", "Student Payment", "Surrender"])
-        department = st.text_input("Department", value=st.session_state.user_dept if st.session_state.user_dept else "")
-        amount = st.number_input("Amount (KES)", min_value=0.0, format="%.2f")
-        
-        # Conditional fields
-        imprest_no = batch_no = supplier_name = invoice_no = surrender_number = previous_imprest_no = None
-        
-        if request_type == "Imprest":
-            imprest_no = st.text_input("Imprest Number *")
-        elif request_type == "Supplier":
-            supplier_name = st.text_input("Supplier Name *")
-            invoice_no = st.text_input("Invoice Number *")
-        elif request_type == "Student Payment":
-            batch_no = st.text_input("Batch Number *")
-        else:  # Surrender
-            surrender_number = st.text_input("Surrender Number *")
-            previous_imprest_no = st.text_input("Previous Imprest Number *")
-        
-        submitted = st.form_submit_button("Submit Request", use_container_width=True)
-        
-        if submitted:
-            # Validation
-            if request_type == "Imprest" and not imprest_no:
-                st.error("Imprest Number is required")
-            elif request_type == "Supplier" and (not supplier_name or not invoice_no):
-                st.error("Supplier Name and Invoice Number are required")
-            elif request_type == "Student Payment" and not batch_no:
-                st.error("Batch Number is required")
-            elif request_type == "Surrender" and (not surrender_number or not previous_imprest_no):
-                st.error("Surrender Number and Previous Imprest Number are required")
-            else:
-                request_data = {
-                    'request_type': request_type,
-                    'department': department,
-                    'submitted_by': st.session_state.username,
-                    'amount': amount,
-                    'imprest_no': imprest_no,
-                    'batch_no': batch_no,
-                    'supplier_name': supplier_name,
-                    'invoice_no': invoice_no,
-                    'surrender_number': surrender_number,
-                    'previous_imprest_no': previous_imprest_no,
-                    'status': 'SUBMITTED'
-                }
+    allowed_types = get_allowed_request_types()
+    
+    if not allowed_types:
+        st.error("Your department does not have permission to submit any request types. Please contact admin.")
+    else:
+        with st.form("request_form"):
+            request_type = st.selectbox("Request Type", allowed_types)
+            
+            # Department is auto-filled
+            st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+            
+            # Submission date auto-populated
+            st.date_input("Submission Date", value=datetime.today(), disabled=True)
+            
+            amount = st.number_input("Amount (KES)", min_value=0.0, format="%.2f", step=1000.0)
+            
+            # Get department-specific config
+            config = get_department_form_config(request_type)
+            
+            # Initialize variables
+            imprest_no = batch_no = supplier_name = invoice_no = lpo_no = None
+            product_type = payment_type = funder_name = None
+            refund_reason = original_payment_ref = None
+            surrender_number = previous_imprest_no = None
+            
+            # Standard payment fields (Imprest, Petty Cash)
+            if config['show_standard_payment_fields'] and request_type in ["Imprest", "Petty Cash"]:
+                imprest_no = st.text_input("Imprest Number *" if request_type == "Imprest" else "Reference Number *")
+            
+            # Supplier fields
+            if config['show_supplier_fields'] or request_type == "Supplier":
+                supplier_name = st.text_input("Supplier Name *")
+                invoice_no = st.text_input("Invoice Number *")
+                lpo_no = st.text_input("LPO Number", help="Local Purchase Order Number if available")
+            
+            # Student Payment with product types (Lending department)
+            if config['show_product'] and request_type == "Student Payment":
+                products = get_products()
+                product_type = st.selectbox("Product Type", products['name'].tolist())
                 
-                request_number = save_request(request_data)
-                st.success(f"✅ Request {request_number} submitted successfully! Finance will review shortly.")
-                st.balloons()
+                if product_type in ["Undergraduate", "TVET"]:
+                    payment_type = st.selectbox("Payment Type", ["Upkeep", "Tuition"])
+                elif product_type == "Jielimishe":
+                    payment_type = "Tuition"
+                    st.info("Jielimishe product: Tuition payment only")
+                batch_no = st.text_input("Batch Number *")
+            
+            # Partner Funds (External Resource Mobilization)
+            if config['show_funder'] and request_type == "Student Payment":
+                funders = get_funders()
+                funder_name = st.selectbox("Select Funder/Partner", funders)
+                batch_no = st.text_input("Batch Number *")
+            
+            # Refund fields (Debt Management)
+            if config['show_refund_fields'] and request_type == "Refund":
+                refund_reason = st.text_area("Reason for Refund *")
+                original_payment_ref = st.text_input("Original Payment Reference *")
+            
+            # Surrender fields
+            if request_type == "Surrender":
+                surrender_number = st.text_input("Surrender Number *")
+                previous_imprest_no = st.text_input("Previous Imprest Number *")
+            
+            submitted = st.form_submit_button("Submit Request", use_container_width=True)
+            
+            if submitted:
+                # Validation
+                errors = []
+                if amount <= 0:
+                    errors.append("Amount must be greater than 0")
+                if request_type in ["Imprest", "Petty Cash"] and not imprest_no:
+                    errors.append(f"{request_type} number is required")
+                if request_type == "Supplier" and (not supplier_name or not invoice_no):
+                    errors.append("Supplier name and invoice number are required")
+                if request_type == "Student Payment" and not batch_no:
+                    errors.append("Batch number is required")
+                if request_type == "Surrender" and (not surrender_number or not previous_imprest_no):
+                    errors.append("Surrender number and previous imprest number are required")
+                if request_type == "Refund" and (not refund_reason or not original_payment_ref):
+                    errors.append("Refund reason and original payment reference are required")
+                
+                if errors:
+                    for error in errors:
+                        st.error(f"❌ {error}")
+                else:
+                    request_data = {
+                        'request_type': request_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'imprest_no': imprest_no,
+                        'batch_no': batch_no,
+                        'supplier_name': supplier_name,
+                        'invoice_no': invoice_no,
+                        'lpo_no': lpo_no,
+                        'product_type': product_type,
+                        'payment_type': payment_type,
+                        'funder_name': funder_name,
+                        'refund_reason': refund_reason,
+                        'original_payment_ref': original_payment_ref,
+                        'surrender_number': surrender_number,
+                        'previous_imprest_no': previous_imprest_no,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    request_number = save_request(request_data)
+                    st.success(f"✅ Request {request_number} submitted successfully on {datetime.today().strftime('%d/%m/%Y')}!")
+                    st.balloons()
 
-elif choice == "My Requests":
+elif choice == "📋 My Requests":
     st.markdown("<h1 style='color: #00843D;'>📋 My Requests</h1>", unsafe_allow_html=True)
     
     df = get_requests()
@@ -338,62 +487,100 @@ elif choice == "My Requests":
         if user_requests.empty:
             st.info("You haven't submitted any requests yet.")
         else:
-            st.dataframe(user_requests[['request_number', 'request_type', 'amount', 'status', 'submission_date']], 
-                        use_container_width=True, hide_index=True)
+            display_cols = ['request_number', 'request_type', 'amount', 'status', 'submission_date']
+            if 'product_type' in user_requests.columns:
+                display_cols.insert(2, 'product_type')
+            if 'funder_name' in user_requests.columns:
+                display_cols.insert(2, 'funder_name')
+            
+            st.dataframe(user_requests[display_cols], use_container_width=True, hide_index=True)
 
-elif choice == "Approval Queue" and st.session_state.user_role in ["FINANCE", "ADMIN"]:
-    st.markdown("<h1 style='color: #00843D;'>✅ Finance Approval Queue</h1>", unsafe_allow_html=True)
-    
-    df = get_requests()
-    pending_requests = df[df['status'].isin(['SUBMITTED', 'FINANCE_CHECKING'])]
-    
-    if pending_requests.empty:
-        st.info("No pending requests for approval.")
+elif choice == "✅ Approval Queue":
+    if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
+        st.markdown("<h1 style='color: #00843D;'>✅ Approval Queue</h1>", unsafe_allow_html=True)
+        
+        df = get_requests()
+        pending_requests = df[df['status'].isin(['SUBMITTED', 'FINANCE_CHECKING'])]
+        
+        if pending_requests.empty:
+            st.info("No pending requests for approval.")
+        else:
+            for idx, req in pending_requests.iterrows():
+                with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - {req['status']}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Department:** {req['department_name']}")
+                        st.markdown(f"**Submitted By:** {req['submitted_by']}")
+                        st.markdown(f"**Submission Date:** {req['submission_date']}")
+                        st.markdown(f"**Amount:** KES {req['amount']:,.2f}")
+                    
+                    with col2:
+                        st.markdown(f"**Request Type:** {req['request_type']}")
+                        if req['request_type'] == 'Imprest':
+                            st.markdown(f"**Imprest No:** {req['imprest_no']}")
+                        elif req['request_type'] == 'Petty Cash':
+                            st.markdown(f"**Reference No:** {req['imprest_no']}")
+                        elif req['request_type'] == 'Supplier':
+                            st.markdown(f"**Supplier:** {req['supplier_name']}")
+                            st.markdown(f"**Invoice:** {req['invoice_no']}")
+                            st.markdown(f"**LPO:** {req['lpo_no'] if req['lpo_no'] else 'N/A'}")
+                        elif req['request_type'] == 'Student Payment':
+                            if req['product_type']:
+                                st.markdown(f"**Product:** {req['product_type']}")
+                            if req['payment_type']:
+                                st.markdown(f"**Payment Type:** {req['payment_type']}")
+                            if req['funder_name']:
+                                st.markdown(f"**Funder:** {req['funder_name']}")
+                            st.markdown(f"**Batch No:** {req['batch_no']}")
+                        elif req['request_type'] == 'Refund':
+                            st.markdown(f"**Reason:** {req['refund_reason']}")
+                            st.markdown(f"**Original Ref:** {req['original_payment_ref']}")
+                        elif req['request_type'] == 'Surrender':
+                            st.markdown(f"**Surrender No:** {req['surrender_number']}")
+                            st.markdown(f"**Previous Imprest:** {req['previous_imprest_no']}")
+                    
+                    st.markdown("---")
+                    
+                    col3, col4, col5 = st.columns([1, 1, 1])
+                    
+                    with col3:
+                        if req['status'] == 'SUBMITTED':
+                            if st.button(f"📋 Start Checking", key=f"start_{req['id']}_{idx}"):
+                                update_request_status(req['id'], 'FINANCE_CHECKING')
+                                st.success(f"Request {req['request_number']} moved to checking stage")
+                                st.rerun()
+                        
+                        elif req['status'] == 'FINANCE_CHECKING':
+                            if st.button(f"✅ Approve", key=f"approve_{req['id']}_{idx}"):
+                                update_request_status(req['id'], 'APPROVED_FOR_PROCESSING')
+                                st.success(f"Request {req['request_number']} approved for processing")
+                                st.rerun()
+                        
+                        elif req['status'] == 'APPROVED_FOR_PROCESSING':
+                            if st.button(f"🎉 Mark Complete", key=f"complete_{req['id']}_{idx}"):
+                                update_request_status(req['id'], 'COMPLETED')
+                                st.balloons()
+                                st.success(f"Request {req['request_number']} completed! Time difference calculated.")
+                                st.rerun()
+                    
+                    with col4:
+                        if req['status'] in ['SUBMITTED', 'FINANCE_CHECKING']:
+                            finance_comment = st.text_area("Finance Comment (optional)", key=f"comment_{req['id']}_{idx}")
+                    
+                    with col5:
+                        if req['status'] in ['SUBMITTED', 'FINANCE_CHECKING']:
+                            return_reason = st.text_input("Return Reason (if returning)", key=f"return_{req['id']}_{idx}")
+                            if st.button(f"↩️ Return to Dept", key=f"return_btn_{req['id']}_{idx}"):
+                                if return_reason:
+                                    update_request_status(req['id'], 'RETURNED', finance_comment, return_reason)
+                                    st.warning(f"Request {req['request_number']} returned to department")
+                                    st.rerun()
+                                else:
+                                    st.error("Please provide a return reason")
     else:
-        for _, req in pending_requests.iterrows():
-            with st.expander(f"{req['request_number']} - {req['request_type']} - {req['status']}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Department:** {req['department']}")
-                    st.write(f"**Amount:** KES {req['amount']:,.2f}")
-                    st.write(f"**Submitted:** {req['submission_date'][:10]}")
-                with col2:
-                    if req['request_type'] == 'Imprest':
-                        st.write(f"**Imprest No:** {req['imprest_no']}")
-                    elif req['request_type'] == 'Supplier':
-                        st.write(f"**Supplier:** {req['supplier_name']}")
-                        st.write(f"**Invoice:** {req['invoice_no']}")
-                    elif req['request_type'] == 'Student Payment':
-                        st.write(f"**Batch No:** {req['batch_no']}")
-                    else:
-                        st.write(f"**Surrender No:** {req['surrender_number']}")
-                
-                col3, col4 = st.columns(2)
-                with col3:
-                    if req['status'] == 'SUBMITTED':
-                        if st.button(f"Start Checking", key=f"start_{req['id']}"):
-                            update_request_status(req['id'], 'FINANCE_CHECKING')
-                            st.rerun()
-                    elif req['status'] == 'FINANCE_CHECKING':
-                        comment = st.text_area("Finance Comment", key=f"comment_{req['id']}")
-                        if st.button(f"Approve", key=f"approve_{req['id']}"):
-                            update_request_status(req['id'], 'APPROVED_FOR_PROCESSING', comment)
-                            st.success("Request approved for processing")
-                            st.rerun()
-                with col4:
-                    if req['status'] == 'APPROVED_FOR_PROCESSING':
-                        if st.button(f"Mark Complete", key=f"complete_{req['id']}"):
-                            update_request_status(req['id'], 'COMPLETED')
-                            st.success("Payment completed!")
-                            st.rerun()
-                    if req['status'] in ['SUBMITTED', 'FINANCE_CHECKING']:
-                        return_reason = st.text_input("Return reason (if returning)", key=f"return_{req['id']}")
-                        if st.button(f"Return to Department", key=f"return_btn_{req['id']}"):
-                            update_request_status(req['id'], 'RETURNED', return_reason=return_reason)
-                            st.warning("Request returned to department")
-                            st.rerun()
+        st.error("Access denied. Finance department only.")
 
-elif choice == "Reports":
+elif choice == "📑 Reports":
     st.markdown("<h1 style='color: #00843D;'>📑 Reports & Export</h1>", unsafe_allow_html=True)
     
     df = get_requests()
@@ -401,51 +588,151 @@ elif choice == "Reports":
         st.info("No data available for reports.")
     else:
         st.download_button(
-            label="📥 Export to Excel",
+            label="📥 Export to CSV",
             data=df.to_csv(index=False).encode('utf-8'),
-            file_name=f"helb_requests_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"helb_requests_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
             use_container_width=True
         )
         
-        st.subheader("Filter Reports")
-        status_filter = st.multiselect("Status", df['status'].unique())
-        if status_filter:
-            df = df[df['status'].isin(status_filter)]
+        st.subheader("🔍 Filter Reports")
+        col1, col2 = st.columns(2)
+        with col1:
+            status_filter = st.multiselect("Status", df['status'].unique())
+        with col2:
+            dept_filter = st.multiselect("Department", df['department_name'].unique())
         
-        st.dataframe(df, use_container_width=True)
+        filtered_df = df.copy()
+        if status_filter:
+            filtered_df = filtered_df[filtered_df['status'].isin(status_filter)]
+        if dept_filter:
+            filtered_df = filtered_df[filtered_df['department_name'].isin(dept_filter)]
+        
+        st.dataframe(filtered_df, use_container_width=True)
 
-elif choice == "Admin" and st.session_state.user_role == "ADMIN":
+elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<h1 style='color: #00843D;'>⚙️ Admin Panel</h1>", unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["Users", "SLA Configuration"])
+    tab1, tab2, tab3, tab4 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders"])
     
     with tab1:
         st.subheader("User Management")
-        conn = sqlite3.connect("helb_data.db")
-        users_df = pd.read_sql_query("SELECT username, role, department, full_name FROM users", conn)
-        conn.close()
+        users_df = get_all_users()
         st.dataframe(users_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("➕ Add New User")
+        with st.form("add_user_form"):
+            new_username = st.text_input("Username")
+            new_password = st.text_input("Password", type="password")
+            new_full_name = st.text_input("Full Name")
+            new_role = st.selectbox("Role", ["DEPARTMENT", "FINANCE", "ADMIN"])
+            
+            depts = get_departments()
+            dept_options = {row['name']: row['id'] for _, row in depts.iterrows()}
+            new_department = st.selectbox("Department (if DEPARTMENT role)", ["None"] + list(dept_options.keys()))
+            
+            if st.form_submit_button("Create User"):
+                if new_username and new_password:
+                    dept_id = dept_options.get(new_department) if new_department != "None" else None
+                    success = create_user(new_username, new_password, new_role, dept_id, new_full_name)
+                    if success:
+                        st.success(f"User {new_username} created successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Username already exists!")
+                else:
+                    st.error("Username and password are required")
     
     with tab2:
-        st.subheader("SLA Timeline Configuration")
-        st.info("Set expected completion days for each request type (excluding weekends & holidays)")
+        st.subheader("Department Management")
         
-        conn = sqlite3.connect("helb_data.db")
-        sla_df = pd.read_sql_query("SELECT * FROM sla_config", conn)
-        conn.close()
+        depts = get_departments()
+        st.dataframe(depts, use_container_width=True, hide_index=True)
         
-        for _, row in sla_df.iterrows():
-            new_days = st.number_input(f"{row['request_type']} (days)", 
-                                       min_value=1, max_value=30, 
-                                       value=int(row['sla_days']), 
-                                       key=f"sla_{row['request_type']}")
-            if new_days != row['sla_days']:
-                conn = sqlite3.connect("helb_data.db")
-                cursor = conn.cursor()
-                cursor.execute("UPDATE sla_config SET sla_days = ? WHERE request_type = ?", 
-                              (new_days, row['request_type']))
-                conn.commit()
-                conn.close()
-                st.success(f"Updated {row['request_type']} SLA to {new_days} days")
-                st.rerun()
+        st.markdown("---")
+        st.subheader("➕ Add New Department")
+        with st.form("add_dept_form"):
+            dept_name = st.text_input("Department Name")
+            
+            st.markdown("**Request Type Permissions:**")
+            col1, col2 = st.columns(2)
+            with col1:
+                can_imprest = st.checkbox("Can submit Imprest", value=True)
+                can_petty = st.checkbox("Can submit Petty Cash", value=True)
+                can_supplier = st.checkbox("Can submit Supplier", value=False)
+            with col2:
+                can_student = st.checkbox("Can submit Student Payment", value=False)
+                can_surrender = st.checkbox("Can submit Surrender", value=True)
+                can_refund = st.checkbox("Can submit Refund", value=False)
+            
+            st.markdown("**Special Requirements:**")
+            col3, col4 = st.columns(2)
+            with col3:
+                requires_product = st.checkbox("Requires Product Type (Lending)", value=False)
+            with col4:
+                requires_funder = st.checkbox("Requires Funder (ERM)", value=False)
+            
+            is_finance = st.checkbox("This is Finance Department (can approve all)", value=False)
+            
+            if st.form_submit_button("Create Department"):
+                if dept_name:
+                    permissions = [can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance]
+                    success = create_department(dept_name, permissions)
+                    if success:
+                        st.success(f"Department {dept_name} created!")
+                        st.rerun()
+                    else:
+                        st.error("Department name already exists!")
+                else:
+                    st.error("Department name is required")
+    
+    with tab3:
+        st.subheader("Product Management (Lending)")
+        
+        products = get_products()
+        st.dataframe(products, use_container_width=True)
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Product")
+        with st.form("add_product_form"):
+            product_name = st.text_input("Product Name")
+            product_category = st.selectbox("Category", ["LOAN", "SCHOLARSHIP", "FUNDER"])
+            has_payment_type = st.checkbox("Has Payment Type (Upkeep/Tuition)")
+            
+            if st.form_submit_button("Add Product"):
+                if product_name:
+                    conn = sqlite3.connect("helb_data.db")
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO products (name, category, has_payment_type) VALUES (?, ?, ?)",
+                        (product_name, product_category, has_payment_type)
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Product {product_name} added!")
+                    st.rerun()
+                else:
+                    st.error("Product name required")
+    
+    with tab4:
+        st.subheader("Funder Management (ERM)")
+        
+        funders = get_funders()
+        st.write("Current Funders/Partners:", ", ".join(funders))
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Funder")
+        with st.form("add_funder_form"):
+            funder_name = st.text_input("Funder/Partner Name")
+            if st.form_submit_button("Add Funder"):
+                if funder_name:
+                    conn = sqlite3.connect("helb_data.db")
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO funders (name) VALUES (?)", (funder_name,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Funder {funder_name} added!")
+                    st.rerun()
+                else:
+                    st.error("Funder name required")
