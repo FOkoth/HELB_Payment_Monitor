@@ -10,7 +10,8 @@ from database import (
     update_user_password, get_user_by_username, get_pending_duration,
     update_payment_details, get_department_requests, get_management_dashboard_stats,
     get_trend_data, get_all_departments_summary, search_by_batch_number,
-    get_all_batch_numbers, get_allowed_request_types, get_reports_data
+    get_all_batch_numbers, get_allowed_request_types, get_reports_data,
+    get_returned_requests, resubmit_request, get_request_logs, add_request_log
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -83,6 +84,19 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
+    
+    .log-entry {
+        padding: 0.5rem;
+        margin: 0.25rem 0;
+        border-radius: 5px;
+        font-size: 0.9rem;
+    }
+    
+    .log-submitted { background-color: #e3f2fd; border-left: 3px solid #2196F3; }
+    .log-received { background-color: #e8f5e9; border-left: 3px solid #4CAF50; }
+    .log-returned { background-color: #ffebee; border-left: 3px solid #f44336; }
+    .log-resubmitted { background-color: #fff3e0; border-left: 3px solid #FF9800; }
+    .log-paid { background-color: #e8f5e9; border-left: 3px solid #00843D; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -189,10 +203,11 @@ with st.sidebar:
         menu_options = ["📈 Management Dashboard", "🔍 Check Payment Status", "📑 Reports", "🔐 Change Password"]
     elif st.session_state.user_role == "ADMIN":
         menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Check Payment Status", 
-                       "📝 New Request", "📋 My Requests", "✅ Approval Queue", "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
+                       "📝 New Request", "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", 
+                       "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
     else:
         menu_options = ["📊 Department Dashboard", "🔍 Check Payment Status", "📝 New Request", 
-                       "📋 My Requests", "✅ Approval Queue", "📑 Reports", "🔐 Change Password"]
+                       "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", "📑 Reports", "🔐 Change Password"]
     
     choice = option_menu(
         menu_title="Menu",
@@ -211,6 +226,46 @@ with st.sidebar:
         st.rerun()
 
 # ================================================================
+# FUNCTION TO DISPLAY TRANSACTION LOGS
+# ================================================================
+def display_transaction_logs(request_id):
+    """Display transaction logs for a request"""
+    logs = get_request_logs(request_id)
+    if logs:
+        for log in logs:
+            timestamp = datetime.fromisoformat(log['timestamp']).strftime('%Y-%m-%d %H:%M')
+            action = log['action']
+            
+            if action == 'SUBMITTED':
+                css_class = "log-submitted"
+                icon = "📝"
+                text = f"**{timestamp}** - Submitted by {log['performed_by']} ({log['performed_by_dept']})"
+            elif action == 'RECEIVED':
+                css_class = "log-received"
+                icon = "📥"
+                text = f"**{timestamp}** - Received by {log['performed_by']} (Finance)"
+            elif action == 'RETURNED':
+                css_class = "log-returned"
+                icon = "↩️"
+                text = f"**{timestamp}** - Returned by {log['performed_by']} - Reason: {log['comment']}"
+            elif action == 'RESUBMITTED':
+                css_class = "log-resubmitted"
+                icon = "📤"
+                text = f"**{timestamp}** - Resubmitted by {log['performed_by']} ({log['performed_by_dept']})"
+            elif action in ['PAID', 'CLEARED']:
+                css_class = "log-paid"
+                icon = "✅"
+                text = f"**{timestamp}** - {action} by {log['performed_by']}"
+            else:
+                css_class = "log-entry"
+                icon = "📌"
+                text = f"**{timestamp}** - {action}: {log['comment'] if log['comment'] else ''}"
+            
+            st.markdown(f"<div class='log-entry {css_class}'>{icon} {text}</div>", unsafe_allow_html=True)
+    else:
+        st.info("No transaction logs available")
+
+# ================================================================
 # DEPARTMENT DASHBOARD
 # ================================================================
 if choice == "📊 Department Dashboard":
@@ -227,6 +282,7 @@ if choice == "📊 Department Dashboard":
         total = len(df)
         pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'FINANCE_CHECKING'])])
         completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+        returned = len(df[df['status'] == 'RETURNED'])
         total_amount = df['amount'].sum()
         
         with col1:
@@ -236,13 +292,12 @@ if choice == "📊 Department Dashboard":
         with col3:
             st.metric("Completed", completed)
         with col4:
-            st.metric("Total Amount", f"KES {total_amount:,.0f}")
+            st.metric("Returned", returned)
         
         st.markdown("---")
         st.subheader("📋 Recent Requests")
         
-        display_data = []
-        for _, row in df.head(20).iterrows():
+        for _, row in df.head(10).iterrows():
             if row['status'] == 'PAID':
                 status_display = "✅ Paid"
             elif row['status'] == 'CLEARED':
@@ -250,19 +305,24 @@ if choice == "📊 Department Dashboard":
             elif row['status'] == 'RECEIVED_BY_FINANCE':
                 status_display = "📥 Received by Finance"
             elif row['status'] == 'RETURNED':
-                status_display = "↩️ Returned"
+                status_display = f"↩️ Returned on {row['date_returned']}"
             else:
                 status_display = f"⏳ {row['status']}"
             
-            display_data.append({
-                'Request #': row['request_number'],
-                'Type': row['request_type'],
-                'Amount': f"KES {row['amount']:,.2f}",
-                'Status': status_display,
-                'Submitted': row['submission_date']
-            })
-        
-        st.dataframe(pd.DataFrame(display_data), use_container_width=True, hide_index=True)
+            with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {status_display}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Amount:** KES {row['amount']:,.2f}")
+                    st.write(f"**Submitted:** {row['submission_date']}")
+                with col2:
+                    st.write(f"**Financial Year:** {row.get('financial_year', 'N/A')}")
+                
+                if row.get('payment_description'):
+                    st.write(f"**Description:** {row['payment_description']}")
+                
+                st.markdown("---")
+                st.subheader("📜 Transaction Logs")
+                display_transaction_logs(row['id'])
 
 # ================================================================
 # MANAGEMENT DASHBOARD
@@ -737,7 +797,6 @@ elif choice == "📋 My Requests":
         if user_requests.empty:
             st.info("You haven't submitted any requests yet.")
         else:
-            display_data = []
             for _, row in user_requests.iterrows():
                 if row['status'] == 'PAID':
                     status_display = "✅ Paid"
@@ -747,17 +806,142 @@ elif choice == "📋 My Requests":
                     days = get_pending_duration(row['submission_date'])
                     status_display = f"📥 Received by Finance ({days} days)"
                 elif row['status'] == 'RETURNED':
-                    status_display = f"↩️ Returned"
+                    status_display = f"↩️ Returned on {row['date_returned']}"
                 else:
                     days = get_pending_duration(row['submission_date'])
                     status_display = f"⏳ Pending ({days} days)"
                 
-                display_data.append({
-                    'Request #': row['request_number'], 'Type': row['request_type'],
-                    'Amount': f"KES {row['amount']:,.2f}", 'Status': status_display,
-                    'Submitted': row['submission_date']
-                })
-            st.dataframe(pd.DataFrame(display_data), use_container_width=True, hide_index=True)
+                with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {status_display}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Amount:** KES {row['amount']:,.2f}")
+                        st.write(f"**Submitted:** {row['submission_date']}")
+                    with col2:
+                        st.write(f"**Financial Year:** {row.get('financial_year', 'N/A')}")
+                    
+                    if row.get('payment_description'):
+                        st.write(f"**Description:** {row['payment_description']}")
+                    
+                    if row['status'] == 'RETURNED' and row.get('return_reason'):
+                        st.error(f"**Return Reason:** {row['return_reason']}")
+                    
+                    st.markdown("---")
+                    st.subheader("📜 Transaction Logs")
+                    display_transaction_logs(row['id'])
+
+# ================================================================
+# RETURNED REQUESTS - REVIEW AND RESUBMIT
+# ================================================================
+elif choice == "↩️ Returned Requests":
+    st.markdown("<h1 style='color: #00843D;'>↩️ Returned Requests</h1>", unsafe_allow_html=True)
+    st.markdown("<p>Review requests that were returned by Finance and resubmit with corrections.</p>", unsafe_allow_html=True)
+    
+    df = get_returned_requests(st.session_state.user_dept)
+    
+    if df.empty:
+        st.info("No returned requests found for your department.")
+    else:
+        st.info(f"📋 You have {len(df)} returned request(s) that need your attention.")
+        
+        for idx, (_, req) in enumerate(df.iterrows()):
+            with st.expander(f"📄 {req['request_number']} - {req['request_type']} - Returned on: {req['date_returned']}"):
+                st.markdown(f"**Return Reason:** :red[{req['return_reason']}]")
+                st.markdown(f"**Original Submission Date:** {req['submission_date']}")
+                st.markdown(f"**Original Amount:** KES {req['amount']:,.2f}")
+                
+                if req.get('payment_description'):
+                    st.markdown(f"**Original Description:** {req['payment_description']}")
+                
+                st.markdown("---")
+                st.subheader("📝 Resubmit Request (Make Corrections)")
+                
+                with st.form(key=f"resubmit_form_{req['id']}"):
+                    # Show editable fields based on request type
+                    new_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, format="%.2f", step=1000.0)
+                    new_description = st.text_area("Payment Description", value=req.get('payment_description', ''))
+                    
+                    # Request type specific fields
+                    if req['request_type'] == "Student Payment":
+                        new_batch_no = st.text_input("Batch No.", value=req.get('batch_no', ''))
+                        if req.get('product_type') in ["Undergraduate", "TVET"]:
+                            current_category = req.get('payment_type', 'Tuition')
+                            new_payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"], 
+                                                                index=0 if current_category == "Tuition" else 1)
+                        else:
+                            new_payment_category = "Tuition"
+                    elif req['request_type'] == "Imprest Payment":
+                        new_imprest_no = st.text_input("Imprest No.", value=req.get('imprest_no', ''))
+                    elif req['request_type'] == "Petty Cash Payment":
+                        new_petty_cash_no = st.text_input("Petty Cash No.", value=req.get('imprest_no', ''))
+                    elif req['request_type'] == "Supplier Payment":
+                        new_invoice_no = st.text_input("Invoice No.", value=req.get('invoice_no', ''))
+                        new_supplier_name = st.text_input("Vendor Name", value=req.get('supplier_name', ''))
+                    elif req['request_type'] == "Salary Payment":
+                        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                        current_month = req.get('salary_month', 'January')
+                        month_index = months.index(current_month) if current_month in months else 0
+                        new_salary_month = st.selectbox("Salary Month", months, index=month_index)
+                        new_salary_year = st.number_input("Year", value=int(req.get('salary_year', datetime.now().year)) if req.get('salary_year') else datetime.now().year)
+                    elif req['request_type'] == "Refund Payment":
+                        new_refund_no = st.text_input("Refund No.", value=req.get('imprest_no', ''))
+                        new_customer_name = st.text_input("Customer Name", value=req.get('customer_name', ''))
+                        new_customer_id = st.text_input("Customer ID Number", value=req.get('customer_id', ''))
+                    elif req['request_type'] == "Surrender":
+                        new_surrender_no = st.text_input("Surrender No.", value=req.get('surrender_number', ''))
+                        new_staff_name = st.text_input("Staff Name", value=req.get('staff_name', ''))
+                    
+                    # Resubmit button
+                    resubmitted = st.form_submit_button("📤 Resubmit Request", use_container_width=True)
+                    
+                    if resubmitted:
+                        # Prepare update data
+                        update_data = {
+                            'amount': new_amount,
+                            'payment_description': new_description,
+                            'status': 'SUBMITTED'
+                        }
+                        
+                        # Add request-specific fields
+                        if req['request_type'] == "Student Payment":
+                            update_data['batch_no'] = new_batch_no
+                            update_data['payment_type'] = new_payment_category
+                        elif req['request_type'] == "Imprest Payment":
+                            update_data['imprest_no'] = new_imprest_no
+                        elif req['request_type'] == "Petty Cash Payment":
+                            update_data['imprest_no'] = new_petty_cash_no
+                        elif req['request_type'] == "Supplier Payment":
+                            update_data['invoice_no'] = new_invoice_no
+                            update_data['supplier_name'] = new_supplier_name
+                        elif req['request_type'] == "Salary Payment":
+                            update_data['salary_month'] = new_salary_month
+                            update_data['salary_year'] = new_salary_year
+                        elif req['request_type'] == "Refund Payment":
+                            update_data['imprest_no'] = new_refund_no
+                            update_data['customer_name'] = new_customer_name
+                            update_data['customer_id'] = new_customer_id
+                        elif req['request_type'] == "Surrender":
+                            update_data['surrender_number'] = new_surrender_no
+                            update_data['staff_name'] = new_staff_name
+                        
+                        # Update the request
+                        resubmit_request(req['id'], update_data)
+                        
+                        # Add log for resubmission
+                        add_request_log(
+                            req['id'], req['request_number'], "RESUBMITTED", 
+                            "RETURNED", "SUBMITTED", "Request resubmitted with corrections",
+                            st.session_state.username, st.session_state.user_role, 
+                            st.session_state.user_dept
+                        )
+                        
+                        st.success(f"✅ Request {req['request_number']} has been resubmitted successfully!")
+                        st.balloons()
+                        st.rerun()
+                
+                # Show transaction logs for this request
+                st.markdown("---")
+                st.subheader("📜 Transaction Logs")
+                display_transaction_logs(req['id'])
 
 # ================================================================
 # APPROVAL QUEUE
@@ -802,7 +986,12 @@ elif choice == "✅ Approval Queue":
                     with col3:
                         if req['status'] == 'SUBMITTED':
                             if st.button(f"📋 Receive Request", key=f"receive_{idx}"):
-                                update_request_status(req['id'], 'RECEIVED_BY_FINANCE')
+                                update_request_status(
+                                    req['id'], 'RECEIVED_BY_FINANCE', 
+                                    performed_by=st.session_state.username,
+                                    performed_by_role=st.session_state.user_role,
+                                    performed_by_dept=st.session_state.user_dept
+                                )
                                 st.success(f"✅ Request {req['request_number']} received by Finance")
                                 st.rerun()
                         elif req['status'] == 'RECEIVED_BY_FINANCE':
@@ -810,9 +999,16 @@ elif choice == "✅ Approval Queue":
                             if st.button(f"✅ Mark as Paid", key=f"paid_{idx}"):
                                 if payment_ref:
                                     if req['request_type'] == 'Surrender':
-                                        update_request_status(req['id'], 'CLEARED')
+                                        new_status = 'CLEARED'
                                     else:
-                                        update_request_status(req['id'], 'PAID')
+                                        new_status = 'PAID'
+                                    
+                                    update_request_status(
+                                        req['id'], new_status,
+                                        performed_by=st.session_state.username,
+                                        performed_by_role=st.session_state.user_role,
+                                        performed_by_dept=st.session_state.user_dept
+                                    )
                                     update_payment_details(req['id'], payment_ref)
                                     submitted_date = datetime.strptime(req['submission_date'], '%Y-%m-%d').date()
                                     days_taken = working_days_between(submitted_date, date.today())
@@ -830,11 +1026,23 @@ elif choice == "✅ Approval Queue":
                             reason = st.text_input("Return Reason", key=f"return_{idx}")
                             if st.button(f"↩️ Return Request", key=f"return_btn_{idx}"):
                                 if reason:
-                                    update_request_status(req['id'], 'RETURNED', comment, reason)
+                                    update_request_status(
+                                        req['id'], 'RETURNED', 
+                                        finance_comment=comment, 
+                                        return_reason=reason,
+                                        performed_by=st.session_state.username,
+                                        performed_by_role=st.session_state.user_role,
+                                        performed_by_dept=st.session_state.user_dept
+                                    )
                                     st.warning(f"⚠️ Request {req['request_number']} returned to department")
                                     st.rerun()
                                 else:
                                     st.error("❌ Please provide a return reason")
+                    
+                    # Show transaction logs
+                    st.markdown("---")
+                    st.subheader("📜 Transaction Logs")
+                    display_transaction_logs(req['id'])
     else:
         st.error("Access denied. Finance only.")
 
