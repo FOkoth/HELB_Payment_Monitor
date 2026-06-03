@@ -145,32 +145,21 @@ with st.sidebar:
 # FUNCTION TO GET ALLOWED REQUEST TYPES BASED ON DEPARTMENT
 # ================================================================
 def get_allowed_request_types():
-    # Admin can see everything
     if st.session_state.user_role == "ADMIN":
         return ["Student Payment", "Imprest Payment", "Petty Cash Payment", "Supplier Payment", "Salary Payment", "Refund Payment", "Surrender"]
     
     user_dept = st.session_state.user_dept
-    
-    # Base allowed types for all departments
     allowed = ["Imprest Payment", "Petty Cash Payment", "Surrender"]
     
-    # Lending and External Resource Mobilization can see Student Payment
     if user_dept in ["Lending", "External Resource Mobilization"]:
         allowed.append("Student Payment")
-    
-    # Only Supply Chain Management can see Supplier Payment
     if user_dept == "Supply Chain Management":
         allowed.append("Supplier Payment")
-    
-    # Only Human Resource can see Salary Payment
     if user_dept == "Human Resource":
         allowed.append("Salary Payment")
-    
-    # Only Debt Management can see Refund Payment
     if user_dept == "Debt Management":
         allowed.append("Refund Payment")
     
-    # Finance department can see everything for approval, but for submission they have limited types
     if st.session_state.user_role == "FINANCE":
         return ["Imprest Payment", "Petty Cash Payment"]
     
@@ -223,9 +212,9 @@ elif choice == "📝 New Request":
         
         st.markdown("---")
         
-        # Create the form - ONE form for the entire section
+        # Create the form
         with st.form(key="request_form"):
-            # Common fields for all request types
+            # Common fields
             col1, col2 = st.columns(2)
             with col1:
                 st.text_input("Department", value=st.session_state.user_dept, disabled=True)
@@ -233,7 +222,7 @@ elif choice == "📝 New Request":
                 st.date_input("Submission Date", value=datetime.today(), disabled=True)
             
             # ============================================================
-            # STUDENT PAYMENT - WITH CORRECT CONDITIONAL LOGIC
+            # STUDENT PAYMENT - WITH DYNAMIC FIELDS
             # ============================================================
             if selected_type == "Student Payment":
                 st.subheader("🎓 Student Payment Details")
@@ -246,15 +235,17 @@ elif choice == "📝 New Request":
                 
                 payment_description = st.text_area("Payment Description")
                 
-                # Product Type selection
+                # Product Type selection - THIS WILL TRIGGER DYNAMIC UPDATE
                 products = get_products()
                 if not products.empty:
                     product_type = st.selectbox("Product Type", products['name'].tolist())
                 else:
                     product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
                 
-                # Conditional fields based on Product Type
-                # ONLY show Semester and Payment Category for Undergraduate or TVET
+                # DYNAMIC FIELDS - These only appear based on product_type selection
+                semester = None
+                payment_category = None
+                
                 if product_type == "Undergraduate":
                     semesters = get_semesters()
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
@@ -264,7 +255,7 @@ elif choice == "📝 New Request":
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                     payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
                 else:
-                    # Jielimishe: DO NOT show Semester and DO NOT show Payment Category
+                    # Jielimishe - NO fields shown
                     semester = None
                     payment_category = "Tuition"
                 
@@ -281,7 +272,6 @@ elif choice == "📝 New Request":
                     if not payment_description:
                         errors.append("Payment Description is required")
                     
-                    # Only validate semester and payment_category for Undergraduate and TVET
                     if product_type in ["Undergraduate", "TVET"]:
                         if not semester:
                             errors.append("Semester is required")
