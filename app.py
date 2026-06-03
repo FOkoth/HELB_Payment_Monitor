@@ -197,7 +197,7 @@ if choice == "📊 Dashboard":
             st.plotly_chart(fig, use_container_width=True)
 
 # ================================================================
-# NEW REQUEST - DYNAMIC WITH PROPER CONDITIONAL LOGIC
+# NEW REQUEST - DYNAMIC WITH PRODUCT TYPE OUTSIDE FORM
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -212,21 +212,42 @@ elif choice == "📝 New Request":
         
         st.markdown("---")
         
-        # Create the form
-        with st.form(key="request_form"):
-            # Common fields
-            col1, col2 = st.columns(2)
-            with col1:
-                st.text_input("Department", value=st.session_state.user_dept, disabled=True)
-            with col2:
-                st.date_input("Submission Date", value=datetime.today(), disabled=True)
+        # ========================================================
+        # STUDENT PAYMENT - Product Type OUTSIDE the form for dynamic updates
+        # ========================================================
+        if selected_type == "Student Payment":
+            st.subheader("🎓 Student Payment Details")
             
-            # ============================================================
-            # STUDENT PAYMENT - WITH DYNAMIC FIELDS
-            # ============================================================
-            if selected_type == "Student Payment":
-                st.subheader("🎓 Student Payment Details")
-                
+            # PRODUCT TYPE DROPDOWN - OUTSIDE THE FORM (dynamic refresh)
+            products = get_products()
+            if not products.empty:
+                product_type = st.selectbox("Product Type", products['name'].tolist(), key="product_type_select")
+            else:
+                product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"], key="product_type_select")
+            
+            # Conditional fields based on product_type - These will show/hide dynamically
+            semester = None
+            payment_category = None
+            
+            if product_type == "Undergraduate":
+                st.markdown("---")
+                semesters = get_semesters()
+                semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+            elif product_type == "TVET":
+                st.markdown("---")
+                semesters = get_semesters()
+                semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+            else:
+                # Jielimishe - No additional fields
+                semester = None
+                payment_category = "Tuition"
+            
+            st.markdown("---")
+            
+            # Now the form with the rest of the fields
+            with st.form(key="student_payment_form"):
                 batch_no = st.text_input("Batch No.")
                 amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
                 
@@ -234,30 +255,6 @@ elif choice == "📝 New Request":
                 financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
                 
                 payment_description = st.text_area("Payment Description")
-                
-                # Product Type selection - THIS WILL TRIGGER DYNAMIC UPDATE
-                products = get_products()
-                if not products.empty:
-                    product_type = st.selectbox("Product Type", products['name'].tolist())
-                else:
-                    product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
-                
-                # DYNAMIC FIELDS - These only appear based on product_type selection
-                semester = None
-                payment_category = None
-                
-                if product_type == "Undergraduate":
-                    semesters = get_semesters()
-                    semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
-                    payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                elif product_type == "TVET":
-                    semesters = get_semesters()
-                    semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
-                    payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                else:
-                    # Jielimishe - NO fields shown
-                    semester = None
-                    payment_category = "Tuition"
                 
                 submitted = st.form_submit_button("Submit Request", use_container_width=True)
                 
@@ -299,11 +296,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # IMPREST PAYMENT
-            # ============================================================
-            elif selected_type == "Imprest Payment":
+        
+        # ========================================================
+        # IMPREST PAYMENT
+        # ========================================================
+        elif selected_type == "Imprest Payment":
+            with st.form(key="imprest_form"):
                 st.subheader("💰 Imprest Payment Details")
                 
                 imprest_no = st.text_input("Imprest No.")
@@ -345,11 +343,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # PETTY CASH PAYMENT
-            # ============================================================
-            elif selected_type == "Petty Cash Payment":
+        
+        # ========================================================
+        # PETTY CASH PAYMENT
+        # ========================================================
+        elif selected_type == "Petty Cash Payment":
+            with st.form(key="petty_cash_form"):
                 st.subheader("💵 Petty Cash Payment Details")
                 
                 petty_cash_no = st.text_input("Petty Cash No.")
@@ -391,11 +390,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # SUPPLIER PAYMENT
-            # ============================================================
-            elif selected_type == "Supplier Payment":
+        
+        # ========================================================
+        # SUPPLIER PAYMENT
+        # ========================================================
+        elif selected_type == "Supplier Payment":
+            with st.form(key="supplier_form"):
                 st.subheader("🏢 Supplier Payment Details")
                 
                 invoice_no = st.text_input("Invoice No.")
@@ -441,11 +441,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # SALARY PAYMENT
-            # ============================================================
-            elif selected_type == "Salary Payment":
+        
+        # ========================================================
+        # SALARY PAYMENT
+        # ========================================================
+        elif selected_type == "Salary Payment":
+            with st.form(key="salary_form"):
                 st.subheader("👔 Salary Payment Details")
                 
                 months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -490,11 +491,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # REFUND PAYMENT
-            # ============================================================
-            elif selected_type == "Refund Payment":
+        
+        # ========================================================
+        # REFUND PAYMENT
+        # ========================================================
+        elif selected_type == "Refund Payment":
+            with st.form(key="refund_form"):
                 st.subheader("🔄 Refund Payment Details")
                 
                 refund_no = st.text_input("Refund No.")
@@ -540,11 +542,12 @@ elif choice == "📝 New Request":
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
                         st.balloons()
-            
-            # ============================================================
-            # SURRENDER
-            # ============================================================
-            elif selected_type == "Surrender":
+        
+        # ========================================================
+        # SURRENDER
+        # ========================================================
+        elif selected_type == "Surrender":
+            with st.form(key="surrender_form"):
                 st.subheader("📤 Surrender Details")
                 
                 surrender_no = st.text_input("Surrender No.")
