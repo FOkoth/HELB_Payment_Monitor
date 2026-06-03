@@ -33,13 +33,32 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
             category TEXT,
-            has_payment_type INTEGER DEFAULT 0
+            has_payment_type INTEGER DEFAULT 0,
+            has_semester INTEGER DEFAULT 1,
+            is_active INTEGER DEFAULT 1
         )
     ''')
     
     # Funders table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS funders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    ''')
+    
+    # Financial Years table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS financial_years (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_active INTEGER DEFAULT 1
+        )
+    ''')
+    
+    # Semesters table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS semesters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL
         )
@@ -58,7 +77,7 @@ def init_database():
         )
     ''')
     
-    # Requests table
+    # Requests table with new columns
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,6 +88,7 @@ def init_database():
             submitted_by TEXT NOT NULL,
             submission_date TEXT NOT NULL,
             amount REAL NOT NULL,
+            payment_description TEXT,
             imprest_no TEXT,
             batch_no TEXT,
             supplier_name TEXT,
@@ -77,6 +97,8 @@ def init_database():
             product_type TEXT,
             payment_type TEXT,
             funder_name TEXT,
+            financial_year TEXT,
+            semester TEXT,
             refund_reason TEXT,
             original_payment_ref TEXT,
             surrender_number TEXT,
@@ -130,12 +152,12 @@ def init_database():
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
         default_products = [
-            ('Undergraduate', 'LOAN', 1),
-            ('TVET', 'LOAN', 1),
-            ('Jielimishe', 'SCHOLARSHIP', 0),
+            ('Undergraduate', 'LOAN', 1, 1, 1),
+            ('TVET', 'LOAN', 1, 1, 1),
+            ('Jielimishe', 'SCHOLARSHIP', 0, 0, 1),
         ]
         cursor.executemany(
-            "INSERT INTO products (name, category, has_payment_type) VALUES (?, ?, ?)",
+            "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, ?)",
             default_products
         )
     
@@ -147,6 +169,24 @@ def init_database():
             ('Mastercard Foundation',), ('KOICA',), ('JICA',), ('USAID',), ('GIZ',)
         ]
         cursor.executemany("INSERT INTO funders (name) VALUES (?)", default_funders)
+    
+    # Insert financial years
+    cursor.execute("SELECT COUNT(*) FROM financial_years")
+    if cursor.fetchone()[0] == 0:
+        default_years = [
+            ('2025/2026', 1),
+            ('2026/2027', 1),
+        ]
+        cursor.executemany("INSERT INTO financial_years (name, is_active) VALUES (?, ?)", default_years)
+    
+    # Insert semesters
+    cursor.execute("SELECT COUNT(*) FROM semesters")
+    if cursor.fetchone()[0] == 0:
+        default_semesters = [
+            ('Semester 1',),
+            ('Semester 2',),
+        ]
+        cursor.executemany("INSERT INTO semesters (name) VALUES (?)", default_semesters)
     
     # Insert SLA defaults
     cursor.execute("SELECT COUNT(*) FROM sla_config")
@@ -209,11 +249,41 @@ def get_departments():
     return df
 
 def get_products():
-    """Get all products"""
+    """Get all active products"""
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT name, category, has_payment_type FROM products", conn)
+    df = pd.read_sql_query("SELECT name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
     conn.close()
     return df
+
+def add_product(name, category, has_payment_type, has_semester):
+    """Add a new product"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, 1)",
+            (name, category, has_payment_type, has_semester)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def get_financial_years():
+    """Get all active financial years"""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
+    conn.close()
+    return df['name'].tolist() if not df.empty else []
+
+def get_semesters():
+    """Get all semesters"""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT name FROM semesters ORDER BY name", conn)
+    conn.close()
+    return df['name'].tolist() if not df.empty else []
 
 def get_funders():
     """Get all funders"""
