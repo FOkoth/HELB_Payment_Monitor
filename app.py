@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, date
 from database import (
     init_database, get_requests, save_request, update_request_status, 
@@ -9,8 +8,9 @@ from database import (
     get_all_users, create_user, create_department, get_departments,
     get_financial_years, get_semesters, add_product,
     update_user_password, get_user_by_username, get_pending_duration,
-    update_payment_details, get_dashboard_stats, get_department_performance,
-    get_trend_data, get_breach_analysis
+    update_payment_details, get_department_requests, get_management_dashboard_stats,
+    get_trend_data, get_all_departments_summary, search_by_batch_number,
+    get_all_batch_numbers, get_allowed_request_types
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for HELB colors
+# Custom CSS
 st.markdown("""
 <style>
     :root {
@@ -48,33 +48,6 @@ st.markdown("""
         transform: translateY(-1px);
     }
     
-    .status-completed {
-        background-color: #00843D20;
-        color: #00843D;
-        padding: 0.25rem 0.5rem;
-        border-radius: 20px;
-        font-weight: bold;
-        display: inline-block;
-    }
-    
-    .status-pending {
-        background-color: #DC354520;
-        color: #DC3545;
-        padding: 0.25rem 0.5rem;
-        border-radius: 20px;
-        font-weight: bold;
-        display: inline-block;
-    }
-    
-    .status-approved {
-        background-color: #FFB81C20;
-        color: #FFB81C;
-        padding: 0.25rem 0.5rem;
-        border-radius: 20px;
-        font-weight: bold;
-        display: inline-block;
-    }
-    
     .metric-card {
         background-color: white;
         padding: 1rem;
@@ -83,7 +56,6 @@ st.markdown("""
         text-align: center;
         transition: transform 0.3s ease;
     }
-    
     .metric-card:hover {
         transform: translateY(-5px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.15);
@@ -111,18 +83,13 @@ st.markdown("""
         border-radius: 10px;
         margin: 1rem 0;
     }
-    
-    div[data-testid="stExpander"] details summary p {
-        font-weight: 600;
-        color: #00843D;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # Initialize database
 init_database()
 
-# Session state for login
+# Session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'user_role' not in st.session_state:
@@ -172,7 +139,7 @@ if not st.session_state.authenticated:
                     st.error("❌ Invalid credentials")
     st.stop()
 
-# Password Change Modal
+# Password Change
 if st.session_state.show_password_change:
     st.markdown("### 🔐 Change Your Password")
     st.info("Please change your default password for security reasons.")
@@ -215,10 +182,17 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.markdown("---")
     
-    menu_options = ["📊 Dashboard", "📝 New Request", "📋 My Requests", "✅ Approval Queue", "📑 Reports"]
-    if st.session_state.user_role == "ADMIN":
-        menu_options.append("⚙️ Admin Panel")
-    menu_options.append("🔐 Change Password")
+    # Dynamic menu based on role
+    menu_options = []
+    
+    if st.session_state.user_role == "MANAGEMENT":
+        menu_options = ["📈 Management Dashboard", "🔍 Check Payment Status", "📑 Reports", "🔐 Change Password"]
+    elif st.session_state.user_role == "ADMIN":
+        menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Check Payment Status", 
+                       "📝 New Request", "📋 My Requests", "✅ Approval Queue", "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
+    else:
+        menu_options = ["📊 Department Dashboard", "🔍 Check Payment Status", "📝 New Request", 
+                       "📋 My Requests", "✅ Approval Queue", "📑 Reports", "🔐 Change Password"]
     
     choice = option_menu(
         menu_title="Menu",
@@ -236,71 +210,78 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-# Change Password option
-if choice == "🔐 Change Password":
-    st.markdown("<h1 style='color: #00843D;'>🔐 Change Password</h1>", unsafe_allow_html=True)
-    with st.form("change_pwd_form"):
-        current = st.text_input("Current Password", type="password")
-        new = st.text_input("New Password", type="password")
-        confirm = st.text_input("Confirm New Password", type="password")
+# ================================================================
+# DEPARTMENT DASHBOARD
+# ================================================================
+if choice == "📊 Department Dashboard":
+    st.markdown("<h1 style='color: #00843D;'>📊 Department Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p>Viewing data for: <strong>{st.session_state.user_dept}</strong></p>", unsafe_allow_html=True)
+    
+    df = get_department_requests(st.session_state.user_dept)
+    
+    if df.empty:
+        st.info("No requests found for your department.")
+    else:
+        col1, col2, col3, col4 = st.columns(4)
         
-        if st.form_submit_button("Update Password"):
-            if new == confirm and len(new) >= 4:
-                user = authenticate_user(st.session_state.username, current)
-                if user:
-                    update_user_password(st.session_state.username, new)
-                    st.success("✅ Password updated successfully!")
-                else:
-                    st.error("❌ Current password is incorrect")
+        total = len(df)
+        pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'FINANCE_CHECKING'])])
+        completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+        total_amount = df['amount'].sum()
+        
+        with col1:
+            st.metric("Total Requests", total)
+        with col2:
+            st.metric("Pending", pending)
+        with col3:
+            st.metric("Completed", completed)
+        with col4:
+            st.metric("Total Amount", f"KES {total_amount:,.0f}")
+        
+        st.markdown("---")
+        st.subheader("📋 Recent Requests")
+        
+        display_data = []
+        for _, row in df.head(20).iterrows():
+            if row['status'] == 'PAID':
+                status_display = "✅ Paid"
+            elif row['status'] == 'CLEARED':
+                status_display = "✅ Cleared"
+            elif row['status'] == 'RECEIVED_BY_FINANCE':
+                status_display = "📥 Received by Finance"
+            elif row['status'] == 'RETURNED':
+                status_display = "↩️ Returned"
             else:
-                st.error("❌ Passwords do not match or are too short")
-    st.stop()
+                status_display = f"⏳ {row['status']}"
+            
+            display_data.append({
+                'Request #': row['request_number'],
+                'Type': row['request_type'],
+                'Amount': f"KES {row['amount']:,.2f}",
+                'Status': status_display,
+                'Submitted': row['submission_date']
+            })
+        
+        st.dataframe(pd.DataFrame(display_data), use_container_width=True, hide_index=True)
 
 # ================================================================
-# FUNCTION TO GET ALLOWED REQUEST TYPES
+# MANAGEMENT DASHBOARD
 # ================================================================
-def get_allowed_request_types():
-    if st.session_state.user_role == "ADMIN":
-        return ["Student Payment", "Imprest Payment", "Petty Cash Payment", "Supplier Payment", "Salary Payment", "Refund Payment", "Surrender"]
+elif choice == "📈 Management Dashboard":
+    st.markdown("<h1 style='color: #00843D;'>📈 Management Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown("<p><strong>Executive View</strong> - All departments, all requests</p>", unsafe_allow_html=True)
     
-    user_dept = st.session_state.user_dept
-    allowed = ["Imprest Payment", "Petty Cash Payment", "Surrender"]
-    
-    if user_dept in ["Lending", "External Resource Mobilization"]:
-        allowed.append("Student Payment")
-    if user_dept == "Supply Chain Management":
-        allowed.append("Supplier Payment")
-    if user_dept == "Human Resource":
-        allowed.append("Salary Payment")
-    if user_dept == "Debt Management":
-        allowed.append("Refund Payment")
-    
-    if st.session_state.user_role == "FINANCE":
-        return ["Imprest Payment", "Petty Cash Payment"]
-    
-    return allowed
-
-# ================================================================
-# DASHBOARD
-# ================================================================
-if choice == "📊 Dashboard":
-    st.markdown("<h1 style='color: #00843D;'>📊 Performance Dashboard</h1>", unsafe_allow_html=True)
-    
-    # Filters
-    st.subheader("🔍 Filter Data")
     col1, col2 = st.columns(2)
     with col1:
         financial_years = ["All"] + get_financial_years()
-        selected_fy = st.selectbox("Financial Year", financial_years)
+        selected_fy = st.selectbox("Financial Year", financial_years, key="mgmt_fy")
     with col2:
         quarters = ["All", "Q1 (Jul-Sep)", "Q2 (Oct-Dec)", "Q3 (Jan-Mar)", "Q4 (Apr-Jun)"]
-        selected_quarter = st.selectbox("Quarter", quarters)
+        selected_quarter = st.selectbox("Quarter", quarters, key="mgmt_qtr")
     
-    # Get statistics
-    stats = get_dashboard_stats(selected_fy if selected_fy != "All" else None, 
-                                 selected_quarter if selected_quarter != "All" else None)
+    stats = get_management_dashboard_stats(selected_fy if selected_fy != "All" else None,
+                                            selected_quarter if selected_quarter != "All" else None)
     
-    # KPI Cards
     st.markdown("---")
     col1, col2, col3, col4 = st.columns(4)
     
@@ -326,7 +307,6 @@ if choice == "📊 Dashboard":
             <div class="metric-card">
                 <h3 style="color: #00843D; margin:0;">{stats['avg_completion_time']:.1f}</h3>
                 <p>Avg Completion (Days)</p>
-                <small>Working days only</small>
             </div>
         """, unsafe_allow_html=True)
     
@@ -340,7 +320,6 @@ if choice == "📊 Dashboard":
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts Row
     st.markdown("---")
     col1, col2 = st.columns(2)
     
@@ -351,10 +330,8 @@ if choice == "📊 Dashboard":
             fig = px.line(trend_data, x='month', y='request_count', 
                          title="Request Volume Trend",
                          color_discrete_sequence=['#00843D'])
-            fig.update_layout(xaxis_title="Month", yaxis_title="Number of Requests", height=400)
+            fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No trend data available")
     
     with col2:
         st.subheader("💰 Amount by Request Type")
@@ -365,64 +342,91 @@ if choice == "📊 Dashboard":
         if not amount_by_type.empty:
             fig = px.bar(amount_by_type, x='request_type', y='amount',
                         color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
-            fig.update_layout(xaxis_title="Request Type", yaxis_title="Amount (KES)", height=400)
+            fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
+    
+    st.subheader("🏢 Department Performance Summary")
+    dept_summary = get_all_departments_summary()
+    if not dept_summary.empty:
+        st.dataframe(dept_summary, use_container_width=True, hide_index=True)
+    
+    st.subheader("📋 All Requests")
+    all_requests = get_requests()
+    if selected_fy != "All":
+        all_requests = all_requests[all_requests['financial_year'] == selected_fy]
+    display_cols = ['request_number', 'request_type', 'department_name', 'amount', 'status', 'submission_date']
+    st.dataframe(all_requests[display_cols], use_container_width=True, hide_index=True)
+
+# ================================================================
+# CHECK PAYMENT STATUS (BATCH SEARCH)
+# ================================================================
+elif choice == "🔍 Check Payment Status":
+    st.markdown("<h1 style='color: #00843D;'>🔍 Check Payment Status</h1>", unsafe_allow_html=True)
+    st.markdown("<p>Enter a Batch Number to check the payment status of a student payment request.</p>", unsafe_allow_html=True)
+    
+    batch_numbers = get_all_batch_numbers()
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if batch_numbers:
+            selected_batch = st.selectbox("Select Batch Number", [""] + batch_numbers)
+            batch_no = st.text_input("Or enter Batch Number manually", value=selected_batch if selected_batch else "")
         else:
-            st.info("No amount data available")
+            batch_no = st.text_input("Enter Batch Number")
     
-    # Department Performance
-    st.subheader("🏢 Department Performance")
-    dept_perf = get_department_performance(selected_fy if selected_fy != "All" else None)
-    if not dept_perf.empty:
-        fig = px.bar(dept_perf, x='department', y='completion_rate',
-                    title="Completion Rate by Department",
-                    color='completion_rate',
-                    color_continuous_scale=['#DC3545', '#FFB81C', '#00843D'])
-        fig.update_layout(xaxis_title="Department", yaxis_title="Completion Rate (%)", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        search_clicked = st.button("🔍 Search", use_container_width=True)
     
-    # Breach Analysis Table
-    st.subheader("⚠️ SLA Breach Analysis")
-    breach_df = get_breach_analysis(selected_fy if selected_fy != "All" else None)
-    if not breach_df.empty:
-        breached_only = breach_df[breach_df['status'] == 'Breached']
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Total Breached Requests", len(breached_only))
-        with col2:
-            breach_percent = (len(breached_only) / len(breach_df) * 100) if len(breach_df) > 0 else 0
-            st.metric("Breach Percentage", f"{breach_percent:.1f}%")
-        st.dataframe(breach_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No completed requests to analyze SLA compliance")
+    if search_clicked and batch_no:
+        results = search_by_batch_number(batch_no)
+        
+        if results:
+            st.success(f"✅ Found {len(results)} record(s) for Batch Number: {batch_no}")
+            st.markdown("---")
+            
+            for result in results:
+                if result['status'] == 'PAID':
+                    status_color = "#00843D"
+                    status_icon = "✅"
+                elif result['status'] == 'CLEARED':
+                    status_color = "#00843D"
+                    status_icon = "✅"
+                elif result['status'] == 'RECEIVED_BY_FINANCE':
+                    status_color = "#FFB81C"
+                    status_icon = "📥"
+                elif result['status'] == 'RETURNED':
+                    status_color = "#DC3545"
+                    status_icon = "↩️"
+                else:
+                    status_color = "#FFB81C"
+                    status_icon = "⏳"
+                
+                st.markdown(f"""
+                <div style='background-color: #f8f9fa; padding: 1rem; border-radius: 10px; margin-bottom: 1rem; border-left: 4px solid {status_color};'>
+                    <h3 style='color: {status_color}; margin: 0;'>{status_icon} {result['status']}</h3>
+                    <table style='width: 100%; margin-top: 0.5rem;'>
+                        <tr><td><strong>Request Number:</strong></td><td>{result['request_number']}</td></tr>
+                        <tr><td><strong>Department:</strong></td><td>{result['department']}</td></tr>
+                        <tr><td><strong>Amount:</strong></td><td>KES {result['amount']:,.2f}</td></tr>
+                        <tr><td><strong>Submission Date:</strong></td><td>{result['submission_date']}</td></tr>
+                """, unsafe_allow_html=True)
+                
+                if result['payment_date']:
+                    st.markdown(f"""
+                        <tr><td><strong>Payment Date:</strong></td><td>{result['payment_date']}</td></tr>
+                        <tr><td><strong>Payment Reference:</strong></td><td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td></tr>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</table></div>", unsafe_allow_html=True)
+        else:
+            st.error(f"❌ No records found for Batch Number: {batch_no}")
     
-    # Insights
-    st.subheader("💡 Intelligent Insights")
-    
-    insights = []
-    if stats['breach_rate'] > 20:
-        insights.append("⚠️ **High breach rate detected** - Review workflow efficiency and resource allocation")
-    elif stats['breach_rate'] > 10:
-        insights.append("📊 **Moderate breach rate** - Consider process improvements and staff training")
-    else:
-        insights.append("✅ **Excellent performance** - Breach rate is within acceptable range")
-    
-    if stats['avg_completion_time'] > 5:
-        insights.append(f"⏱️ **Average completion time is {stats['avg_completion_time']:.1f} days** - Target is 3-5 working days")
-    elif stats['avg_completion_time'] > 3:
-        insights.append(f"📈 **Average completion time is {stats['avg_completion_time']:.1f} days** - Room for improvement")
-    
-    if not dept_perf.empty:
-        worst_dept = dept_perf.loc[dept_perf['completion_rate'].idxmin()]
-        best_dept = dept_perf.loc[dept_perf['completion_rate'].idxmax()]
-        insights.append(f"🏆 **Best performing department:** {best_dept['department']} ({best_dept['completion_rate']:.1f}% completion rate)")
-        insights.append(f"⚠️ **Needs attention:** {worst_dept['department']} ({worst_dept['completion_rate']:.1f}% completion rate)")
-    
-    if stats['total_returned'] > stats['total_requests'] * 0.1:
-        insights.append(f"↩️ **High return rate** ({stats['total_returned']} requests returned) - Review submission quality")
-    
-    for insight in insights:
-        st.info(insight)
+    if batch_numbers:
+        st.markdown("---")
+        st.subheader("📋 Recent Batch Numbers")
+        for batch in batch_numbers[:10]:
+            st.write(f"• {batch}")
 
 # ================================================================
 # NEW REQUEST
@@ -430,10 +434,10 @@ if choice == "📊 Dashboard":
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
     
-    allowed_types = get_allowed_request_types()
+    allowed_types = get_allowed_request_types(st.session_state.user_role, st.session_state.user_dept)
     
     if not allowed_types:
-        st.error("Your department has no submission permissions.")
+        st.error("Your role does not have permission to submit requests.")
     else:
         selected_type = st.selectbox("Select Request Type", allowed_types)
         st.markdown("---")
@@ -450,12 +454,7 @@ elif choice == "📝 New Request":
             semester = None
             payment_category = None
             
-            if product_type == "Undergraduate":
-                st.markdown("---")
-                semesters = get_semesters()
-                semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
-                payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-            elif product_type == "TVET":
+            if product_type in ["Undergraduate", "TVET"]:
                 st.markdown("---")
                 semesters = get_semesters()
                 semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
@@ -483,27 +482,19 @@ elif choice == "📝 New Request":
                         errors.append("Amount must be greater than 0")
                     if not payment_description:
                         errors.append("Payment Description is required")
-                    if product_type in ["Undergraduate", "TVET"]:
-                        if not semester:
-                            errors.append("Semester is required")
+                    if product_type in ["Undergraduate", "TVET"] and not semester:
+                        errors.append("Semester is required")
                     
                     if errors:
                         for error in errors:
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'batch_no': batch_no,
-                            'product_type': product_type,
-                            'semester': semester,
-                            'payment_type': payment_category,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'payment_description': payment_description, 'financial_year': financial_year,
+                            'batch_no': batch_no, 'product_type': product_type, 'semester': semester,
+                            'payment_type': payment_category, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -533,15 +524,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'imprest_no': imprest_no,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'payment_description': payment_description, 'financial_year': financial_year,
+                            'imprest_no': imprest_no, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -571,15 +557,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'imprest_no': petty_cash_no,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'payment_description': payment_description, 'financial_year': financial_year,
+                            'imprest_no': petty_cash_no, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -612,16 +593,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'invoice_no': invoice_no,
-                            'supplier_name': supplier_name,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'payment_description': payment_description, 'financial_year': financial_year,
+                            'invoice_no': invoice_no, 'supplier_name': supplier_name, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -653,15 +628,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'financial_year': financial_year,
-                            'salary_month': salary_month,
-                            'salary_year': salary_year,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'financial_year': financial_year, 'salary_month': salary_month,
+                            'salary_year': salary_year, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -694,16 +664,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'financial_year': financial_year,
-                            'imprest_no': refund_no,
-                            'customer_name': customer_name,
-                            'customer_id': customer_id,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'financial_year': financial_year, 'imprest_no': refund_no,
+                            'customer_name': customer_name, 'customer_id': customer_id, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -733,15 +697,10 @@ elif choice == "📝 New Request":
                             st.error(f"❌ {error}")
                     else:
                         request_data = {
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'financial_year': financial_year,
-                            'surrender_number': surrender_no,
-                            'staff_name': staff_name,
-                            'status': 'SUBMITTED'
+                            'request_type': selected_type, 'department_id': st.session_state.user_dept_id,
+                            'department_name': st.session_state.user_dept, 'submitted_by': st.session_state.username,
+                            'amount': amount, 'financial_year': financial_year, 'surrender_number': surrender_no,
+                            'staff_name': staff_name, 'status': 'SUBMITTED'
                         }
                         request_number = save_request(request_data)
                         st.success(f"✅ Request {request_number} submitted successfully!")
@@ -762,30 +721,24 @@ elif choice == "📋 My Requests":
         else:
             display_data = []
             for _, row in user_requests.iterrows():
-                status_display = ""
                 if row['status'] == 'PAID':
                     status_display = "✅ Paid"
                 elif row['status'] == 'CLEARED':
                     status_display = "✅ Cleared"
                 elif row['status'] == 'RECEIVED_BY_FINANCE':
                     days = get_pending_duration(row['submission_date'])
-                    status_display = f"⏳ Received by Finance ({days} days)"
+                    status_display = f"📥 Received by Finance ({days} days)"
                 elif row['status'] == 'RETURNED':
                     status_display = f"↩️ Returned"
-                elif row['status'] in ['SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING']:
+                else:
                     days = get_pending_duration(row['submission_date'])
                     status_display = f"⏳ Pending ({days} days)"
-                else:
-                    status_display = f"↺ {row['status']}"
                 
                 display_data.append({
-                    'Request #': row['request_number'],
-                    'Type': row['request_type'],
-                    'Amount': f"KES {row['amount']:,.2f}",
-                    'Status': status_display,
+                    'Request #': row['request_number'], 'Type': row['request_type'],
+                    'Amount': f"KES {row['amount']:,.2f}", 'Status': status_display,
                     'Submitted': row['submission_date']
                 })
-            
             st.dataframe(pd.DataFrame(display_data), use_container_width=True, hide_index=True)
 
 # ================================================================
@@ -809,7 +762,6 @@ elif choice == "✅ Approval Queue":
                         st.write(f"**Submitted By:** {req['submitted_by']}")
                         st.write(f"**Submission Date:** {req['submission_date']}")
                         st.write(f"**Amount:** KES {req['amount']:,.2f}")
-                        st.write(f"**Pending Duration:** {days_pending} working days")
                     with col2:
                         st.write(f"**Type:** {req['request_type']}")
                         if req['request_type'] == "Student Payment":
@@ -817,31 +769,16 @@ elif choice == "✅ Approval Queue":
                                 st.write(f"**Product:** {req['product_type']}")
                             if req.get('semester'):
                                 st.write(f"**Semester:** {req['semester']}")
-                            if req.get('payment_type'):
-                                st.write(f"**Category:** {req['payment_type']}")
                             st.write(f"**Batch No:** {req.get('batch_no', 'N/A')}")
                         elif req['request_type'] == "Imprest Payment":
                             st.write(f"**Imprest No:** {req.get('imprest_no', 'N/A')}")
-                        elif req['request_type'] == "Petty Cash Payment":
-                            st.write(f"**Petty Cash No:** {req.get('imprest_no', 'N/A')}")
                         elif req['request_type'] == "Supplier Payment":
-                            st.write(f"**Supplier:** {req.get('supplier_name', 'N/A')}")
                             st.write(f"**Invoice No:** {req.get('invoice_no', 'N/A')}")
-                        elif req['request_type'] == "Salary Payment":
-                            st.write(f"**Month:** {req.get('salary_month', 'N/A')}")
-                            st.write(f"**Year:** {req.get('salary_year', 'N/A')}")
-                        elif req['request_type'] == "Refund Payment":
-                            st.write(f"**Refund No:** {req.get('imprest_no', 'N/A')}")
-                            st.write(f"**Customer:** {req.get('customer_name', 'N/A')}")
-                        elif req['request_type'] == "Surrender":
-                            st.write(f"**Surrender No:** {req.get('surrender_number', 'N/A')}")
-                            st.write(f"**Staff:** {req.get('staff_name', 'N/A')}")
                     
                     if req.get('payment_description'):
                         st.write(f"**Description:** {req['payment_description']}")
                     
                     st.markdown("---")
-                    
                     col3, col4, col5 = st.columns(3)
                     
                     with col3:
@@ -850,7 +787,6 @@ elif choice == "✅ Approval Queue":
                                 update_request_status(req['id'], 'RECEIVED_BY_FINANCE')
                                 st.success(f"✅ Request {req['request_number']} received by Finance")
                                 st.rerun()
-                        
                         elif req['status'] == 'RECEIVED_BY_FINANCE':
                             payment_ref = st.text_input("Payment Reference Number", key=f"ref_{idx}")
                             if st.button(f"✅ Mark as Paid", key=f"paid_{idx}"):
@@ -860,11 +796,8 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         update_request_status(req['id'], 'PAID')
                                     update_payment_details(req['id'], payment_ref)
-                                    
-                                    # Calculate completion time
                                     submitted_date = datetime.strptime(req['submission_date'], '%Y-%m-%d').date()
                                     days_taken = working_days_between(submitted_date, date.today())
-                                    
                                     st.balloons()
                                     st.success(f"✅ Request {req['request_number']} completed! Took {days_taken} working days.")
                                     st.rerun()
@@ -911,14 +844,6 @@ elif choice == "📑 Reports":
             dept_counts = df['department_name'].value_counts().reset_index()
             dept_counts.columns = ['Department', 'Count']
             st.dataframe(dept_counts, use_container_width=True, hide_index=True)
-        
-        st.subheader("📅 Financial Year Summary")
-        fy_summary = df.groupby('financial_year').agg({
-            'amount': 'sum',
-            'request_number': 'count'
-        }).reset_index()
-        fy_summary.columns = ['Financial Year', 'Total Amount', 'Request Count']
-        st.dataframe(fy_summary, use_container_width=True, hide_index=True)
 
 # ================================================================
 # ADMIN PANEL
@@ -938,24 +863,22 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         with st.form("add_user_form"):
             new_username = st.text_input("Username")
             new_password = st.text_input("Password (default)", type="password", value="password123")
-            new_full_name = st.text_input("Full Name (e.g., Alice Kagucia)")
-            new_role = st.selectbox("Role", ["DEPARTMENT", "FINANCE", "ADMIN"])
+            new_full_name = st.text_input("Full Name")
+            new_role = st.selectbox("Role", ["DEPARTMENT", "FINANCE", "MANAGEMENT", "ADMIN"])
             
             depts = get_departments()
             dept_options = {row['name']: row['id'] for _, row in depts.iterrows()}
-            new_department = st.selectbox("Department", ["None"] + list(dept_options.keys()))
+            new_department = st.selectbox("Department (if DEPARTMENT role)", ["None"] + list(dept_options.keys()))
             
             if st.form_submit_button("Create User"):
                 if new_username and new_password and new_full_name:
                     dept_id = dept_options.get(new_department) if new_department != "None" else None
                     success = create_user(new_username, new_password, new_role, dept_id, new_full_name)
                     if success:
-                        st.success(f"✅ User {new_username} ({new_full_name}) created successfully!")
+                        st.success(f"✅ User {new_username} ({new_full_name}) created!")
                         st.rerun()
                     else:
                         st.error("❌ Username already exists!")
-                else:
-                    st.error("❌ Username, password, and full name are required")
     
     with tab2:
         st.subheader("🏢 Department Management")
@@ -966,7 +889,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.subheader("➕ Add New Department")
         with st.form("add_dept_form"):
             dept_name = st.text_input("Department Name")
-            
             col1, col2 = st.columns(2)
             with col1:
                 can_imprest = st.checkbox("Imprest", True)
@@ -976,14 +898,9 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 can_student = st.checkbox("Student Payment", False)
                 can_surrender = st.checkbox("Surrender", True)
                 can_refund = st.checkbox("Refund", False)
-            
-            col3, col4 = st.columns(2)
-            with col3:
-                requires_product = st.checkbox("Requires Product Type", False)
-            with col4:
-                requires_funder = st.checkbox("Requires Funder", False)
-            
-            is_finance = st.checkbox("Finance Department (can approve all)", False)
+            requires_product = st.checkbox("Requires Product Type", False)
+            requires_funder = st.checkbox("Requires Funder", False)
+            is_finance = st.checkbox("Finance Department", False)
             
             if st.form_submit_button("Create Department"):
                 if dept_name:
@@ -992,14 +909,11 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     if success:
                         st.success(f"✅ Department {dept_name} created!")
                         st.rerun()
-                    else:
-                        st.error("❌ Department name already exists!")
     
     with tab3:
         st.subheader("📦 Product Management")
         products = get_products()
         st.dataframe(products, use_container_width=True)
-        
         with st.form("add_product"):
             name = st.text_input("Product Name")
             category = st.selectbox("Category", ["LOAN", "SCHOLARSHIP"])
@@ -1039,3 +953,24 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     conn.commit()
                     conn.close()
                     st.rerun()
+
+# ================================================================
+# CHANGE PASSWORD
+# ================================================================
+elif choice == "🔐 Change Password":
+    st.markdown("<h1 style='color: #00843D;'>🔐 Change Password</h1>", unsafe_allow_html=True)
+    with st.form("change_pwd_form"):
+        current = st.text_input("Current Password", type="password")
+        new = st.text_input("New Password", type="password")
+        confirm = st.text_input("Confirm New Password", type="password")
+        
+        if st.form_submit_button("Update Password"):
+            if new == confirm and len(new) >= 4:
+                user = authenticate_user(st.session_state.username, current)
+                if user:
+                    update_user_password(st.session_state.username, new)
+                    st.success("✅ Password updated successfully!")
+                else:
+                    st.error("❌ Current password is incorrect")
+            else:
+                st.error("❌ Passwords do not match or are too short")
