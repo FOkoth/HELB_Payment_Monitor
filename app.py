@@ -208,7 +208,7 @@ if choice == "📊 Dashboard":
             st.plotly_chart(fig, use_container_width=True)
 
 # ================================================================
-# NEW REQUEST - DYNAMIC WITH PROPER FORM STRUCTURE
+# NEW REQUEST - DYNAMIC WITH PROPER CONDITIONAL LOGIC
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -233,7 +233,7 @@ elif choice == "📝 New Request":
                 st.date_input("Submission Date", value=datetime.today(), disabled=True)
             
             # ============================================================
-            # STUDENT PAYMENT
+            # STUDENT PAYMENT - WITH CORRECT CONDITIONAL LOGIC
             # ============================================================
             if selected_type == "Student Payment":
                 st.subheader("🎓 Student Payment Details")
@@ -246,7 +246,7 @@ elif choice == "📝 New Request":
                 
                 payment_description = st.text_area("Payment Description")
                 
-                # Product Type
+                # Product Type selection
                 products = get_products()
                 if not products.empty:
                     product_type = st.selectbox("Product Type", products['name'].tolist())
@@ -254,6 +254,9 @@ elif choice == "📝 New Request":
                     product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
                 
                 # Conditional fields based on Product Type
+                semester = None
+                payment_category = None
+                
                 if product_type == "Undergraduate":
                     semesters = get_semesters()
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
@@ -262,9 +265,12 @@ elif choice == "📝 New Request":
                     semesters = get_semesters()
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                     payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                else:  # Jielimishe
+                else:
+                    # Jielimishe - NO semester field, NO payment category field
                     semester = None
                     payment_category = "Tuition"
+                    # Display a quiet info (optional - can remove if you don't want any message)
+                    st.caption("Jielimishe: Tuition payment only")
                 
                 submitted = st.form_submit_button("Submit Request", use_container_width=True)
                 
