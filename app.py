@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, date
 from database import (
     init_database, get_requests, save_request, update_request_status, 
@@ -8,7 +9,8 @@ from database import (
     get_all_users, create_user, create_department, get_departments,
     get_financial_years, get_semesters, add_product,
     update_user_password, get_user_by_username, get_pending_duration,
-    update_request_payment_details
+    update_payment_details, get_dashboard_stats, get_department_performance,
+    get_trend_data, get_breach_analysis
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -38,10 +40,12 @@ st.markdown("""
         border-radius: 5px;
         padding: 0.5rem 1rem;
         font-weight: 500;
+        transition: all 0.3s ease;
     }
     .stButton > button:hover {
         background-color: #00529B;
         color: white;
+        transform: translateY(-1px);
     }
     
     .status-completed {
@@ -71,6 +75,20 @@ st.markdown("""
         display: inline-block;
     }
     
+    .metric-card {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        text-align: center;
+        transition: transform 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
     h1, h2, h3 {
         color: #00843D;
     }
@@ -86,20 +104,17 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    .metric-card {
-        background-color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        text-align: center;
-    }
-    
     .user-info {
         text-align: center;
         padding: 0.5rem;
         background-color: #e8f5e9;
         border-radius: 10px;
         margin: 1rem 0;
+    }
+    
+    div[data-testid="stExpander"] details summary p {
+        font-weight: 600;
+        color: #00843D;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -157,7 +172,7 @@ if not st.session_state.authenticated:
                     st.error("❌ Invalid credentials")
     st.stop()
 
-# Password Change Modal (shown after login if needed)
+# Password Change Modal
 if st.session_state.show_password_change:
     st.markdown("### 🔐 Change Your Password")
     st.info("Please change your default password for security reasons.")
@@ -171,7 +186,6 @@ if st.session_state.show_password_change:
         with col1:
             if st.form_submit_button("Update Password"):
                 if new_pwd == confirm_pwd and len(new_pwd) >= 4:
-                    # Verify current password
                     user = authenticate_user(st.session_state.username, current_pwd)
                     if user:
                         update_user_password(st.session_state.username, new_pwd)
@@ -192,7 +206,6 @@ if st.session_state.show_password_change:
 with st.sidebar:
     st.markdown("<h2 style='color: #00843D; text-align: center;'>HELB</h2>", unsafe_allow_html=True)
     
-    # Display user info with full name and department
     st.markdown(f"""
         <div class='user-info'>
             <strong>{st.session_state.full_name}</strong><br>
@@ -223,7 +236,7 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-# Change Password option in menu
+# Change Password option
 if choice == "🔐 Change Password":
     st.markdown("<h1 style='color: #00843D;'>🔐 Change Password</h1>", unsafe_allow_html=True)
     with st.form("change_pwd_form"):
@@ -272,105 +285,144 @@ def get_allowed_request_types():
 # ================================================================
 if choice == "📊 Dashboard":
     st.markdown("<h1 style='color: #00843D;'>📊 Performance Dashboard</h1>", unsafe_allow_html=True)
-    df = get_requests()
     
-    if df.empty:
-        st.info("No requests found.")
-    else:
-        # Convert submission_date to datetime
-        df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
-        
-        # Calculate pending duration for non-completed requests
-        pending_requests = df[df['status'] != 'COMPLETED']
-        pending_durations = []
-        for _, row in pending_requests.iterrows():
-            days = get_pending_duration(row['submission_date'])
-            pending_durations.append(days)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            total = len(df)
-            st.markdown(f"""
-                <div class="metric-card">
-                    <h2 style="color: #00843D; margin:0;">{total}</h2>
-                    <p>Total Requests</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            pending_count = len(df[df['status'].isin(['SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING'])])
-            st.markdown(f"""
-                <div class="metric-card">
-                    <h2 style="color: #DC3545; margin:0;">{pending_count}</h2>
-                    <p>Pending</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with col3:
-            completed_count = len(df[df['status'] == 'COMPLETED'])
-            st.markdown(f"""
-                <div class="metric-card">
-                    <h2 style="color: #00843D; margin:0;">{completed_count}</h2>
-                    <p>Completed</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with col4:
-            avg_completion = 0
-            completed_df = df[df['status'] == 'COMPLETED']
-            if not completed_df.empty and 'completion_date' in completed_df.columns:
-                completion_times = []
-                for _, row in completed_df.iterrows():
-                    if row.get('completion_date'):
-                        sub = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                        comp = datetime.strptime(row['completion_date'], '%Y-%m-%d').date()
-                        completion_times.append(working_days_between(sub, comp))
-                avg_completion = sum(completion_times) / len(completion_times) if completion_times else 0
-            st.markdown(f"""
-                <div class="metric-card">
-                    <h2 style="color: #00843D; margin:0;">{avg_completion:.1f}</h2>
-                    <p>Avg Days to Complete</p>
-                </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("📈 Requests by Status")
-            status_counts = df['status'].value_counts()
-            color_map = {
-                'COMPLETED': '#00843D',
-                'SUBMITTED': '#DC3545',
-                'FINANCE_CHECKING': '#FFB81C',
-                'APPROVED_FOR_PROCESSING': '#00529B',
-                'RETURNED': '#6C757D'
-            }
-            colors = [color_map.get(s, '#D3D3D3') for s in status_counts.index]
-            fig = px.pie(values=status_counts.values, names=status_counts.index, color_discrete_sequence=colors)
-            fig.update_layout(showlegend=True, height=400)
+    # Filters
+    st.subheader("🔍 Filter Data")
+    col1, col2 = st.columns(2)
+    with col1:
+        financial_years = ["All"] + get_financial_years()
+        selected_fy = st.selectbox("Financial Year", financial_years)
+    with col2:
+        quarters = ["All", "Q1 (Jul-Sep)", "Q2 (Oct-Dec)", "Q3 (Jan-Mar)", "Q4 (Apr-Jun)"]
+        selected_quarter = st.selectbox("Quarter", quarters)
+    
+    # Get statistics
+    stats = get_dashboard_stats(selected_fy if selected_fy != "All" else None, 
+                                 selected_quarter if selected_quarter != "All" else None)
+    
+    # KPI Cards
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h3 style="color: #00843D; margin:0;">{stats['total_requests']}</h3>
+                <p>Total Requests</p>
+                <small>📥 Received: {stats['total_received']} | ↩️ Returned: {stats['total_returned']}</small>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h3 style="color: #00843D; margin:0;">KES {stats['total_amount']:,.0f}</h3>
+                <p>Total Amount</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+            <div class="metric-card">
+                <h3 style="color: #00843D; margin:0;">{stats['avg_completion_time']:.1f}</h3>
+                <p>Avg Completion (Days)</p>
+                <small>Working days only</small>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        breach_color = "#DC3545" if stats['breach_rate'] > 20 else "#00843D"
+        st.markdown(f"""
+            <div class="metric-card">
+                <h3 style="color: {breach_color}; margin:0;">{stats['breach_rate']:.1f}%</h3>
+                <p>Breach Rate</p>
+                <small>{stats['total_breaches']} of {stats['completed_count']} requests</small>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Charts Row
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📈 Monthly Trends")
+        trend_data = get_trend_data(selected_fy if selected_fy != "All" else None)
+        if not trend_data.empty:
+            fig = px.line(trend_data, x='month', y='request_count', 
+                         title="Request Volume Trend",
+                         color_discrete_sequence=['#00843D'])
+            fig.update_layout(xaxis_title="Month", yaxis_title="Number of Requests", height=400)
             st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.subheader("💰 Amount by Request Type")
-            amount_by_type = df.groupby('request_type')['amount'].sum().reset_index()
+        else:
+            st.info("No trend data available")
+    
+    with col2:
+        st.subheader("💰 Amount by Request Type")
+        df = get_requests()
+        if selected_fy != "All":
+            df = df[df['financial_year'] == selected_fy]
+        amount_by_type = df.groupby('request_type')['amount'].sum().reset_index()
+        if not amount_by_type.empty:
             fig = px.bar(amount_by_type, x='request_type', y='amount',
                         color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
-            fig.update_layout(showlegend=False, height=400)
+            fig.update_layout(xaxis_title="Request Type", yaxis_title="Amount (KES)", height=400)
             st.plotly_chart(fig, use_container_width=True)
-        
-        # Recent requests table with status badges
-        st.subheader("📋 Recent Requests")
-        display_df = df.head(10).copy()
-        
-        def get_status_badge(status):
-            if status == 'COMPLETED':
-                return '<span class="status-completed">✓ Paid</span>'
-            elif status in ['SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING']:
-                days = 0
-                return '<span class="status-pending">⏳ Pending</span>'
-            else:
-                return f'<span class="status-approved">↺ {status}</span>'
-        
-        display_df['Status'] = display_df['status'].apply(get_status_badge)
-        st.markdown(display_df[['request_number', 'request_type', 'amount', 'Status', 'submission_date']].to_html(escape=False, index=False), unsafe_allow_html=True)
+        else:
+            st.info("No amount data available")
+    
+    # Department Performance
+    st.subheader("🏢 Department Performance")
+    dept_perf = get_department_performance(selected_fy if selected_fy != "All" else None)
+    if not dept_perf.empty:
+        fig = px.bar(dept_perf, x='department', y='completion_rate',
+                    title="Completion Rate by Department",
+                    color='completion_rate',
+                    color_continuous_scale=['#DC3545', '#FFB81C', '#00843D'])
+        fig.update_layout(xaxis_title="Department", yaxis_title="Completion Rate (%)", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Breach Analysis Table
+    st.subheader("⚠️ SLA Breach Analysis")
+    breach_df = get_breach_analysis(selected_fy if selected_fy != "All" else None)
+    if not breach_df.empty:
+        breached_only = breach_df[breach_df['status'] == 'Breached']
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Breached Requests", len(breached_only))
+        with col2:
+            breach_percent = (len(breached_only) / len(breach_df) * 100) if len(breach_df) > 0 else 0
+            st.metric("Breach Percentage", f"{breach_percent:.1f}%")
+        st.dataframe(breach_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No completed requests to analyze SLA compliance")
+    
+    # Insights
+    st.subheader("💡 Intelligent Insights")
+    
+    insights = []
+    if stats['breach_rate'] > 20:
+        insights.append("⚠️ **High breach rate detected** - Review workflow efficiency and resource allocation")
+    elif stats['breach_rate'] > 10:
+        insights.append("📊 **Moderate breach rate** - Consider process improvements and staff training")
+    else:
+        insights.append("✅ **Excellent performance** - Breach rate is within acceptable range")
+    
+    if stats['avg_completion_time'] > 5:
+        insights.append(f"⏱️ **Average completion time is {stats['avg_completion_time']:.1f} days** - Target is 3-5 working days")
+    elif stats['avg_completion_time'] > 3:
+        insights.append(f"📈 **Average completion time is {stats['avg_completion_time']:.1f} days** - Room for improvement")
+    
+    if not dept_perf.empty:
+        worst_dept = dept_perf.loc[dept_perf['completion_rate'].idxmin()]
+        best_dept = dept_perf.loc[dept_perf['completion_rate'].idxmax()]
+        insights.append(f"🏆 **Best performing department:** {best_dept['department']} ({best_dept['completion_rate']:.1f}% completion rate)")
+        insights.append(f"⚠️ **Needs attention:** {worst_dept['department']} ({worst_dept['completion_rate']:.1f}% completion rate)")
+    
+    if stats['total_returned'] > stats['total_requests'] * 0.1:
+        insights.append(f"↩️ **High return rate** ({stats['total_returned']} requests returned) - Review submission quality")
+    
+    for insight in insights:
+        st.info(insight)
 
 # ================================================================
 # NEW REQUEST
@@ -708,15 +760,18 @@ elif choice == "📋 My Requests":
         if user_requests.empty:
             st.info("You haven't submitted any requests yet.")
         else:
-            # Add status display and pending duration
             display_data = []
             for _, row in user_requests.iterrows():
                 status_display = ""
-                if row['status'] == 'COMPLETED':
-                    if row['request_type'] == 'Surrender':
-                        status_display = "✅ Cleared"
-                    else:
-                        status_display = "✅ Paid"
+                if row['status'] == 'PAID':
+                    status_display = "✅ Paid"
+                elif row['status'] == 'CLEARED':
+                    status_display = "✅ Cleared"
+                elif row['status'] == 'RECEIVED_BY_FINANCE':
+                    days = get_pending_duration(row['submission_date'])
+                    status_display = f"⏳ Received by Finance ({days} days)"
+                elif row['status'] == 'RETURNED':
+                    status_display = f"↩️ Returned"
                 elif row['status'] in ['SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING']:
                     days = get_pending_duration(row['submission_date'])
                     status_display = f"⏳ Pending ({days} days)"
@@ -740,19 +795,19 @@ elif choice == "✅ Approval Queue":
     if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
         st.markdown("<h1 style='color: #00843D;'>✅ Approval Queue</h1>", unsafe_allow_html=True)
         df = get_requests()
-        pending = df[df['status'].isin(['SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING'])]
+        pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING'])]
         
         if pending.empty:
             st.info("No pending requests.")
         else:
             for idx, (_, req) in enumerate(pending.iterrows()):
                 days_pending = get_pending_duration(req['submission_date'])
-                with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - Pending for {days_pending} days"):
+                with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - {req['status']} (Pending {days_pending} days)"):
                     col1, col2 = st.columns(2)
                     with col1:
                         st.write(f"**Department:** {req['department_name']}")
                         st.write(f"**Submitted By:** {req['submitted_by']}")
-                        st.write(f"**Date:** {req['submission_date']}")
+                        st.write(f"**Submission Date:** {req['submission_date']}")
                         st.write(f"**Amount:** KES {req['amount']:,.2f}")
                         st.write(f"**Pending Duration:** {days_pending} working days")
                     with col2:
@@ -788,23 +843,23 @@ elif choice == "✅ Approval Queue":
                     st.markdown("---")
                     
                     col3, col4, col5 = st.columns(3)
+                    
                     with col3:
                         if req['status'] == 'SUBMITTED':
-                            if st.button(f"📋 Start Checking", key=f"start_{idx}"):
-                                update_request_status(req['id'], 'FINANCE_CHECKING')
+                            if st.button(f"📋 Receive Request", key=f"receive_{idx}"):
+                                update_request_status(req['id'], 'RECEIVED_BY_FINANCE')
+                                st.success(f"✅ Request {req['request_number']} received by Finance")
                                 st.rerun()
-                        elif req['status'] == 'FINANCE_CHECKING':
-                            if st.button(f"✅ Approve", key=f"approve_{idx}"):
-                                update_request_status(req['id'], 'APPROVED_FOR_PROCESSING')
-                                st.rerun()
-                        elif req['status'] == 'APPROVED_FOR_PROCESSING':
-                            # For completion, ask for payment reference
+                        
+                        elif req['status'] == 'RECEIVED_BY_FINANCE':
                             payment_ref = st.text_input("Payment Reference Number", key=f"ref_{idx}")
-                            if st.button(f"🎉 Mark Complete", key=f"complete_{idx}"):
+                            if st.button(f"✅ Mark as Paid", key=f"paid_{idx}"):
                                 if payment_ref:
-                                    completion_date = date.today().isoformat()
-                                    update_request_status(req['id'], 'COMPLETED')
-                                    update_request_payment_details(req['id'], payment_ref, completion_date)
+                                    if req['request_type'] == 'Surrender':
+                                        update_request_status(req['id'], 'CLEARED')
+                                    else:
+                                        update_request_status(req['id'], 'PAID')
+                                    update_payment_details(req['id'], payment_ref)
                                     
                                     # Calculate completion time
                                     submitted_date = datetime.strptime(req['submission_date'], '%Y-%m-%d').date()
@@ -820,11 +875,15 @@ elif choice == "✅ Approval Queue":
                         comment = st.text_area("Comment", key=f"comment_{idx}")
                     
                     with col5:
-                        reason = st.text_input("Return Reason", key=f"return_{idx}")
-                        if st.button(f"↩️ Return", key=f"return_btn_{idx}"):
-                            if reason:
-                                update_request_status(req['id'], 'RETURNED', comment, reason)
-                                st.rerun()
+                        if req['status'] == 'SUBMITTED':
+                            reason = st.text_input("Return Reason", key=f"return_{idx}")
+                            if st.button(f"↩️ Return Request", key=f"return_btn_{idx}"):
+                                if reason:
+                                    update_request_status(req['id'], 'RETURNED', comment, reason)
+                                    st.warning(f"⚠️ Request {req['request_number']} returned to department")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Please provide a return reason")
     else:
         st.error("Access denied. Finance only.")
 
@@ -838,16 +897,28 @@ elif choice == "📑 Reports":
         st.info("No data")
     else:
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("Export CSV", csv, "helb_requests.csv", "text/csv", use_container_width=True)
+        st.download_button("📥 Export to CSV", csv, "helb_requests.csv", "text/csv", use_container_width=True)
         
         st.subheader("📊 Summary Statistics")
         col1, col2 = st.columns(2)
         with col1:
             st.write("**By Status:**")
-            st.dataframe(df['status'].value_counts().reset_index())
+            status_counts = df['status'].value_counts().reset_index()
+            status_counts.columns = ['Status', 'Count']
+            st.dataframe(status_counts, use_container_width=True, hide_index=True)
         with col2:
             st.write("**By Department:**")
-            st.dataframe(df['department_name'].value_counts().reset_index())
+            dept_counts = df['department_name'].value_counts().reset_index()
+            dept_counts.columns = ['Department', 'Count']
+            st.dataframe(dept_counts, use_container_width=True, hide_index=True)
+        
+        st.subheader("📅 Financial Year Summary")
+        fy_summary = df.groupby('financial_year').agg({
+            'amount': 'sum',
+            'request_number': 'count'
+        }).reset_index()
+        fy_summary.columns = ['Financial Year', 'Total Amount', 'Request Count']
+        st.dataframe(fy_summary, use_container_width=True, hide_index=True)
 
 # ================================================================
 # ADMIN PANEL
@@ -859,8 +930,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     
     with tab1:
         st.subheader("👥 User Management")
-        
-        # Display existing users
         users_df = get_all_users()
         st.dataframe(users_df, use_container_width=True, hide_index=True)
         
