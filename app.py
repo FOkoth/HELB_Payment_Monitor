@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from database import (
     init_database, get_requests, save_request, update_request_status, 
     authenticate_user, get_user_department, get_products, get_funders,
-    get_all_users, create_user, create_department, get_departments
+    get_all_users, create_user, create_department, get_departments,
+    get_financial_years, get_semesters, add_product
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -115,6 +116,13 @@ st.markdown("""
         border-radius: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    
+    /* Required field indicator */
+    .required-field::after {
+        content: " *";
+        color: red;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -221,7 +229,6 @@ def get_allowed_request_types():
     result = get_user_department(st.session_state.username)
     if result:
         allowed = []
-        # result indices: 0=id, 1=name, 2=imprest, 3=petty, 4=supplier, 5=student, 6=surrender, 7=refund, 8=product, 9=funder, 10=finance
         if result[2]: allowed.append("Imprest")
         if result[3]: allowed.append("Petty Cash")
         if result[4]: allowed.append("Supplier")
@@ -310,15 +317,15 @@ if choice == "📊 Dashboard":
                 st.info("No status data available")
         
         with col2:
-            st.subheader("💰 Total Amount by Department")
-            amount_by_dept = df.groupby('department_name')['amount'].sum().reset_index()
-            if not amount_by_dept.empty:
-                fig = px.bar(amount_by_dept, x='department_name', y='amount', 
-                            color='department_name', color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
-                fig.update_layout(showlegend=False, height=400, xaxis_title="Department", yaxis_title="Amount (KES)")
+            st.subheader("💰 Amount by Request Type")
+            amount_by_type = df.groupby('request_type')['amount'].sum().reset_index()
+            if not amount_by_type.empty:
+                fig = px.bar(amount_by_type, x='request_type', y='amount', 
+                            color='request_type', color_discrete_sequence=['#00843D', '#FFB81C', '#00529B'])
+                fig.update_layout(showlegend=False, height=400, xaxis_title="Request Type", yaxis_title="Amount (KES)")
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("No department data available")
+                st.info("No amount data available")
         
         # SLA Compliance Table
         st.subheader("⏱️ SLA Compliance & Insights")
@@ -386,9 +393,15 @@ elif choice == "📝 New Request":
             
             amount = st.number_input("Amount (KES)", min_value=0.0, format="%.2f", step=1000.0)
             
+            # Payment Description - for ALL request types
+            payment_description = st.text_area("Payment Description", 
+                                               placeholder="Enter a detailed description of this payment request...",
+                                               help="Provide clear description of what this payment is for")
+            
             # Initialize variables
             imprest_no = batch_no = supplier_name = invoice_no = lpo_no = None
             product_type = payment_type = funder_name = None
+            financial_year = semester = None
             refund_reason = original_payment_ref = None
             surrender_number = previous_imprest_no = None
             
@@ -406,14 +419,33 @@ elif choice == "📝 New Request":
             # Student Payment - Lending department
             if request_type == "Student Payment" and st.session_state.user_dept == "Lending":
                 products = get_products()
-                product_type = st.selectbox("Product Type", products['name'].tolist())
-                
-                if product_type in ["Undergraduate", "TVET"]:
-                    payment_type = st.selectbox("Payment Type", ["Upkeep", "Tuition"])
-                elif product_type == "Jielimishe":
-                    payment_type = "Tuition"
-                    st.info("ℹ️ Jielimishe product: Tuition payment only")
-                batch_no = st.text_input("Batch Number *")
+                if not products.empty:
+                    product_type = st.selectbox("Product Type", products['name'].tolist())
+                    
+                    # Financial Year (for all Student Payments)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    
+                    # Get product details to check if semester is required
+                    product_row = products[products['name'] == product_type]
+                    has_semester = product_row['has_semester'].iloc[0] if not product_row.empty else 1
+                    has_payment_type = product_row['has_payment_type'].iloc[0] if not product_row.empty else 1
+                    
+                    # Semester (only for products that have it - Undergraduate, TVET)
+                    if has_semester:
+                        semesters = get_semesters()
+                        semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                    
+                    # Payment Type (Tuition/Upkeep)
+                    if has_payment_type and product_type in ["Undergraduate", "TVET"]:
+                        payment_type = st.selectbox("Payment Type", ["Upkeep", "Tuition"])
+                    elif product_type == "Jielimishe":
+                        payment_type = "Tuition"
+                        st.info("ℹ️ Jielimishe product: Tuition payment only")
+                    
+                    batch_no = st.text_input("Batch Number *")
+                else:
+                    st.warning("No products configured. Contact admin to add products.")
             
             # Student Payment - ERM department (Partner Funds)
             elif request_type == "Student Payment" and st.session_state.user_dept == "External Resource Mobilization":
@@ -422,6 +454,15 @@ elif choice == "📝 New Request":
                     funder_name = st.selectbox("Select Funder/Partner", funders)
                 else:
                     funder_name = st.text_input("Funder/Partner Name *")
+                
+                # Financial Year for ERM
+                financial_years = get_financial_years()
+                financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                
+                # ERM - Tuition by default
+                payment_type = "Tuition"
+                st.info("ℹ️ External Resource Mobilization: Tuition payment only")
+                
                 batch_no = st.text_input("Batch Number *")
             
             # Refund - Debt Management
@@ -441,12 +482,16 @@ elif choice == "📝 New Request":
                 errors = []
                 if amount <= 0:
                     errors.append("Amount must be greater than 0")
+                if not payment_description:
+                    errors.append("Payment Description is required")
                 if request_type in ["Imprest", "Petty Cash"] and not imprest_no:
                     errors.append(f"{request_type} number is required")
                 if request_type == "Supplier" and (not supplier_name or not invoice_no):
                     errors.append("Supplier name and invoice number are required")
                 if request_type == "Student Payment" and not batch_no:
                     errors.append("Batch number is required")
+                if request_type == "Student Payment" and not financial_year:
+                    errors.append("Financial Year is required")
                 if request_type == "Surrender" and (not surrender_number or not previous_imprest_no):
                     errors.append("Surrender number and previous imprest number are required")
                 if request_type == "Refund" and (not refund_reason or not original_payment_ref):
@@ -462,6 +507,7 @@ elif choice == "📝 New Request":
                         'department_name': st.session_state.user_dept,
                         'submitted_by': st.session_state.username,
                         'amount': amount,
+                        'payment_description': payment_description,
                         'imprest_no': imprest_no,
                         'batch_no': batch_no,
                         'supplier_name': supplier_name,
@@ -470,6 +516,8 @@ elif choice == "📝 New Request":
                         'product_type': product_type,
                         'payment_type': payment_type,
                         'funder_name': funder_name,
+                        'financial_year': financial_year,
+                        'semester': semester,
                         'refund_reason': refund_reason,
                         'original_payment_ref': original_payment_ref,
                         'surrender_number': surrender_number,
@@ -492,12 +540,7 @@ elif choice == "📋 My Requests":
         if user_requests.empty:
             st.info("📭 You haven't submitted any requests yet.")
         else:
-            display_cols = ['request_number', 'request_type', 'amount', 'status', 'submission_date']
-            if 'product_type' in user_requests.columns and user_requests['product_type'].notna().any():
-                display_cols.insert(2, 'product_type')
-            if 'funder_name' in user_requests.columns and user_requests['funder_name'].notna().any():
-                display_cols.insert(2, 'funder_name')
-            
+            display_cols = ['request_number', 'request_type', 'amount', 'status', 'submission_date', 'payment_description']
             st.dataframe(user_requests[display_cols], use_container_width=True, hide_index=True)
 
 elif choice == "✅ Approval Queue":
@@ -536,6 +579,10 @@ elif choice == "✅ Approval Queue":
                                 st.markdown(f"**Payment Type:** {req['payment_type']}")
                             if req['funder_name']:
                                 st.markdown(f"**Funder:** {req['funder_name']}")
+                            if req['financial_year']:
+                                st.markdown(f"**Financial Year:** {req['financial_year']}")
+                            if req['semester']:
+                                st.markdown(f"**Semester:** {req['semester']}")
                             st.markdown(f"**Batch No:** {req['batch_no']}")
                         elif req['request_type'] == 'Refund':
                             st.markdown(f"**Reason:** {req['refund_reason']}")
@@ -543,6 +590,9 @@ elif choice == "✅ Approval Queue":
                         elif req['request_type'] == 'Surrender':
                             st.markdown(f"**Surrender No:** {req['surrender_number']}")
                             st.markdown(f"**Previous Imprest:** {req['previous_imprest_no']}")
+                    
+                    st.markdown("**Payment Description:**")
+                    st.info(req['payment_description'] if req['payment_description'] else "No description provided")
                     
                     st.markdown("---")
                     
@@ -631,7 +681,7 @@ elif choice == "📑 Reports":
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<h1 style='color: #00843D;'>⚙️ Admin Panel</h1>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years"])
     
     with tab1:
         st.subheader("👥 User Management")
@@ -717,19 +767,16 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             product_name = st.text_input("Product Name")
             product_category = st.selectbox("Category", ["LOAN", "SCHOLARSHIP", "FUNDER"])
             has_payment_type = st.checkbox("Has Payment Type (Upkeep/Tuition)")
+            has_semester = st.checkbox("Has Semester Selection", value=True)
             
             if st.form_submit_button("Add Product"):
                 if product_name:
-                    conn = sqlite3.connect("helb_data.db")
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO products (name, category, has_payment_type) VALUES (?, ?, ?)",
-                        (product_name, product_category, 1 if has_payment_type else 0)
-                    )
-                    conn.commit()
-                    conn.close()
-                    st.success(f"✅ Product {product_name} added!")
-                    st.rerun()
+                    success = add_product(product_name, product_category, 1 if has_payment_type else 0, 1 if has_semester else 0)
+                    if success:
+                        st.success(f"✅ Product {product_name} added!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Product name already exists!")
                 else:
                     st.error("❌ Product name required")
     
@@ -759,3 +806,34 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     st.rerun()
                 else:
                     st.error("❌ Funder name required")
+    
+    with tab5:
+        st.subheader("📅 Financial Year Management")
+        
+        financial_years = get_financial_years()
+        if financial_years:
+            st.write("**Current Financial Years:**")
+            for fy in financial_years:
+                st.markdown(f"• {fy}")
+        else:
+            st.info("No financial years added yet.")
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Financial Year")
+        with st.form("add_fy_form"):
+            fy_name = st.text_input("Financial Year (e.g., 2027/2028)")
+            if st.form_submit_button("Add Financial Year"):
+                if fy_name:
+                    conn = sqlite3.connect("helb_data.db")
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, 1)", (fy_name,))
+                        conn.commit()
+                        st.success(f"✅ Financial Year {fy_name} added!")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("❌ Financial year already exists!")
+                    finally:
+                        conn.close()
+                else:
+                    st.error("❌ Financial year name required")
