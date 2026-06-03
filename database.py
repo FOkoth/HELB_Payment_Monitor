@@ -77,7 +77,7 @@ def init_database():
         )
     ''')
     
-    # Requests table with all columns
+    # Requests table with all tracking columns
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,10 +111,11 @@ def init_database():
             status TEXT DEFAULT 'SUBMITTED',
             finance_comment TEXT,
             return_reason TEXT,
+            date_received TEXT,
+            date_returned TEXT,
             finance_check_date TEXT,
-            completion_date TEXT,
-            payment_reference TEXT,
             payment_date TEXT,
+            payment_reference TEXT,
             completed_by TEXT,
             completion_notes TEXT,
             last_updated TEXT
@@ -129,7 +130,7 @@ def init_database():
         )
     ''')
     
-    # Insert default departments (alphabetically)
+    # Insert default departments
     cursor.execute("SELECT COUNT(*) FROM departments")
     if cursor.fetchone()[0] == 0:
         default_depts = [
@@ -183,6 +184,7 @@ def init_database():
     cursor.execute("SELECT COUNT(*) FROM financial_years")
     if cursor.fetchone()[0] == 0:
         default_years = [
+            ('2024/2025', 0),
             ('2025/2026', 1),
             ('2026/2027', 1),
         ]
@@ -217,14 +219,13 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Run migration to add any missing columns
+    # Run migration
     migrate_database()
     
-    # Insert default users AFTER departments exist
+    # Insert default users
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Get department IDs
     cursor.execute("SELECT id, name FROM departments")
     dept_map = {name: id for id, name in cursor.fetchall()}
     
@@ -238,13 +239,6 @@ def init_database():
             ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer'),
             ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer'),
             ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer'),
-            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer'),
-            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer'),
-            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer'),
-            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer'),
-            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer'),
-            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office'),
-            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer'),
         ]
         cursor.executemany(
             "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
@@ -260,13 +254,14 @@ def migrate_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Check and add missing columns to requests table
     cursor.execute("PRAGMA table_info(requests)")
     columns = [column[1] for column in cursor.fetchall()]
     
     new_columns = {
-        'payment_reference': 'TEXT',
+        'date_received': 'TEXT',
+        'date_returned': 'TEXT',
         'payment_date': 'TEXT',
+        'payment_reference': 'TEXT',
         'completed_by': 'TEXT',
         'completion_notes': 'TEXT'
     }
@@ -275,17 +270,14 @@ def migrate_database():
         if col_name not in columns:
             try:
                 cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
-                print(f"Added column: {col_name}")
             except Exception as e:
                 print(f"Error adding {col_name}: {e}")
     
     conn.commit()
     conn.close()
-    print("Database migration completed!")
 
 
 def get_departments():
-    """Get all departments"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
     conn.close()
@@ -293,7 +285,6 @@ def get_departments():
 
 
 def get_products():
-    """Get all active products"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
     conn.close()
@@ -301,7 +292,6 @@ def get_products():
 
 
 def add_product(name, category, has_payment_type, has_semester):
-    """Add a new product"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -318,7 +308,6 @@ def add_product(name, category, has_payment_type, has_semester):
 
 
 def get_financial_years():
-    """Get all active financial years"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
     conn.close()
@@ -326,7 +315,6 @@ def get_financial_years():
 
 
 def get_semesters():
-    """Get all semesters"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name FROM semesters ORDER BY name", conn)
     conn.close()
@@ -334,7 +322,6 @@ def get_semesters():
 
 
 def get_funders():
-    """Get all funders"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name FROM funders ORDER BY name", conn)
     conn.close()
@@ -342,7 +329,6 @@ def get_funders():
 
 
 def get_user_department(username):
-    """Get user's department details"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -356,7 +342,6 @@ def get_user_department(username):
 
 
 def get_all_users():
-    """Get all users with department names"""
     conn = sqlite3.connect(DB_PATH)
     query = '''
         SELECT u.username, u.role, d.name as department, u.full_name 
@@ -370,7 +355,6 @@ def get_all_users():
 
 
 def create_user(username, password, role, department_id, full_name):
-    """Create a new user"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -387,7 +371,6 @@ def create_user(username, password, role, department_id, full_name):
 
 
 def create_department(name, permissions):
-    """Create a new department with permissions"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -407,18 +390,7 @@ def create_department(name, permissions):
         conn.close()
 
 
-def get_department_permissions(dept_id):
-    """Get department permissions"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM departments WHERE id = ?', (dept_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result
-
-
 def get_requests(filters=None):
-    """Fetch requests with optional filters"""
     conn = sqlite3.connect(DB_PATH)
     query = "SELECT * FROM requests ORDER BY submission_date DESC"
     df = pd.read_sql_query(query, conn)
@@ -427,11 +399,9 @@ def get_requests(filters=None):
 
 
 def save_request(data):
-    """Save new request"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Generate request number
     cursor.execute("SELECT COUNT(*) FROM requests")
     count = cursor.fetchone()[0] + 1
     request_number = f"HELB-{datetime.now().strftime('%Y%m')}-{count:04d}"
@@ -450,22 +420,33 @@ def save_request(data):
 
 
 def update_request_status(request_id, status, finance_comment=None, return_reason=None):
-    """Update workflow status"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
     
-    if status == 'FINANCE_CHECKING':
+    if status == 'RECEIVED_BY_FINANCE':
+        updates.append("date_received = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("finance_check_date = ?")
         params.append(datetime.now().isoformat())
-    elif status == 'COMPLETED':
+    elif status == 'RETURNED':
+        updates.append("date_returned = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
+        if return_reason:
+            updates.append("return_reason = ?")
+            params.append(return_reason)
+    elif status == 'PAID':
+        updates.append("payment_date = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
-    elif status == 'RETURNED' and return_reason:
-        updates.append("return_reason = ?")
-        params.append(return_reason)
+    elif status == 'CLEARED':
+        updates.append("payment_date = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
+        updates.append("completion_date = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
     
     if finance_comment:
         updates.append("finance_comment = ?")
@@ -477,8 +458,18 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     conn.close()
 
 
+def update_payment_details(request_id, payment_reference):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE requests SET payment_reference = ?, payment_date = ?, last_updated = ? WHERE id = ?",
+        (payment_reference, datetime.now().strftime('%Y-%m-%d'), datetime.now().isoformat(), request_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def authenticate_user(username, password):
-    """Verify login credentials"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -497,7 +488,6 @@ def authenticate_user(username, password):
 
 
 def update_user_password(username, new_password):
-    """Update user password"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
@@ -506,155 +496,173 @@ def update_user_password(username, new_password):
     return True
 
 
-def get_user_by_username(username):
-    """Get full user details including department"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.username = ?
-    ''', (username,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
+def get_working_days_between(start_date, end_date):
+    from utils.holidays_ke import working_days_between
+    return working_days_between(start_date, end_date)
 
 
 def get_pending_duration(request_date):
-    """Calculate days pending (excluding weekends and holidays)"""
     from utils.holidays_ke import working_days_between
-    
     today = date.today()
     submitted_date = datetime.strptime(request_date, '%Y-%m-%d').date()
     return working_days_between(submitted_date, today)
 
 
-def update_request_payment_details(request_id, payment_reference=None, payment_date=None):
-    """Update payment details when completed"""
+def get_sla_status(request_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    updates = []
-    params = []
-    
-    if payment_reference:
-        updates.append("payment_reference = ?")
-        params.append(payment_reference)
-    if payment_date:
-        updates.append("payment_date = ?")
-        params.append(payment_date)
-    
-    updates.append("completed_by = ?")
-    params.append("Finance Department")
-    
-    updates.append("completion_notes = ?")
-    params.append("Payment processed and completed")
-    
-    if updates:
-        updates.append("last_updated = ?")
-        params.append(datetime.now().isoformat())
-        params.append(request_id)
-        cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
-        conn.commit()
-    conn.close()
-
-
-def get_sla_days(request_type):
-    """Get SLA days for a request type"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT sla_days FROM sla_config WHERE request_type = ?", (request_type,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else 5
-
-
-def update_sla_config(request_type, sla_days):
-    """Update SLA configuration"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("REPLACE INTO sla_config (request_type, sla_days) VALUES (?, ?)", (request_type, sla_days))
-    conn.commit()
-    conn.close()
-
-
-def get_requests_by_status(status):
-    """Get requests filtered by status"""
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM requests WHERE status = ? ORDER BY submission_date DESC", conn, params=(status,))
-    conn.close()
-    return df
-
-
-def get_requests_by_department(department_name):
-    """Get requests filtered by department"""
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM requests WHERE department_name = ? ORDER BY submission_date DESC", conn, params=(department_name,))
-    conn.close()
-    return df
-
-
-def get_completion_time(request_id):
-    """Calculate completion time in working days for a specific request"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT submission_date, completion_date FROM requests WHERE id = ?", (request_id,))
+    cursor.execute("SELECT request_type, submission_date, payment_date, status FROM requests WHERE id = ?", (request_id,))
     result = cursor.fetchone()
     conn.close()
     
-    if result and result[0] and result[1]:
+    if result and result[2] and result[3] == 'PAID':
         from utils.holidays_ke import working_days_between
-        submitted = datetime.strptime(result[0], '%Y-%m-%d').date()
-        completed = datetime.strptime(result[1], '%Y-%m-%d').date()
-        return working_days_between(submitted, completed)
-    return None
+        submitted = datetime.strptime(result[1], '%Y-%m-%d').date()
+        paid = datetime.strptime(result[2], '%Y-%m-%d').date()
+        days_taken = working_days_between(submitted, paid)
+        
+        sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                   'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+        sla_days = sla_map.get(result[0], 5)
+        
+        return "Breached" if days_taken > sla_days else "Within SLA", days_taken, sla_days
+    return "Pending", None, None
 
 
-def get_department_summary():
-    """Get summary statistics by department"""
-    conn = sqlite3.connect(DB_PATH)
-    query = '''
-        SELECT 
-            department_name,
-            COUNT(*) as total_requests,
-            SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status IN ('SUBMITTED', 'FINANCE_CHECKING', 'APPROVED_FOR_PROCESSING') THEN 1 ELSE 0 END) as pending,
-            SUM(amount) as total_amount
-        FROM requests
-        GROUP BY department_name
-        ORDER BY total_requests DESC
-    '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+def get_dashboard_stats(financial_year=None, quarter=None):
+    df = get_requests()
+    
+    if financial_year and financial_year != "All":
+        df = df[df['financial_year'] == financial_year]
+    
+    if quarter and quarter != "All":
+        df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
+        if quarter == "Q1 (Jul-Sep)":
+            df = df[df['submission_date_dt'].dt.month.isin([7, 8, 9])]
+        elif quarter == "Q2 (Oct-Dec)":
+            df = df[df['submission_date_dt'].dt.month.isin([10, 11, 12])]
+        elif quarter == "Q3 (Jan-Mar)":
+            df = df[df['submission_date_dt'].dt.month.isin([1, 2, 3])]
+        elif quarter == "Q4 (Apr-Jun)":
+            df = df[df['submission_date_dt'].dt.month.isin([4, 5, 6])]
+    
+    total_requests = len(df)
+    total_received = len(df[df['date_received'].notna()])
+    total_returned = len(df[df['date_returned'].notna()])
+    total_paid = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+    total_amount = df['amount'].sum()
+    
+    # Calculate breaches
+    breaches = 0
+    completion_times = []
+    for _, row in df.iterrows():
+        if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
+            from utils.holidays_ke import working_days_between
+            submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+            paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+            days = working_days_between(submitted, paid)
+            completion_times.append(days)
+            
+            sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                       'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+            sla_days = sla_map.get(row['request_type'], 5)
+            if days > sla_days:
+                breaches += 1
+    
+    avg_completion_time = sum(completion_times) / len(completion_times) if completion_times else 0
+    breach_rate = (breaches / total_paid * 100) if total_paid > 0 else 0
+    
+    return {
+        'total_requests': total_requests,
+        'total_received': total_received,
+        'total_returned': total_returned,
+        'total_paid': total_paid,
+        'total_amount': total_amount,
+        'avg_completion_time': avg_completion_time,
+        'total_breaches': breaches,
+        'breach_rate': breach_rate,
+        'completed_count': total_paid
+    }
 
 
-def get_monthly_summary(year=None):
-    """Get monthly summary statistics"""
-    conn = sqlite3.connect(DB_PATH)
-    if year:
-        query = '''
-            SELECT 
-                strftime('%Y-%m', submission_date) as month,
-                COUNT(*) as total,
-                SUM(amount) as total_amount
-            FROM requests
-            WHERE strftime('%Y', submission_date) = ?
-            GROUP BY strftime('%Y-%m', submission_date)
-            ORDER BY month DESC
-        '''
-        df = pd.read_sql_query(query, conn, params=(str(year),))
-    else:
-        query = '''
-            SELECT 
-                strftime('%Y-%m', submission_date) as month,
-                COUNT(*) as total,
-                SUM(amount) as total_amount
-            FROM requests
-            GROUP BY strftime('%Y-%m', submission_date)
-            ORDER BY month DESC
-            LIMIT 12
-        '''
-        df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+def get_department_performance(financial_year=None):
+    df = get_requests()
+    if financial_year and financial_year != "All":
+        df = df[df['financial_year'] == financial_year]
+    
+    performance = []
+    for dept in df['department_name'].unique():
+        dept_df = df[df['department_name'] == dept]
+        total = len(dept_df)
+        paid = len(dept_df[dept_df['status'].isin(['PAID', 'CLEARED'])])
+        
+        breaches = 0
+        for _, row in dept_df.iterrows():
+            if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
+                from utils.holidays_ke import working_days_between
+                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                paid_date = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                days = working_days_between(submitted, paid_date)
+                sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+                sla_days = sla_map.get(row['request_type'], 5)
+                if days > sla_days:
+                    breaches += 1
+        
+        performance.append({
+            'department': dept,
+            'total_requests': total,
+            'completed': paid,
+            'completion_rate': (paid / total * 100) if total > 0 else 0,
+            'breaches': breaches
+        })
+    
+    return pd.DataFrame(performance)
+
+
+def get_trend_data(financial_year=None):
+    df = get_requests()
+    if financial_year and financial_year != "All":
+        df = df[df['financial_year'] == financial_year]
+    
+    df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
+    df['month'] = df['submission_date_dt'].dt.strftime('%b %Y')
+    
+    monthly = df.groupby('month').agg({
+        'amount': 'sum',
+        'request_number': 'count'
+    }).reset_index()
+    monthly.columns = ['month', 'total_amount', 'request_count']
+    
+    return monthly.sort_values('month')
+
+
+def get_breach_analysis(financial_year=None):
+    df = get_requests()
+    if financial_year and financial_year != "All":
+        df = df[df['financial_year'] == financial_year]
+    
+    breach_data = []
+    for _, row in df.iterrows():
+        if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
+            from utils.holidays_ke import working_days_between
+            submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+            paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+            days = working_days_between(submitted, paid)
+            
+            sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                       'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+            sla_days = sla_map.get(row['request_type'], 5)
+            
+            breach_data.append({
+                'request_number': row['request_number'],
+                'request_type': row['request_type'],
+                'department': row['department_name'],
+                'submission_date': row['submission_date'],
+                'payment_date': row['payment_date'],
+                'days_taken': days,
+                'sla_days': sla_days,
+                'status': 'Breached' if days > sla_days else 'Within SLA'
+            })
+    
+    return pd.DataFrame(breach_data)
