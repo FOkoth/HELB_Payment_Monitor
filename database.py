@@ -5,6 +5,69 @@ import streamlit as st
 
 DB_PATH = "helb_data.db"
 
+def migrate_database():
+    """Add missing columns to existing tables"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get existing columns in requests table
+    cursor.execute("PRAGMA table_info(requests)")
+    existing_columns = [column[1] for column in cursor.fetchall()]
+    
+    # Define all columns that should exist
+    required_columns = {
+        'payment_description': 'TEXT',
+        'financial_year': 'TEXT',
+        'batch_no': 'TEXT',
+        'product_type': 'TEXT',
+        'semester': 'TEXT',
+        'payment_type': 'TEXT',
+        'imprest_no': 'TEXT',
+        'supplier_name': 'TEXT',
+        'invoice_no': 'TEXT',
+        'lpo_no': 'TEXT',
+        'salary_month': 'TEXT',
+        'salary_year': 'INTEGER',
+        'customer_name': 'TEXT',
+        'customer_id': 'TEXT',
+        'surrender_number': 'TEXT',
+        'staff_name': 'TEXT',
+        'funder_name': 'TEXT',
+        'refund_reason': 'TEXT',
+        'original_payment_ref': 'TEXT',
+        'previous_imprest_no': 'TEXT',
+        'date_received': 'TEXT',
+        'date_returned': 'TEXT',
+        'payment_date': 'TEXT',
+        'payment_reference': 'TEXT',
+        'completed_by': 'TEXT',
+        'completion_notes': 'TEXT'
+    }
+    
+    # Add missing columns
+    for col_name, col_type in required_columns.items():
+        if col_name not in existing_columns:
+            try:
+                cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
+                print(f"Added column: {col_name}")
+            except Exception as e:
+                print(f"Error adding {col_name}: {e}")
+    
+    # Check and add full_name column to users table
+    cursor.execute("PRAGMA table_info(users)")
+    user_columns = [column[1] for column in cursor.fetchall()]
+    if 'full_name' not in user_columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+            print("Added column: full_name to users")
+        except Exception as e:
+            print(f"Error adding full_name: {e}")
+    
+    conn.commit()
+    conn.close()
+    print("Database migration completed!")
+
+
 def init_database():
     """Create all tables if they don't exist"""
     conn = sqlite3.connect(DB_PATH)
@@ -77,7 +140,7 @@ def init_database():
         )
     ''')
     
-    # Requests table with all tracking columns
+    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +281,9 @@ def init_database():
     
     conn.commit()
     conn.close()
+    
+    # Run migration to add missing columns to existing database
+    migrate_database()
     
     # Insert default users
     conn = sqlite3.connect(DB_PATH)
@@ -496,6 +562,23 @@ def get_dashboard_stats(financial_year=None, quarter=None):
     
     df = get_requests()
     
+    # Handle empty dataframe
+    if df.empty:
+        return {
+            'total_requests': 0,
+            'total_received': 0,
+            'total_returned': 0,
+            'total_paid': 0,
+            'total_amount': 0,
+            'avg_completion_time': 0,
+            'total_breaches': 0,
+            'breach_rate': 0,
+            'completed_count': 0
+        }
+    
+    # Make a copy to avoid warnings
+    df = df.copy()
+    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
     
@@ -511,26 +594,33 @@ def get_dashboard_stats(financial_year=None, quarter=None):
             df = df[df['submission_date_dt'].dt.month.isin([4, 5, 6])]
     
     total_requests = len(df)
-    total_received = len(df[df['date_received'].notna()])
-    total_returned = len(df[df['date_returned'].notna()])
-    total_paid = len(df[df['status'].isin(['PAID', 'CLEARED'])])
-    total_amount = df['amount'].sum()
+    
+    # Safely check for column existence
+    total_received = len(df[df['date_received'].notna()]) if 'date_received' in df.columns else 0
+    total_returned = len(df[df['date_returned'].notna()]) if 'date_returned' in df.columns else 0
+    total_paid = len(df[df['status'].isin(['PAID', 'CLEARED'])]) if 'status' in df.columns else 0
+    total_amount = df['amount'].sum() if 'amount' in df.columns else 0
     
     # Calculate breaches
     breaches = 0
     completion_times = []
-    for _, row in df.iterrows():
-        if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-            submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-            paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-            days = working_days_between(submitted, paid)
-            completion_times.append(days)
-            
-            sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
-                       'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
-            sla_days = sla_map.get(row['request_type'], 5)
-            if days > sla_days:
-                breaches += 1
+    
+    if 'status' in df.columns and 'payment_date' in df.columns and 'submission_date' in df.columns:
+        for _, row in df.iterrows():
+            if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
+                try:
+                    submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                    paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                    days = working_days_between(submitted, paid)
+                    completion_times.append(days)
+                    
+                    sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+                    sla_days = sla_map.get(row['request_type'], 5)
+                    if days > sla_days:
+                        breaches += 1
+                except:
+                    pass
     
     avg_completion_time = sum(completion_times) / len(completion_times) if completion_times else 0
     breach_rate = (breaches / total_paid * 100) if total_paid > 0 else 0
@@ -552,6 +642,9 @@ def get_department_performance(financial_year=None):
     from utils.holidays_ke import working_days_between
     
     df = get_requests()
+    if df.empty:
+        return pd.DataFrame()
+    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
     
@@ -564,14 +657,17 @@ def get_department_performance(financial_year=None):
         breaches = 0
         for _, row in dept_df.iterrows():
             if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                paid_date = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                days = working_days_between(submitted, paid_date)
-                sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
-                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
-                sla_days = sla_map.get(row['request_type'], 5)
-                if days > sla_days:
-                    breaches += 1
+                try:
+                    submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                    paid_date = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                    days = working_days_between(submitted, paid_date)
+                    sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+                    sla_days = sla_map.get(row['request_type'], 5)
+                    if days > sla_days:
+                        breaches += 1
+                except:
+                    pass
         
         performance.append({
             'department': dept,
@@ -586,6 +682,9 @@ def get_department_performance(financial_year=None):
 
 def get_trend_data(financial_year=None):
     df = get_requests()
+    if df.empty:
+        return pd.DataFrame()
+    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
     
@@ -605,29 +704,35 @@ def get_breach_analysis(financial_year=None):
     from utils.holidays_ke import working_days_between
     
     df = get_requests()
+    if df.empty:
+        return pd.DataFrame()
+    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
     
     breach_data = []
     for _, row in df.iterrows():
         if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-            submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-            paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-            days = working_days_between(submitted, paid)
-            
-            sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
-                       'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
-            sla_days = sla_map.get(row['request_type'], 5)
-            
-            breach_data.append({
-                'request_number': row['request_number'],
-                'request_type': row['request_type'],
-                'department': row['department_name'],
-                'submission_date': row['submission_date'],
-                'payment_date': row['payment_date'],
-                'days_taken': days,
-                'sla_days': sla_days,
-                'status': 'Breached' if days > sla_days else 'Within SLA'
-            })
+            try:
+                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                days = working_days_between(submitted, paid)
+                
+                sla_map = {'Student Payment': 3, 'Imprest Payment': 5, 'Petty Cash Payment': 3, 
+                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
+                sla_days = sla_map.get(row['request_type'], 5)
+                
+                breach_data.append({
+                    'request_number': row['request_number'],
+                    'request_type': row['request_type'],
+                    'department': row['department_name'],
+                    'submission_date': row['submission_date'],
+                    'payment_date': row['payment_date'],
+                    'days_taken': days,
+                    'sla_days': sla_days,
+                    'status': 'Breached' if days > sla_days else 'Within SLA'
+                })
+            except:
+                pass
     
     return pd.DataFrame(breach_data)
