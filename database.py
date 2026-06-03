@@ -217,6 +217,9 @@ def init_database():
     conn.commit()
     conn.close()
     
+    # Run migration to add any missing columns
+    migrate_database()
+    
     # Insert default users AFTER departments exist
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -250,6 +253,35 @@ def init_database():
     
     conn.commit()
     conn.close()
+
+
+def migrate_database():
+    """Add new columns to existing tables if they don't exist"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Check and add missing columns to requests table
+    cursor.execute("PRAGMA table_info(requests)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    new_columns = {
+        'payment_reference': 'TEXT',
+        'payment_date': 'TEXT',
+        'completed_by': 'TEXT',
+        'completion_notes': 'TEXT'
+    }
+    
+    for col_name, col_type in new_columns.items():
+        if col_name not in columns:
+            try:
+                cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
+                print(f"Added column: {col_name}")
+            except Exception as e:
+                print(f"Error adding {col_name}: {e}")
+    
+    conn.commit()
+    conn.close()
+    print("Database migration completed!")
 
 
 def get_departments():
