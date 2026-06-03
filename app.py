@@ -254,9 +254,7 @@ elif choice == "📝 New Request":
                     product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
                 
                 # Conditional fields based on Product Type
-                semester = None
-                payment_category = None
-                
+                # ONLY show Semester and Payment Category for Undergraduate or TVET
                 if product_type == "Undergraduate":
                     semesters = get_semesters()
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
@@ -266,11 +264,9 @@ elif choice == "📝 New Request":
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                     payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
                 else:
-                    # Jielimishe - NO semester field, NO payment category field
+                    # Jielimishe: DO NOT show Semester and DO NOT show Payment Category
                     semester = None
                     payment_category = "Tuition"
-                    # Display a quiet info (optional - can remove if you don't want any message)
-                    st.caption("Jielimishe: Tuition payment only")
                 
                 submitted = st.form_submit_button("Submit Request", use_container_width=True)
                 
@@ -284,6 +280,8 @@ elif choice == "📝 New Request":
                         errors.append("Financial Year is required")
                     if not payment_description:
                         errors.append("Payment Description is required")
+                    
+                    # Only validate semester and payment_category for Undergraduate and TVET
                     if product_type in ["Undergraduate", "TVET"]:
                         if not semester:
                             errors.append("Semester is required")
