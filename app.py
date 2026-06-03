@@ -205,7 +205,7 @@ if choice == "📊 Dashboard":
             st.plotly_chart(fig, use_container_width=True)
 
 # ================================================================
-# NEW REQUEST - COMPLETELY SEPARATED BY REQUEST TYPE
+# NEW REQUEST
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -229,174 +229,109 @@ elif choice == "📝 New Request":
             
             st.markdown("---")
             
+            # Initialize all variables to None
+            batch_no = None
+            product_type = None
+            semester = None
+            payment_category = None
+            financial_year = None
+            funder_name = None
+            imprest_no = None
+            petty_cash_no = None
+            supplier_name = None
+            invoice_no = None
+            lpo_no = None
+            surrender_no = None
+            previous_imprest_no = None
+            refund_no = None
+            refund_reason = None
+            original_payment_ref = None
+            
             # ======================================================
-            # STUDENT PAYMENT SECTION (COMPLETE)
+            # STUDENT PAYMENT
             # ======================================================
             if request_type == "Student Payment":
                 st.subheader("🎓 Student Payment Details")
                 
                 # Product Type
                 products = get_products()
-                product_type = st.selectbox("Product Type", products['name'].tolist() if not products.empty else ["Undergraduate", "TVET", "Jielimishe"])
+                if not products.empty:
+                    product_type = st.selectbox("Product Type", products['name'].tolist())
+                else:
+                    product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
                 
                 # Financial Year (for ALL)
                 financial_years = get_financial_years()
                 financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
                 
                 # Conditional fields based on Product Type
-                if product_type in ["Undergraduate", "TVET"]:
+                if product_type == "Undergraduate":
                     semesters = get_semesters()
                     semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                     payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                else:
-                    # Jielimishe - no semester, tuition only
+                
+                elif product_type == "TVET":
+                    semesters = get_semesters()
+                    semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                    payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+                
+                elif product_type == "Jielimishe":
+                    # Jielimishe: No semester, No payment category dropdown
                     semester = None
                     payment_category = "Tuition"
-                    st.info("ℹ️ Jielimishe: Tuition payment only")
+                    # No info message displayed
                 
-                # External Resource Mobilization override
+                # External Resource Mobilization department override
                 if st.session_state.user_dept == "External Resource Mobilization":
                     funders = get_funders()
-                    funder_name = st.selectbox("Funder/Partner", funders) if funders else st.text_input("Funder/Partner Name")
+                    if funders:
+                        funder_name = st.selectbox("Funder/Partner", funders)
+                    else:
+                        funder_name = st.text_input("Funder/Partner Name")
                     payment_category = "Tuition"
-                    st.info("ℹ️ External Resource Mobilization: Tuition payment only")
-                else:
-                    funder_name = None
                 
                 # Batch Number (REQUIRED for ALL student payments)
                 batch_no = st.text_input("Batch Number *")
-                
-                # Store all student payment variables
-                imprest_no = None
-                petty_cash_no = None
-                supplier_name = None
-                invoice_no = None
-                lpo_no = None
-                surrender_no = None
-                previous_imprest_no = None
-                refund_no = None
-                refund_reason = None
-                original_payment_ref = None
             
             # ======================================================
-            # IMPREST SECTION
+            # IMPREST
             # ======================================================
             elif request_type == "Imprest":
                 st.subheader("💰 Imprest Details")
                 imprest_no = st.text_input("Imprest Number *")
-                
-                # Clear other variables
-                batch_no = None
-                product_type = None
-                semester = None
-                payment_category = None
-                financial_year = None
-                funder_name = None
-                petty_cash_no = None
-                supplier_name = None
-                invoice_no = None
-                lpo_no = None
-                surrender_no = None
-                previous_imprest_no = None
-                refund_no = None
-                refund_reason = None
-                original_payment_ref = None
             
             # ======================================================
-            # PETTY CASH SECTION
+            # PETTY CASH
             # ======================================================
             elif request_type == "Petty Cash":
                 st.subheader("💵 Petty Cash Details")
                 petty_cash_no = st.text_input("Petty Cash Number *")
-                
-                # Clear other variables
-                imprest_no = None
-                batch_no = None
-                product_type = None
-                semester = None
-                payment_category = None
-                financial_year = None
-                funder_name = None
-                supplier_name = None
-                invoice_no = None
-                lpo_no = None
-                surrender_no = None
-                previous_imprest_no = None
-                refund_no = None
-                refund_reason = None
-                original_payment_ref = None
             
             # ======================================================
-            # SUPPLIER SECTION
+            # SUPPLIER
             # ======================================================
             elif request_type == "Supplier":
                 st.subheader("🏢 Supplier Payment Details")
                 supplier_name = st.text_input("Supplier Name *")
                 invoice_no = st.text_input("Invoice Number *")
                 lpo_no = st.text_input("LPO Number (optional)")
-                
-                # Clear other variables
-                imprest_no = None
-                petty_cash_no = None
-                batch_no = None
-                product_type = None
-                semester = None
-                payment_category = None
-                financial_year = None
-                funder_name = None
-                surrender_no = None
-                previous_imprest_no = None
-                refund_no = None
-                refund_reason = None
-                original_payment_ref = None
             
             # ======================================================
-            # SURRENDER SECTION
+            # SURRENDER
             # ======================================================
             elif request_type == "Surrender":
                 st.subheader("📤 Surrender Details")
                 surrender_no = st.text_input("Surrender Number *")
                 previous_imprest_no = st.text_input("Previous Imprest Number *")
-                
-                # Clear other variables
-                imprest_no = None
-                petty_cash_no = None
-                batch_no = None
-                product_type = None
-                semester = None
-                payment_category = None
-                financial_year = None
-                funder_name = None
-                supplier_name = None
-                invoice_no = None
-                lpo_no = None
-                refund_no = None
-                refund_reason = None
-                original_payment_ref = None
             
             # ======================================================
-            # REFUND SECTION
+            # REFUND
             # ======================================================
-            else:  # Refund
+            elif request_type == "Refund":
                 st.subheader("🔄 Refund Details")
                 refund_no = st.text_input("Refund Number *")
                 refund_reason = st.text_area("Reason for Refund *")
                 original_payment_ref = st.text_input("Original Payment Reference *")
-                
-                # Clear other variables
-                imprest_no = None
-                petty_cash_no = None
-                batch_no = None
-                product_type = None
-                semester = None
-                payment_category = None
-                financial_year = None
-                funder_name = None
-                supplier_name = None
-                invoice_no = None
-                lpo_no = None
-                surrender_no = None
-                previous_imprest_no = None
             
             st.markdown("---")
             submitted = st.form_submit_button("Submit Request", use_container_width=True)
@@ -417,7 +352,7 @@ elif choice == "📝 New Request":
                     if not financial_year:
                         errors.append("Financial Year is required")
                     if product_type in ["Undergraduate", "TVET"]:
-                        if 'semester' not in dir() or not semester:
+                        if not semester:
                             errors.append("Semester is required")
                         if not payment_category:
                             errors.append("Payment Category is required")
@@ -446,24 +381,24 @@ elif choice == "📝 New Request":
                         'amount': amount,
                         'payment_description': payment_description,
                         # Student Payment fields
-                        'batch_no': batch_no if request_type == "Student Payment" else None,
-                        'product_type': product_type if request_type == "Student Payment" else None,
-                        'semester': semester if request_type == "Student Payment" and product_type in ["Undergraduate", "TVET"] else None,
-                        'payment_type': payment_category if request_type == "Student Payment" else None,
-                        'financial_year': financial_year if request_type == "Student Payment" else None,
-                        'funder_name': funder_name if request_type == "Student Payment" and st.session_state.user_dept == "External Resource Mobilization" else None,
-                        # Imprest
-                        'imprest_no': imprest_no if request_type == "Imprest" else (petty_cash_no if request_type == "Petty Cash" else (refund_no if request_type == "Refund" else None)),
+                        'batch_no': batch_no,
+                        'product_type': product_type,
+                        'semester': semester,
+                        'payment_type': payment_category,
+                        'financial_year': financial_year,
+                        'funder_name': funder_name,
+                        # Imprest / Petty Cash / Refund
+                        'imprest_no': imprest_no or petty_cash_no or refund_no,
                         # Supplier fields
-                        'supplier_name': supplier_name if request_type == "Supplier" else None,
-                        'invoice_no': invoice_no if request_type == "Supplier" else None,
-                        'lpo_no': lpo_no if request_type == "Supplier" else None,
+                        'supplier_name': supplier_name,
+                        'invoice_no': invoice_no,
+                        'lpo_no': lpo_no,
                         # Surrender fields
-                        'surrender_number': surrender_no if request_type == "Surrender" else None,
-                        'previous_imprest_no': previous_imprest_no if request_type == "Surrender" else None,
+                        'surrender_number': surrender_no,
+                        'previous_imprest_no': previous_imprest_no,
                         # Refund fields
-                        'refund_reason': refund_reason if request_type == "Refund" else None,
-                        'original_payment_ref': original_payment_ref if request_type == "Refund" else None,
+                        'refund_reason': refund_reason,
+                        'original_payment_ref': original_payment_ref,
                         'status': 'SUBMITTED'
                     }
                     
@@ -522,6 +457,7 @@ elif choice == "✅ Approval Queue":
                         elif req['request_type'] == "Petty Cash":
                             st.write(f"**Petty Cash No:** {req['imprest_no']}")
                         elif req['request_type'] == "Supplier":
+                            st.write(f"**Supplier:** {req['supplier_name']}")
                             st.write(f"**Invoice No:** {req['invoice_no']}")
                         elif req['request_type'] == "Surrender":
                             st.write(f"**Surrender No:** {req['surrender_number']}")
