@@ -4,6 +4,113 @@ from datetime import datetime, date
 
 DB_PATH = "helb_data.db"
 
+def create_logs_table():
+    """Create request_logs table if it doesn't exist"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS request_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER,
+            request_number TEXT,
+            action TEXT NOT NULL,
+            status_from TEXT,
+            status_to TEXT,
+            comment TEXT,
+            performed_by TEXT,
+            performed_by_role TEXT,
+            performed_by_dept TEXT,
+            timestamp TEXT,
+            details TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def add_request_log(request_id, request_number, action, status_from, status_to, 
+                    comment, performed_by, performed_by_role, performed_by_dept, details=None):
+    """Add a log entry for a request action"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO request_logs (
+            request_id, request_number, action, status_from, status_to,
+            comment, performed_by, performed_by_role, performed_by_dept,
+            timestamp, details
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        request_id, request_number, action, status_from, status_to,
+        comment, performed_by, performed_by_role, performed_by_dept,
+        datetime.now().isoformat(), details
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_request_logs(request_id):
+    """Get all logs for a specific request"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM request_logs 
+        WHERE request_id = ? 
+        ORDER BY timestamp ASC
+    ''', (request_id,))
+    logs = cursor.fetchall()
+    conn.close()
+    
+    if logs:
+        columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
+                   'status_to', 'comment', 'performed_by', 'performed_by_role', 
+                   'performed_by_dept', 'timestamp', 'details']
+        return [dict(zip(columns, log)) for log in logs]
+    return []
+
+
+def get_returned_requests(department_name):
+    """Get all returned requests for a department"""
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        "SELECT * FROM requests WHERE status = 'RETURNED' AND department_name = ? ORDER BY date_returned DESC",
+        conn, params=(department_name,)
+    )
+    conn.close()
+    return df
+
+
+def resubmit_request(request_id, updated_data):
+    """Resubmit a returned request with new data"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Build the update query
+    set_clause = ', '.join([f"{k} = ?" for k in updated_data.keys()])
+    values = list(updated_data.values())
+    values.append(request_id)
+    
+    cursor.execute(f"UPDATE requests SET {set_clause}, last_updated = ? WHERE id = ?", 
+                   values + [datetime.now().isoformat()])
+    conn.commit()
+    conn.close()
+
+
+def get_request_by_id(request_id):
+    """Get a single request by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        columns = [description[0] for description in cursor.description]
+        result = dict(zip(columns, row))
+        conn.close()
+        return result
+    conn.close()
+    return None
+
+
 def migrate_database():
     """Add missing columns to existing tables"""
     conn = sqlite3.connect(DB_PATH)
@@ -274,6 +381,9 @@ def init_database():
     conn.commit()
     conn.close()
     
+    # Create logs table
+    create_logs_table()
+    
     # Run migration
     migrate_database()
     
@@ -453,39 +563,67 @@ def save_request(data):
     placeholders = ', '.join(['?' for _ in data])
     
     cursor.execute(f"INSERT INTO requests ({columns}) VALUES ({placeholders})", list(data.values()))
+    
+    # Add log for submission
+    add_request_log(
+        cursor.lastrowid, request_number, "SUBMITTED", None, "SUBMITTED",
+        "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name')
+    )
+    
     conn.commit()
     conn.close()
     return request_number
 
 
-def update_request_status(request_id, status, finance_comment=None, return_reason=None):
+def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
+                          performed_by=None, performed_by_role=None, performed_by_dept=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # Get current status and request number
+    cursor.execute("SELECT status, request_number FROM requests WHERE id = ?", (request_id,))
+    current = cursor.fetchone()
+    old_status = current[0] if current else None
+    request_number = current[1] if current else None
+    
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
+    action = ""
+    comment = finance_comment or return_reason
     
     if status == 'RECEIVED_BY_FINANCE':
         updates.append("date_received = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("finance_check_date = ?")
         params.append(datetime.now().isoformat())
+        action = "RECEIVED"
     elif status == 'RETURNED':
         updates.append("date_returned = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         if return_reason:
             updates.append("return_reason = ?")
             params.append(return_reason)
+        action = "RETURNED"
+    elif status == 'SUBMITTED':
+        updates.append("submission_date = ?")
+        params.append(datetime.now().strftime('%Y-%m-%d'))
+        updates.append("date_returned = ?")
+        params.append(None)
+        updates.append("return_reason = ?")
+        params.append(None)
+        action = "RESUBMITTED"
     elif status == 'PAID':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
+        action = "PAID"
     elif status == 'CLEARED':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
+        action = "CLEARED"
     
     if finance_comment:
         updates.append("finance_comment = ?")
@@ -493,6 +631,14 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     
     params.append(request_id)
     cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
+    
+    # Add log entry
+    if action:
+        add_request_log(
+            request_id, request_number, action, old_status, status,
+            comment, performed_by, performed_by_role, performed_by_dept
+        )
+    
     conn.commit()
     conn.close()
 
