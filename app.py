@@ -10,7 +10,7 @@ from database import (
     update_user_password, get_user_by_username, get_pending_duration,
     update_payment_details, get_department_requests, get_management_dashboard_stats,
     get_trend_data, get_all_departments_summary, search_by_batch_number,
-    get_all_batch_numbers, get_allowed_request_types
+    get_all_batch_numbers, get_allowed_request_types, get_reports_data
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -406,16 +406,34 @@ elif choice == "🔍 Check Payment Status":
                 <div style='background-color: #f8f9fa; padding: 1rem; border-radius: 10px; margin-bottom: 1rem; border-left: 4px solid {status_color};'>
                     <h3 style='color: {status_color}; margin: 0;'>{status_icon} {result['status']}</h3>
                     <table style='width: 100%; margin-top: 0.5rem;'>
-                        <tr><td><strong>Request Number:</strong></td><td>{result['request_number']}</td></tr>
-                        <tr><td><strong>Department:</strong></td><td>{result['department']}</td></tr>
-                        <tr><td><strong>Amount:</strong></td><td>KES {result['amount']:,.2f}</td></tr>
-                        <tr><td><strong>Submission Date:</strong></td><td>{result['submission_date']}</td></tr>
+                        <tr>
+                            <td><strong>Request Number:</strong></td>
+                            <td>{result['request_number']}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Department:</strong></td>
+                            <td>{result['department']}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Amount:</strong></td>
+                            <td>KES {result['amount']:,.2f}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Submission Date:</strong></td>
+                            <td>{result['submission_date']}</td>
+                        </tr>
                 """, unsafe_allow_html=True)
                 
                 if result['payment_date']:
                     st.markdown(f"""
-                        <tr><td><strong>Payment Date:</strong></td><td>{result['payment_date']}</td></tr>
-                        <tr><td><strong>Payment Reference:</strong></td><td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td></tr>
+                        <tr>
+                            <td><strong>Payment Date:</strong></td>
+                            <td>{result['payment_date']}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Payment Reference:</strong></td>
+                            <td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td>
+                        </tr>
                     """, unsafe_allow_html=True)
                 
                 st.markdown("</table></div>", unsafe_allow_html=True)
@@ -821,29 +839,70 @@ elif choice == "✅ Approval Queue":
         st.error("Access denied. Finance only.")
 
 # ================================================================
-# REPORTS
+# REPORTS - DEPARTMENT LEVEL ACCESS ONLY
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<h1 style='color: #00843D;'>📑 Reports</h1>", unsafe_allow_html=True)
-    df = get_requests()
+    
+    # Get filtered data based on user role
+    df = get_reports_data(st.session_state.user_role, st.session_state.user_dept)
+    
     if df.empty:
-        st.info("No data")
+        if st.session_state.user_role not in ["ADMIN", "MANAGEMENT", "FINANCE"]:
+            st.info(f"No requests found for your department: {st.session_state.user_dept}")
+        else:
+            st.info("No data available")
     else:
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Export to CSV", csv, "helb_requests.csv", "text/csv", use_container_width=True)
+        # Show info based on role
+        if st.session_state.user_role == "ADMIN":
+            st.info("📊 Admin View: Showing all departments' requests")
+        elif st.session_state.user_role == "MANAGEMENT":
+            st.info("📊 Management View: Showing all departments' requests")
+        elif st.session_state.user_role == "FINANCE":
+            st.info("📊 Finance View: Showing all departments' requests")
+        else:
+            st.info(f"📊 Department View: Showing only {st.session_state.user_dept} department requests")
         
+        # Export button
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Export to CSV", csv, f"helb_requests_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv", use_container_width=True)
+        
+        st.markdown("---")
         st.subheader("📊 Summary Statistics")
+        
         col1, col2 = st.columns(2)
         with col1:
             st.write("**By Status:**")
             status_counts = df['status'].value_counts().reset_index()
             status_counts.columns = ['Status', 'Count']
             st.dataframe(status_counts, use_container_width=True, hide_index=True)
+        
         with col2:
-            st.write("**By Department:**")
-            dept_counts = df['department_name'].value_counts().reset_index()
-            dept_counts.columns = ['Department', 'Count']
-            st.dataframe(dept_counts, use_container_width=True, hide_index=True)
+            st.write("**By Request Type:**")
+            type_counts = df['request_type'].value_counts().reset_index()
+            type_counts.columns = ['Request Type', 'Count']
+            st.dataframe(type_counts, use_container_width=True, hide_index=True)
+        
+        # Financial Year Summary
+        if 'financial_year' in df.columns and df['financial_year'].notna().any():
+            st.subheader("📅 Financial Year Summary")
+            fy_summary = df.groupby('financial_year').agg({
+                'amount': 'sum',
+                'request_number': 'count'
+            }).reset_index()
+            fy_summary.columns = ['Financial Year', 'Total Amount', 'Request Count']
+            fy_summary['Total Amount'] = fy_summary['Total Amount'].apply(lambda x: f"KES {x:,.2f}")
+            st.dataframe(fy_summary, use_container_width=True, hide_index=True)
+        
+        # Detailed data
+        st.subheader("📋 Detailed Requests")
+        display_cols = ['request_number', 'request_type', 'amount', 'status', 'submission_date']
+        if 'payment_date' in df.columns:
+            display_cols.append('payment_date')
+        if 'payment_reference' in df.columns:
+            display_cols.append('payment_reference')
+        
+        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
 # ================================================================
 # ADMIN PANEL
