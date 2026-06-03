@@ -746,3 +746,25 @@ def get_allowed_request_types(user_role, user_dept):
         allowed.append("Refund Payment")
     
     return allowed
+
+
+# ================================================================
+# REPORTS QUERIES (DEPARTMENT LEVEL)
+# ================================================================
+
+def get_reports_data(user_role, user_dept):
+    """Get reports data based on user role - department users only see their own data"""
+    df = get_requests()
+    
+    if df.empty:
+        return df
+    
+    if user_role == "ADMIN":
+        return df
+    elif user_role == "MANAGEMENT":
+        return df
+    elif user_role == "FINANCE":
+        return df
+    else:
+        # Department users see only their own department
+        return df[df['department_name'] == user_dept]
