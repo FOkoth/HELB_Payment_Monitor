@@ -45,7 +45,7 @@ def init_database():
         )
     ''')
     
-    # Updated Users table (with department_id)
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +58,7 @@ def init_database():
         )
     ''')
     
-    # Updated Requests table (with additional fields)
+    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,51 +69,52 @@ def init_database():
             submitted_by TEXT NOT NULL,
             submission_date TEXT NOT NULL,
             amount REAL NOT NULL,
-            
-            -- Payment specific
             imprest_no TEXT,
             batch_no TEXT,
             supplier_name TEXT,
             invoice_no TEXT,
             lpo_no TEXT,
-            
-            -- Student payment specific
             product_type TEXT,
             payment_type TEXT,
             funder_name TEXT,
-            
-            -- Refund specific
             refund_reason TEXT,
             original_payment_ref TEXT,
-            
-            -- Surrender specific
             surrender_number TEXT,
             previous_imprest_no TEXT,
-            
-            -- Workflow
-            status TEXT DEFAULT 'DRAFT',
+            status TEXT DEFAULT 'SUBMITTED',
             finance_comment TEXT,
             return_reason TEXT,
             finance_check_date TEXT,
             completion_date TEXT,
-            
-            -- Tracking
             last_updated TEXT
         )
     ''')
     
-    # Insert default departments
+    # SLA Config table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sla_config (
+            request_type TEXT PRIMARY KEY,
+            sla_days INTEGER NOT NULL
+        )
+    ''')
+    
+    # Insert default departments (alphabetically)
     cursor.execute("SELECT COUNT(*) FROM departments")
     if cursor.fetchone()[0] == 0:
         default_depts = [
-            ('Lending', 1, 0, 0, 1, 1, 0, 1, 0, 0),
-            ('External Resource Mobilization', 1, 0, 0, 1, 1, 0, 0, 1, 0),
+            ('CEO\'s Office', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Corporate Communication', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('Debt Management', 0, 0, 0, 0, 0, 1, 0, 0, 0),
-            ('Supply Chain Management', 0, 0, 1, 0, 0, 0, 0, 0, 0),
-            ('Academic Affairs', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('External Resource Mobilization', 1, 0, 0, 1, 1, 0, 0, 1, 0),
+            ('Field Services', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('Finance', 1, 1, 0, 0, 0, 0, 0, 0, 1),
-            ('HR', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Human Resource', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('ICT', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Internal Audit', 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ('Legal Services', 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ('Lending', 1, 0, 0, 1, 1, 0, 1, 0, 0),
+            ('Strategy', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Supply Chain Management', 0, 0, 1, 0, 0, 0, 0, 0, 0),
         ]
         for dept in default_depts:
             cursor.execute('''
@@ -132,7 +133,6 @@ def init_database():
             ('Undergraduate', 'LOAN', 1),
             ('TVET', 'LOAN', 1),
             ('Jielimishe', 'SCHOLARSHIP', 0),
-            ('Partner Funds', 'FUNDER', 0),
         ]
         cursor.executemany(
             "INSERT INTO products (name, category, has_payment_type) VALUES (?, ?, ?)",
@@ -144,39 +144,11 @@ def init_database():
     if cursor.fetchone()[0] == 0:
         default_funders = [
             ('KMTC',), ('World Bank',), ('AfDB',), ('UNESCO',), 
-            ('Mastercard Foundation',), ('KOICA',), ('JICA',)
+            ('Mastercard Foundation',), ('KOICA',), ('JICA',), ('USAID',), ('GIZ',)
         ]
         cursor.executemany("INSERT INTO funders (name) VALUES (?)", default_funders)
     
-    # Get department IDs for default users
-    cursor.execute("SELECT id, name FROM departments")
-    depts = {name: id for id, name in cursor.fetchall()}
-    
-    # Insert default users
-    cursor.execute("SELECT COUNT(*) FROM users")
-    if cursor.fetchone()[0] == 0:
-        default_users = [
-            ('lending_user', 'lend123', 'DEPARTMENT', depts.get('Lending'), 'Lending Officer'),
-            ('erm_user', 'erm123', 'DEPARTMENT', depts.get('External Resource Mobilization'), 'ERM Officer'),
-            ('debt_user', 'debt123', 'DEPARTMENT', depts.get('Debt Management'), 'Debt Officer'),
-            ('scm_user', 'scm123', 'DEPARTMENT', depts.get('Supply Chain Management'), 'SCM Officer'),
-            ('academic_user', 'acad123', 'DEPARTMENT', depts.get('Academic Affairs'), 'Academic Officer'),
-            ('finance_user', 'fin123', 'FINANCE', depts.get('Finance'), 'Finance Officer'),
-            ('admin', 'admin123', 'ADMIN', None, 'Admin User'),
-        ]
-        cursor.executemany(
-            "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
-            default_users
-        )
-    
-    # SLA Config table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sla_config (
-            request_type TEXT PRIMARY KEY,
-            sla_days INTEGER NOT NULL
-        )
-    ''')
-    
+    # Insert SLA defaults
     cursor.execute("SELECT COUNT(*) FROM sla_config")
     if cursor.fetchone()[0] == 0:
         sla_defaults = [
@@ -190,6 +162,40 @@ def init_database():
         cursor.executemany(
             "INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)",
             sla_defaults
+        )
+    
+    conn.commit()
+    conn.close()
+    
+    # Insert default users AFTER departments exist
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get department IDs
+    cursor.execute("SELECT id, name FROM departments")
+    dept_map = {name: id for id, name in cursor.fetchall()}
+    
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        default_users = [
+            ('admin', 'admin123', 'ADMIN', None, 'System Administrator'),
+            ('finance_user', 'fin123', 'FINANCE', dept_map.get('Finance'), 'Finance Officer'),
+            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer'),
+            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer'),
+            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer'),
+            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer'),
+            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer'),
+            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer'),
+            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer'),
+            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer'),
+            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer'),
+            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer'),
+            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office'),
+            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer'),
+        ]
+        cursor.executemany(
+            "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
+            default_users
         )
     
     conn.commit()
@@ -214,9 +220,9 @@ def get_funders():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name FROM funders ORDER BY name", conn)
     conn.close()
-    return df['name'].tolist()
+    return df['name'].tolist() if not df.empty else []
 
-def get_user_department(user_id):
+def get_user_department(username):
     """Get user's department details"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -224,10 +230,10 @@ def get_user_department(user_id):
         SELECT d.* FROM users u
         JOIN departments d ON u.department_id = d.id
         WHERE u.username = ?
-    ''', (user_id,))
-    dept = cursor.fetchone()
+    ''', (username,))
+    result = cursor.fetchone()
     conn.close()
-    return dept
+    return result
 
 def get_all_users():
     """Get all users with department names"""
@@ -236,6 +242,7 @@ def get_all_users():
         SELECT u.username, u.role, d.name as department, u.full_name 
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
+        ORDER BY u.username
     '''
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -282,9 +289,9 @@ def get_department_permissions(dept_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM departments WHERE id = ?', (dept_id,))
-    dept = cursor.fetchone()
+    result = cursor.fetchone()
     conn.close()
-    return dept
+    return result
 
 def get_requests(filters=None):
     """Fetch requests with optional filters"""
@@ -347,12 +354,16 @@ def authenticate_user(username, password):
     """Verify login credentials"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, d.is_finance_dept
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.username = ? AND u.password = ?
-    ''', (username, password))
-    user = cursor.fetchone()
-    conn.close()
-    return user if user else None
+    try:
+        cursor.execute('''
+            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, COALESCE(d.is_finance_dept, 0) as is_finance_dept
+            FROM users u
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE u.username = ? AND u.password = ?
+        ''', (username, password))
+        user = cursor.fetchone()
+        conn.close()
+        return user if user else None
+    except Exception as e:
+        conn.close()
+        return None
