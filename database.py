@@ -459,6 +459,20 @@ def add_product(name, category, has_payment_type, has_semester):
         conn.close()
 
 
+def delete_product(product_id):
+    """Delete a product by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+
 def get_financial_years():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
@@ -471,6 +485,20 @@ def add_financial_year(year_name):
     cursor = conn.cursor()
     try:
         cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, 1)", (year_name,))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+
+def delete_financial_year(year_id):
+    """Delete a financial year by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM financial_years WHERE id = ?", (year_id,))
         conn.commit()
         return True
     except:
@@ -499,11 +527,25 @@ def add_semester(semester_name):
         conn.close()
 
 
+def delete_semester(semester_id):
+    """Delete a semester by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM semesters WHERE id = ?", (semester_id,))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+
 def get_funders():
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT name FROM funders ORDER BY name", conn)
+    df = pd.read_sql_query("SELECT id, name FROM funders ORDER BY name", conn)
     conn.close()
-    return df['name'].tolist() if not df.empty else []
+    return df
 
 
 def add_funder(funder_name):
@@ -511,6 +553,20 @@ def add_funder(funder_name):
     cursor = conn.cursor()
     try:
         cursor.execute("INSERT INTO funders (name) VALUES (?)", (funder_name,))
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+
+def delete_funder(funder_id):
+    """Delete a funder by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM funders WHERE id = ?", (funder_id,))
         conn.commit()
         return True
     except:
