@@ -565,7 +565,8 @@ def display_transaction_logs(request_id):
                 st.markdown(f"<div class='log-submitted'>📝 **{timestamp}** - Submitted by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RECEIVED':
                 st.markdown(f"<div class='log-received'>📥 **{timestamp}** - Received by {log['performed_by']}</div>", unsafe_allow_html=True)
-            elif action in ['Payment Prepared', 'Payment Verified', 'Payment Approved', 'Payment Authorized']:
+            elif action in ['Payment Prepared', 'Payment Verified', 'Payment Approved', 'Payment Authorized',
+                           'First Verification', 'Second Verification', 'Surrender Approval', 'Surrender Posting']:
                 st.markdown(f"<div class='log-stage'>⚙️ **{timestamp}** - {action} by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RETURNED':
                 st.markdown(f"<div class='log-returned'>↩️ **{timestamp}** - Returned by {log['performed_by']}</div>", unsafe_allow_html=True)
@@ -581,7 +582,7 @@ def display_approval_stages(request_id, main_category):
     if main_category == "Submit Payment Request":
         stages = ['Received', 'Prepared', 'Verified', 'Approved', 'Authorized', 'Paid']
     else:
-        stages = ['Received', 'Verified', 'Approved', 'Authorized', 'Cleared']
+        stages = ['Received', 'First Verification', 'Second Verification', 'Approval', 'Posting', 'Cleared']
     
     conn = sqlite3.connect("helb_data.db")
     cursor = conn.cursor()
@@ -598,9 +599,10 @@ def display_approval_stages(request_id, main_category):
         'PAYMENT_APPROVED': 'Approved',
         'PAYMENT_AUTHORIZED': 'Authorized',
         'PAID': 'Paid',
-        'SURRENDER_VERIFIED': 'Verified',
-        'SURRENDER_APPROVED': 'Approved',
-        'SURRENDER_AUTHORIZED': 'Authorized',
+        'SURRENDER_FIRST_VERIFICATION': 'First Verification',
+        'SURRENDER_SECOND_VERIFICATION': 'Second Verification',
+        'SURRENDER_APPROVAL': 'Approval',
+        'SURRENDER_POSTING': 'Posting',
         'CLEARED': 'Cleared'
     }
     current_stage = status_map.get(result[0], '')
@@ -633,7 +635,7 @@ if choice == "📊 Department Dashboard":
         
         with tab1:
             total = len(df)
-            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
+            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])])
             completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
             amount = df['amount'].sum()
             
@@ -647,7 +649,10 @@ if choice == "📊 Department Dashboard":
             for _, row in df.head(15).iterrows():
                 if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                     tat = calculate_tat(row['submission_date'], row['payment_date'])
-                    status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                    if row['status'] == 'PAID':
+                        status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                    else:
+                        status_badge = f'<span class="status-cleared">✅ Cleared (TAT: {tat} days)</span>'
                 else:
                     pending_days = calculate_tat(row['submission_date'])
                     status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
@@ -683,7 +688,7 @@ elif choice == "📈 Management Dashboard":
         
         with tab1:
             total = len(df)
-            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
+            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])])
             completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
             amount = df['amount'].sum()
             
@@ -834,7 +839,10 @@ elif choice == "🔍 Check Payment Status":
                 for _, row in results.iterrows():
                     if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                         tat = calculate_tat(row['submission_date'], row['payment_date'])
-                        status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                        if row['status'] == 'PAID':
+                            status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                        else:
+                            status_badge = f'<span class="status-cleared">✅ Cleared (TAT: {tat} days)</span>'
                     else:
                         pending_days = calculate_tat(row['submission_date'])
                         status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
@@ -1217,6 +1225,7 @@ elif choice == "📝 New Request":
             # Surrender
             elif main_category == "Submit Surrender":
                 with st.form(key="surrender_form"):
+                    st.subheader("📤 Surrender Details")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.text_input("Department", value=st.session_state.user_dept, disabled=True)
@@ -1260,7 +1269,10 @@ elif choice == "📋 My Requests":
             for _, row in user_requests.iterrows():
                 if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                     tat = calculate_tat(row['submission_date'], row['payment_date'])
-                    status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                    if row['status'] == 'PAID':
+                        status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                    else:
+                        status_badge = f'<span class="status-cleared">✅ Cleared (TAT: {tat} days)</span>'
                 else:
                     pending_days = calculate_tat(row['submission_date'])
                     status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
@@ -1298,7 +1310,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE
+# APPROVAL QUEUE - WITH SEPARATE PAYMENT AND SURRENDER WORKFLOWS
 # ================================================================
 elif choice == "✅ Approval Queue":
     if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
@@ -1309,102 +1321,200 @@ elif choice == "✅ Approval Queue":
             st.info(f"📋 {pending_confirmation} request(s) pending confirmation")
         
         df = get_requests()
-        pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
         
-        if pending.empty:
+        payment_pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
+        surrender_pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
+        
+        if payment_pending.empty and surrender_pending.empty:
             st.info("No pending requests.")
         else:
-            for idx, (_, req) in enumerate(pending.iterrows()):
-                with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']}"):
-                    st.write(f"**Amount:** KES {req['amount']:,.2f}")
-                    st.write(f"**Submitted:** {req['submission_date']}")
-                    
-                    if req['status'] == 'SUBMITTED':
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            checklist_approvals = st.checkbox("✓ Approvals", key=f"app_{idx}")
-                            checklist_documents = st.checkbox("✓ Documents", key=f"doc_{idx}")
-                        with col2:
-                            pwd = st.text_input("Finance Password", type="password", key=f"pwd_{idx}")
-                            if st.button(f"📋 Receive Request", key=f"confirm_{idx}"):
-                                if checklist_approvals and checklist_documents:
+            # Payment Requests Section
+            if not payment_pending.empty:
+                st.markdown("### 💰 Payment Requests")
+                for idx, (_, req) in enumerate(payment_pending.iterrows()):
+                    with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']}"):
+                        st.write(f"**Amount:** KES {req['amount']:,.2f}")
+                        st.write(f"**Submitted:** {req['submission_date']}")
+                        
+                        if req['status'] == 'SUBMITTED':
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                checklist_approvals = st.checkbox("✓ Approvals", key=f"pay_app_{idx}")
+                                checklist_documents = st.checkbox("✓ Documents", key=f"pay_doc_{idx}")
+                            with col2:
+                                pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_{idx}")
+                                if st.button(f"📋 Receive Request", key=f"pay_receive_{idx}"):
+                                    if checklist_approvals and checklist_documents:
+                                        if pwd and verify_finance_password(pwd):
+                                            update_request_status(req['id'], 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
+                                            st.success(f"Request received!")
+                                            st.rerun()
+                                        else:
+                                            st.error("Incorrect password!")
+                                    else:
+                                        st.error("Check both boxes!")
+                            
+                            reason = st.text_input("Return Reason", key=f"pay_ret_{idx}")
+                            if st.button(f"↩️ Return Request", key=f"pay_return_{idx}"):
+                                if reason:
                                     if pwd and verify_finance_password(pwd):
-                                        update_request_status(req['id'], 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
-                                        st.success(f"Request received!")
+                                        update_request_status(req['id'], 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'RECEIVED_BY_FINANCE':
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_prep_{idx}")
+                            if st.button(f"📋 Prepare Payment", key=f"pay_prepare_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'PAYMENT_PREPARED', performed_by=st.session_state.username)
+                                    st.success(f"Payment prepared!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'PAYMENT_PREPARED':
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_ver_{idx}")
+                            if st.button(f"✅ Verify Payment", key=f"pay_verify_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
+                                    st.success(f"Payment verified!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'PAYMENT_VERIFIED':
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_app_{idx}")
+                            if st.button(f"✅ Approve Payment", key=f"pay_approve_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'PAYMENT_APPROVED', performed_by=st.session_state.username)
+                                    st.success(f"Payment approved!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'PAYMENT_APPROVED':
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_auth_{idx}")
+                            if st.button(f"✅ Authorize Payment", key=f"pay_authorize_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
+                                    st.success(f"Payment authorized!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'PAYMENT_AUTHORIZED':
+                            payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{idx}")
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{idx}")
+                            if st.button(f"💰 Mark as Paid", key=f"pay_paid_{idx}"):
+                                if payment_ref:
+                                    if pwd and verify_finance_password(pwd):
+                                        update_request_status(req['id'], 'PAID', performed_by=st.session_state.username)
+                                        update_payment_details(req['id'], payment_ref)
+                                        tat = calculate_tat(req['submission_date'], datetime.now().strftime('%Y-%m-%d'))
+                                        st.balloons()
+                                        st.success(f"Payment completed! TAT: {tat} working days")
                                         st.rerun()
                                     else:
                                         st.error("Incorrect password!")
                                 else:
-                                    st.error("Check both boxes!")
+                                    st.error("Enter reference!")
+            
+            # Surrender Requests Section
+            if not surrender_pending.empty:
+                st.markdown("### 📤 Surrender Requests")
+                for idx, (_, req) in enumerate(surrender_pending.iterrows()):
+                    with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']}"):
+                        st.write(f"**Amount:** KES {req['amount']:,.2f}")
+                        st.write(f"**Submitted:** {req['submission_date']}")
                         
-                        reason = st.text_input("Return Reason", key=f"ret_{idx}")
-                        if st.button(f"↩️ Return Request", key=f"return_{idx}"):
-                            if reason:
+                        if req['status'] == 'SUBMITTED':
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                checklist_approvals = st.checkbox("✓ Approvals", key=f"surr_app_{idx}")
+                                checklist_documents = st.checkbox("✓ Documents", key=f"surr_doc_{idx}")
+                            with col2:
+                                pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_{idx}")
+                                if st.button(f"📋 Receive Surrender", key=f"surr_receive_{idx}"):
+                                    if checklist_approvals and checklist_documents:
+                                        if pwd and verify_finance_password(pwd):
+                                            update_request_status(req['id'], 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
+                                            st.success(f"Surrender received!")
+                                            st.rerun()
+                                        else:
+                                            st.error("Incorrect password!")
+                                    else:
+                                        st.error("Check both boxes!")
+                            
+                            reason = st.text_input("Return Reason", key=f"surr_ret_{idx}")
+                            if st.button(f"↩️ Return Request", key=f"surr_return_{idx}"):
+                                if reason:
+                                    if pwd and verify_finance_password(pwd):
+                                        update_request_status(req['id'], 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'RECEIVED_BY_FINANCE':
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_first_{idx}")
+                            if st.button(f"🔍 First Verification", key=f"surr_first_verify_{idx}"):
                                 if pwd and verify_finance_password(pwd):
-                                    update_request_status(req['id'], 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
-                                    st.warning(f"Request returned!")
+                                    update_request_status(req['id'], 'SURRENDER_FIRST_VERIFICATION', performed_by=st.session_state.username)
+                                    st.success(f"First verification completed!")
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                    
-                    elif req['status'] == 'RECEIVED_BY_FINANCE':
-                        pwd = st.text_input("Finance Password", type="password", key=f"pwd_prep_{idx}")
-                        if st.button(f"📋 Prepare Payment", key=f"prepare_{idx}"):
-                            if pwd and verify_finance_password(pwd):
-                                update_request_status(req['id'], 'PAYMENT_PREPARED', performed_by=st.session_state.username)
-                                st.success(f"Payment prepared!")
-                                st.rerun()
-                            else:
-                                st.error("Incorrect password!")
-                    
-                    elif req['status'] == 'PAYMENT_PREPARED':
-                        pwd = st.text_input("Finance Password", type="password", key=f"pwd_ver_{idx}")
-                        if st.button(f"✅ Verify Payment", key=f"verify_{idx}"):
-                            if pwd and verify_finance_password(pwd):
-                                update_request_status(req['id'], 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
-                                st.success(f"Payment verified!")
-                                st.rerun()
-                            else:
-                                st.error("Incorrect password!")
-                    
-                    elif req['status'] == 'PAYMENT_VERIFIED':
-                        pwd = st.text_input("Finance Password", type="password", key=f"pwd_app_{idx}")
-                        if st.button(f"✅ Approve Payment", key=f"approve_{idx}"):
-                            if pwd and verify_finance_password(pwd):
-                                update_request_status(req['id'], 'PAYMENT_APPROVED', performed_by=st.session_state.username)
-                                st.success(f"Payment approved!")
-                                st.rerun()
-                            else:
-                                st.error("Incorrect password!")
-                    
-                    elif req['status'] == 'PAYMENT_APPROVED':
-                        pwd = st.text_input("Finance Password", type="password", key=f"pwd_auth_{idx}")
-                        if st.button(f"✅ Authorize Payment", key=f"authorize_{idx}"):
-                            if pwd and verify_finance_password(pwd):
-                                update_request_status(req['id'], 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
-                                st.success(f"Payment authorized!")
-                                st.rerun()
-                            else:
-                                st.error("Incorrect password!")
-                    
-                    elif req['status'] == 'PAYMENT_AUTHORIZED':
-                        payment_ref = st.text_input("Payment Reference", key=f"ref_{idx}")
-                        pwd = st.text_input("Finance Password", type="password", key=f"pwd_pay_{idx}")
-                        if st.button(f"💰 Mark as Paid", key=f"paid_{idx}"):
-                            if payment_ref:
+                        
+                        elif req['status'] == 'SURRENDER_FIRST_VERIFICATION':
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_second_{idx}")
+                            if st.button(f"🔍 Second Verification", key=f"surr_second_verify_{idx}"):
                                 if pwd and verify_finance_password(pwd):
-                                    update_request_status(req['id'], 'PAID', performed_by=st.session_state.username)
-                                    update_payment_details(req['id'], payment_ref)
-                                    tat = calculate_tat(req['submission_date'], datetime.now().strftime('%Y-%m-%d'))
-                                    st.balloons()
-                                    st.success(f"Payment completed! TAT: {tat} working days")
+                                    update_request_status(req['id'], 'SURRENDER_SECOND_VERIFICATION', performed_by=st.session_state.username)
+                                    st.success(f"Second verification completed!")
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                            else:
-                                st.error("Enter reference!")
+                        
+                        elif req['status'] == 'SURRENDER_SECOND_VERIFICATION':
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_app_{idx}")
+                            if st.button(f"✅ Approve Surrender", key=f"surr_approve_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'SURRENDER_APPROVAL', performed_by=st.session_state.username)
+                                    st.success(f"Surrender approved!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'SURRENDER_APPROVAL':
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_post_{idx}")
+                            if st.button(f"📋 Post Surrender", key=f"surr_post_{idx}"):
+                                if pwd and verify_finance_password(pwd):
+                                    update_request_status(req['id'], 'SURRENDER_POSTING', performed_by=st.session_state.username)
+                                    st.success(f"Surrender posted!")
+                                    st.rerun()
+                                else:
+                                    st.error("Incorrect password!")
+                        
+                        elif req['status'] == 'SURRENDER_POSTING':
+                            reference = st.text_input("Reference Number", key=f"surr_ref_{idx}")
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_clear_{idx}")
+                            if st.button(f"✅ Mark as Cleared", key=f"surr_cleared_{idx}"):
+                                if reference:
+                                    if pwd and verify_finance_password(pwd):
+                                        update_request_status(req['id'], 'CLEARED', performed_by=st.session_state.username)
+                                        update_payment_details(req['id'], reference)
+                                        tat = calculate_tat(req['submission_date'], datetime.now().strftime('%Y-%m-%d'))
+                                        st.balloons()
+                                        st.success(f"Surrender cleared! TAT: {tat} working days")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Enter reference number!")
     else:
-        st.error("Access denied.")
+        st.error("Access denied. Finance only.")
 
 
 # ================================================================
