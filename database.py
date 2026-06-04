@@ -686,6 +686,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             params.append(None)
         action = "RESUBMITTED"
     
+    # Payment statuses
     elif status == 'PAYMENT_PREPARED':
         action = "Payment Prepared"
     
@@ -697,6 +698,19 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     
     elif status == 'PAYMENT_AUTHORIZED':
         action = "Payment Authorized"
+    
+    # Surrender statuses
+    elif status == 'SURRENDER_FIRST_VERIFICATION':
+        action = "First Verification"
+    
+    elif status == 'SURRENDER_SECOND_VERIFICATION':
+        action = "Second Verification"
+    
+    elif status == 'SURRENDER_APPROVAL':
+        action = "Surrender Approval"
+    
+    elif status == 'SURRENDER_POSTING':
+        action = "Surrender Posting"
     
     elif status == 'PAID':
         if 'payment_date' in existing_columns:
