@@ -614,7 +614,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST - WITH MAIN CATEGORIES AND FIXED STUDENT PAYMENT
+# NEW REQUEST - WITH PROPER CONDITIONAL STUDENT PAYMENT FIELDS
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -662,29 +662,43 @@ elif choice == "📝 New Request":
                 # ======================================================
                 if main_category == "Submit Payment Request":
                     
-                    # STUDENT PAYMENT - WITH FULL FIELDS
+                    # STUDENT PAYMENT - WITH PROPER CONDITIONAL FIELDS
                     if selected_type == "Student Payment":
                         st.subheader("🎓 Student Payment Details")
                         
+                        # Product Type selection (OUTSIDE form for dynamic updates)
                         products = get_products()
                         if not products.empty:
-                            product_type = st.selectbox("Product Type", products['name'].tolist())
+                            product_type = st.selectbox("Product Type", products['name'].tolist(), key="student_product_type")
                         else:
-                            product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"])
+                            product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"], key="student_product_type")
                         
+                        st.markdown("---")
+                        
+                        # Conditional fields based on Product Type
                         semester = None
                         payment_category = None
                         
-                        # Show Semester and Payment Category ONLY for Undergraduate and TVET
-                        if product_type in ["Undergraduate", "TVET"]:
+                        if product_type == "Undergraduate":
+                            st.markdown("**Undergraduate Payment Details**")
                             semesters = get_semesters()
                             semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                             payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+                        
+                        elif product_type == "TVET":
+                            st.markdown("**TVET Payment Details**")
+                            semesters = get_semesters()
+                            semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                            payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+                        
                         else:
-                            # Jielimishe - no semester, tuition only
+                            # Jielimishe - No semester, no payment category
                             semester = None
                             payment_category = "Tuition"
                         
+                        st.markdown("---")
+                        
+                        # Batch Number (for ALL student payments)
                         batch_no = st.text_input("Batch No.", placeholder="Enter batch number")
                         
                         request_data = {
@@ -840,8 +854,14 @@ elif choice == "📝 New Request":
                     
                     # Validation based on type
                     if main_category == "Submit Payment Request":
-                        if selected_type == "Student Payment" and not request_data.get('batch_no'):
-                            errors.append("Batch No. is required")
+                        if selected_type == "Student Payment":
+                            if not request_data.get('batch_no'):
+                                errors.append("Batch No. is required")
+                            if request_data.get('product_type') in ["Undergraduate", "TVET"]:
+                                if not request_data.get('semester'):
+                                    errors.append("Semester is required")
+                                if not request_data.get('payment_type'):
+                                    errors.append("Payment Category is required")
                         elif selected_type == "Imprest" and not request_data.get('imprest_no'):
                             errors.append("Imprest No. is required")
                         elif selected_type == "Petty Cash" and not request_data.get('imprest_no'):
