@@ -113,52 +113,12 @@ def get_request_by_id(request_id):
     return None
 
 
-def migrate_database():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA table_info(requests)")
-    existing_columns = [column[1] for column in cursor.fetchall()]
-    
-    required_columns = {
-        'payment_description': 'TEXT', 'financial_year': 'TEXT', 'batch_no': 'TEXT',
-        'product_type': 'TEXT', 'semester': 'TEXT', 'payment_type': 'TEXT',
-        'imprest_no': 'TEXT', 'supplier_name': 'TEXT', 'invoice_no': 'TEXT',
-        'lpo_no': 'TEXT', 'salary_month': 'TEXT', 'salary_year': 'INTEGER',
-        'customer_name': 'TEXT', 'customer_id': 'TEXT', 'surrender_number': 'TEXT',
-        'staff_name': 'TEXT', 'funder_name': 'TEXT', 'refund_reason': 'TEXT',
-        'original_payment_ref': 'TEXT', 'previous_imprest_no': 'TEXT',
-        'date_received': 'TEXT', 'date_returned': 'TEXT', 'payment_date': 'TEXT',
-        'payment_reference': 'TEXT', 'completed_by': 'TEXT', 'completion_notes': 'TEXT',
-        'finance_checklist_approvals': 'INTEGER DEFAULT 0',
-        'finance_checklist_documents': 'INTEGER DEFAULT 0',
-        'finance_checklist_comments': 'TEXT', 'date_confirmed_by_finance': 'TEXT',
-        'main_category': 'TEXT', 'mileage_claim_details': 'TEXT', 'training_details': 'TEXT',
-        'professional_body': 'TEXT', 'direct_payment_details': 'TEXT'
-    }
-    
-    for col_name, col_type in required_columns.items():
-        if col_name not in existing_columns:
-            try:
-                cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
-            except:
-                pass
-    
-    cursor.execute("PRAGMA table_info(users)")
-    user_columns = [column[1] for column in cursor.fetchall()]
-    if 'full_name' not in user_columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
-        except:
-            pass
-    
-    conn.commit()
-    conn.close()
-
-
 def init_database():
+    """Create all tables if they don't exist"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # Departments table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS departments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +135,7 @@ def init_database():
         )
     ''')
     
+    # Products table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -186,6 +147,7 @@ def init_database():
         )
     ''')
     
+    # Funders table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS funders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +155,7 @@ def init_database():
         )
     ''')
     
+    # Financial Years table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS financial_years (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,6 +164,7 @@ def init_database():
         )
     ''')
     
+    # Semesters table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS semesters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,6 +172,7 @@ def init_database():
         )
     ''')
     
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,6 +185,7 @@ def init_database():
         )
     ''')
     
+    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -273,6 +239,7 @@ def init_database():
         )
     ''')
     
+    # SLA Config table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sla_config (
             request_type TEXT PRIMARY KEY,
@@ -356,8 +323,8 @@ def init_database():
     conn.commit()
     conn.close()
     
+    # Create logs table
     create_logs_table()
-    migrate_database()
     
     # Insert default users
     conn = sqlite3.connect(DB_PATH)
@@ -648,7 +615,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     current = cursor.fetchone()
     old_status = current[0] if current else None
     request_number = current[1] if current else None
-    main_category = current[2] if current else None
     
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
@@ -688,17 +654,8 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         params.append(None)
         action = "RESUBMITTED"
     
-    elif status == 'PAYMENT_PREPARED':
-        action = "PAYMENT_PREPARED"
-    
-    elif status == 'PAYMENT_VERIFIED':
-        action = "PAYMENT_VERIFIED"
-    
-    elif status == 'PAYMENT_APPROVED':
-        action = "PAYMENT_APPROVED"
-    
-    elif status == 'PAYMENT_AUTHORIZED':
-        action = "PAYMENT_AUTHORIZED"
+    elif status in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED']:
+        action = status
     
     elif status == 'PAID':
         updates.append("payment_date = ?")
