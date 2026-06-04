@@ -753,24 +753,28 @@ def get_time_lapsed_from_confirmation(request_id):
     """Calculate time lapsed from finance confirmation to completion"""
     from utils.holidays_ke import working_days_between
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT date_confirmed_by_finance, payment_date, completion_date FROM requests WHERE id = ?", (request_id,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if result and result[0]:
-        confirmed_date = datetime.strptime(result[0], '%Y-%m-%d').date()
-        if result[1]:  # payment_date exists
-            completion_date = datetime.strptime(result[1], '%Y-%m-%d').date()
-            return working_days_between(confirmed_date, completion_date)
-        elif result[2]:  # completion_date exists
-            completion_date = datetime.strptime(result[2], '%Y-%m-%d').date()
-            return working_days_between(confirmed_date, completion_date)
-        else:
-            today = date.today()
-            return working_days_between(confirmed_date, today)
-    return None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT date_confirmed_by_finance, payment_date, completion_date FROM requests WHERE id = ?", (request_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result and result[0]:
+            confirmed_date = datetime.strptime(result[0], '%Y-%m-%d').date()
+            if result[1]:  # payment_date exists
+                completion_date = datetime.strptime(result[1], '%Y-%m-%d').date()
+                return working_days_between(confirmed_date, completion_date)
+            elif result[2]:  # completion_date exists
+                completion_date = datetime.strptime(result[2], '%Y-%m-%d').date()
+                return working_days_between(confirmed_date, completion_date)
+            else:
+                today = date.today()
+                return working_days_between(confirmed_date, today)
+        return None
+    except Exception as e:
+        print(f"Error in get_time_lapsed_from_confirmation: {e}")
+        return None
 
 
 def get_department_requests(department_name):
@@ -829,7 +833,7 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
                     days = working_days_between(submitted, paid)
                     completion_times.append(days)
                     
-                    sla_days = 5 if row['main_category'] == 'Payment Request' else 4
+                    sla_days = 5 if row['main_category'] == 'Submit Payment Request' else 4
                     if days > sla_days:
                         breaches += 1
                 except:
