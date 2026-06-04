@@ -29,17 +29,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Professional Design
+# Custom CSS
 st.markdown("""
 <style>
-    /* ============================================
-       IMPORT FONTS
-    ============================================ */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     
-    /* ============================================
-       ROOT VARIABLES
-    ============================================ */
     :root {
         --helb-green: #00843D;
         --helb-green-light: #00B347;
@@ -52,8 +46,6 @@ st.markdown("""
         --gray-300: #D1D5DB;
         --gray-400: #9CA3AF;
         --gray-500: #6B7280;
-        --gray-600: #4B5563;
-        --gray-700: #374151;
         --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         --radius-sm: 0.375rem;
@@ -245,7 +237,43 @@ st.markdown("""
         border: 1px solid var(--gray-200);
     }
     
-    /* Responsive */
+    /* Approval Stages - Green Theme */
+    .stage-completed {
+        background: #E8F5E9;
+        color: #00843D;
+        text-align: center;
+        padding: 0.3rem;
+        border-radius: var(--radius-md);
+        font-size: 0.7rem;
+        font-weight: 500;
+    }
+    
+    .stage-pending {
+        background: #FFF8E1;
+        color: #FFB81C;
+        text-align: center;
+        padding: 0.3rem;
+        border-radius: var(--radius-md);
+        font-size: 0.7rem;
+    }
+    
+    .stage-current {
+        background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
+        color: white;
+        text-align: center;
+        padding: 0.3rem;
+        border-radius: var(--radius-md);
+        font-size: 0.7rem;
+        font-weight: bold;
+    }
+    
+    /* Log Entries */
+    .log-submitted { background: #E3F2FD; border-left: 3px solid #2196F3; padding: 0.3rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.7rem; }
+    .log-received { background: #E8F5E9; border-left: 3px solid #4CAF50; padding: 0.3rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.7rem; }
+    .log-returned { background: #FFEBEE; border-left: 3px solid #F44336; padding: 0.3rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.7rem; }
+    .log-paid { background: #E8F5E9; border-left: 3px solid #00843D; padding: 0.3rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.7rem; }
+    .log-stage { background: #F3E5F5; border-left: 3px solid #9C27B0; padding: 0.3rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.7rem; }
+    
     @media (max-width: 768px) {
         .filter-item { min-width: 100px; }
         .metric-card h3 { font-size: 1rem; }
@@ -281,7 +309,6 @@ if 'selected_quarter' not in st.session_state:
 if 'selected_month' not in st.session_state:
     st.session_state.selected_month = "All"
 
-# Helper function to filter data
 def filter_by_filters(df, financial_year, quarter, month):
     if df.empty or 'submission_date' not in df.columns:
         return df
@@ -312,6 +339,33 @@ def filter_by_filters(df, financial_year, quarter, month):
             df = df[df['submission_date_dt'].dt.month == month_num]
     
     return df
+
+def get_reference_number(row):
+    """Get the appropriate reference number based on request type"""
+    if row['request_type'] == "Student Payment":
+        return row.get('batch_no', '-')
+    elif row['request_type'] == "Imprest":
+        return row.get('imprest_no', '-')
+    elif row['request_type'] == "Petty Cash":
+        return row.get('imprest_no', '-')
+    elif row['request_type'] == "Supplier Payment":
+        return row.get('invoice_no', '-')
+    elif row['request_type'] == "Surrender":
+        return row.get('surrender_number', '-')
+    elif row['request_type'] == "Refund Payment":
+        return row.get('imprest_no', '-')
+    elif row['request_type'] == "Direct Payment":
+        return row.get('direct_payment_details', '-')[:20] if row.get('direct_payment_details') else '-'
+    elif row['request_type'] == "Mileage Claim":
+        return row.get('mileage_claim_details', '-')[:20] if row.get('mileage_claim_details') else '-'
+    elif row['request_type'] == "Staff Training":
+        return row.get('training_details', '-')[:20] if row.get('training_details') else '-'
+    elif row['request_type'] == "Professional Body":
+        return row.get('professional_body', '-')
+    elif row['request_type'] == "Salary Payment":
+        return f"{row.get('salary_month', '')} {row.get('salary_year', '')}" if row.get('salary_month') else '-'
+    else:
+        return '-'
 
 # Login Screen
 if not st.session_state.authenticated:
@@ -378,7 +432,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Filter Bar - Moved to Top
+# Filter Bar
 st.markdown("<div class='filter-bar'>", unsafe_allow_html=True)
 col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
 with col1:
@@ -399,7 +453,7 @@ with col4:
     st.markdown("&nbsp;", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Sidebar - Compact
+# Sidebar
 with st.sidebar:
     st.markdown("""
     <div style='text-align: center; padding: 0.3rem 0;'>
@@ -418,7 +472,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Compact Menu
     menu_options = []
     if st.session_state.user_role == "MANAGEMENT":
         menu_options = ["📈 Management Dashboard", "🔍 Check Payment Status", "📑 Reports", "🔐 Change Password"]
@@ -463,19 +516,22 @@ def display_transaction_logs(request_id):
             timestamp = datetime.fromisoformat(log['timestamp']).strftime('%Y-%m-%d %H:%M')
             action = log['action']
             if action == 'SUBMITTED':
-                st.markdown(f"<div style='background:#E3F2FD; padding:0.3rem; margin:0.2rem 0; border-radius:5px; font-size:0.7rem;'>📝 **{timestamp}** - Submitted by {log['performed_by']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='log-submitted'>📝 **{timestamp}** - Submitted by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RECEIVED':
-                st.markdown(f"<div style='background:#E8F5E9; padding:0.3rem; margin:0.2rem 0; border-radius:5px; font-size:0.7rem;'>📥 **{timestamp}** - Received by {log['performed_by']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='log-received'>📥 **{timestamp}** - Received by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED']:
-                st.markdown(f"<div style='background:#F3E5F5; padding:0.3rem; margin:0.2rem 0; border-radius:5px; font-size:0.7rem;'>⚙️ **{timestamp}** - {action.replace('_', ' ').title()} by {log['performed_by']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='log-stage'>⚙️ **{timestamp}** - {action.replace('_', ' ').title()} by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RETURNED':
-                st.markdown(f"<div style='background:#FFEBEE; padding:0.3rem; margin:0.2rem 0; border-radius:5px; font-size:0.7rem;'>↩️ **{timestamp}** - Returned by {log['performed_by']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='log-returned'>↩️ **{timestamp}** - Returned by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action in ['PAID', 'CLEARED']:
-                st.markdown(f"<div style='background:#E8F5E9; padding:0.3rem; margin:0.2rem 0; border-radius:5px; font-size:0.7rem;'>✅ **{timestamp}** - {action} by {log['performed_by']}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='log-paid'>✅ **{timestamp}** - {action} by {log['performed_by']}</div>", unsafe_allow_html=True)
     else:
         st.info("No logs available")
 
 def display_approval_stages(request_id, main_category):
+    st.markdown("---")
+    st.markdown("**Approval Progress:**")
+    
     if main_category == "Submit Payment Request":
         stages = ['Received', 'Prepared', 'Verified', 'Approved', 'Authorized', 'Paid']
     else:
@@ -502,11 +558,11 @@ def display_approval_stages(request_id, main_category):
     for i, stage in enumerate(stages):
         with cols[i]:
             if current_stage == stage:
-                st.markdown(f"<div style='background:linear-gradient(135deg,#00843D,#00529B); color:white; text-align:center; padding:0.2rem; border-radius:5px; font-size:0.65rem;'>⏳ {stage}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stage-current'>⏳ {stage}</div>", unsafe_allow_html=True)
             elif i < (stages.index(current_stage) if current_stage in stages else 999):
-                st.markdown(f"<div style='background:#E8F5E9; color:#00843D; text-align:center; padding:0.2rem; border-radius:5px; font-size:0.65rem;'>✅ {stage}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stage-completed'>✅ {stage}</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div style='background:#FFF8E1; color:#FFB81C; text-align:center; padding:0.2rem; border-radius:5px; font-size:0.65rem;'>⏸ {stage}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='stage-pending'>⏸ {stage}</div>", unsafe_allow_html=True)
 
 
 # ================================================================
@@ -539,7 +595,8 @@ if choice == "📊 Department Dashboard":
         with tab2:
             for _, row in df.head(15).iterrows():
                 status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
-                with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['submission_date']}"):
+                ref_number = get_reference_number(row)
+                with st.expander(f"📄 {row['request_number']} - {row['request_type']} - Ref: {ref_number}"):
                     st.write(f"**Amount:** KES {row['amount']:,.2f}")
                     st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
                     if row.get('payment_description'):
@@ -615,8 +672,11 @@ elif choice == "📈 Management Dashboard":
             st.dataframe(dept_summary, use_container_width=True, hide_index=True)
         
         with tab3:
-            display_cols = ['request_number', 'request_type', 'department_name', 'amount', 'status', 'submission_date']
-            st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+            # Add reference number column
+            display_df = df.copy()
+            display_df['Reference No.'] = display_df.apply(get_reference_number, axis=1)
+            display_cols = ['request_number', 'request_type', 'department_name', 'Reference No.', 'amount', 'status', 'submission_date']
+            st.dataframe(display_df[display_cols], use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
@@ -627,31 +687,31 @@ elif choice == "📈 Management Dashboard":
 elif choice == "🔍 Check Payment Status":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>🔍 Check Payment Status</h2>", unsafe_allow_html=True)
     
-    batch_no = st.text_input("Enter Batch Number, Imprest No., Invoice No., or Surrender No.")
-    search_type = st.selectbox("Search by", ["Batch No.", "Imprest No.", "Invoice No.", "Surrender No.", "Request Number"])
+    search_term = st.text_input("Enter Batch No., Imprest No., Invoice No., or Surrender No.")
     
     if st.button("Search"):
         df = get_requests()
         if df.empty:
             st.error("No records found")
         else:
-            if search_type == "Batch No.":
-                results = df[df['batch_no'].str.contains(batch_no, case=False, na=False)]
-            elif search_type == "Imprest No.":
-                results = df[df['imprest_no'].str.contains(batch_no, case=False, na=False)]
-            elif search_type == "Invoice No.":
-                results = df[df['invoice_no'].str.contains(batch_no, case=False, na=False)]
-            elif search_type == "Surrender No.":
-                results = df[df['surrender_number'].str.contains(batch_no, case=False, na=False)]
-            else:
-                results = df[df['request_number'].str.contains(batch_no, case=False, na=False)]
+            # Search in multiple fields
+            mask = (
+                df['batch_no'].str.contains(search_term, case=False, na=False) |
+                df['imprest_no'].str.contains(search_term, case=False, na=False) |
+                df['invoice_no'].str.contains(search_term, case=False, na=False) |
+                df['surrender_number'].str.contains(search_term, case=False, na=False) |
+                df['request_number'].str.contains(search_term, case=False, na=False)
+            )
+            results = df[mask]
             
             if not results.empty:
                 for _, row in results.iterrows():
                     status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
+                    ref_number = get_reference_number(row)
                     st.markdown(f"""
                     <div style='background:#F9FAFB; padding:0.75rem; border-radius:10px; margin-bottom:0.5rem; border-left:4px solid #00843D;'>
                         <strong>{row['request_number']}</strong><br>
+                        Reference: {ref_number}<br>
                         Amount: KES {row['amount']:,.2f}<br>
                         Status: {status_badge}<br>
                         Submitted: {row['submission_date']}
@@ -662,7 +722,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST (Simplified - keeping all existing functionality)
+# NEW REQUEST (simplified - keeping all existing functionality)
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>📝 Create New Request</h2>", unsafe_allow_html=True)
@@ -1019,7 +1079,8 @@ elif choice == "📋 My Requests":
         else:
             for _, row in user_requests.iterrows():
                 status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
-                with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['submission_date']}"):
+                ref_number = get_reference_number(row)
+                with st.expander(f"📄 {row['request_number']} - {row['request_type']} - Ref: {ref_number}"):
                     st.write(f"**Amount:** KES {row['amount']:,.2f}")
                     st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
                     if row.get('payment_description'):
@@ -1161,7 +1222,7 @@ elif choice == "✅ Approval Queue":
 
 
 # ================================================================
-# REPORTS - WITH REFERENCE NUMBERS
+# REPORTS - WITH DYNAMIC REFERENCE NUMBER
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>📑 Reports</h2>", unsafe_allow_html=True)
@@ -1172,28 +1233,17 @@ elif choice == "📑 Reports":
     if df.empty:
         st.info("No data available")
     else:
-        # Create display dataframe with reference numbers
+        # Create display dataframe with dynamic reference number
         display_df = pd.DataFrame()
         display_df['Request No.'] = df['request_number']
         display_df['Type'] = df['request_type']
         display_df['Department'] = df['department_name']
+        display_df['Reference No.'] = df.apply(get_reference_number, axis=1)
         display_df['Amount'] = df['amount'].apply(lambda x: f"KES {x:,.2f}")
         display_df['Status'] = df['status']
         display_df['Submitted'] = df['submission_date']
         
-        # Add reference numbers based on request type
-        display_df['Batch No.'] = df['batch_no'].fillna('-')
-        display_df['Imprest No.'] = df['imprest_no'].fillna('-')
-        display_df['Invoice No.'] = df['invoice_no'].fillna('-')
-        display_df['Surrender No.'] = df['surrender_number'].fillna('-')
-        display_df['Refund ID'] = df['imprest_no'].fillna('-')
-        display_df['Petty Cash No.'] = df['imprest_no'].fillna('-')
-        
-        # Select relevant columns
-        cols = ['Request No.', 'Type', 'Department', 'Amount', 'Status', 'Submitted', 
-                'Batch No.', 'Imprest No.', 'Invoice No.', 'Surrender No.']
-        
-        st.dataframe(display_df[cols], use_container_width=True, hide_index=True)
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
         
         # Export
         csv = df.to_csv(index=False).encode('utf-8')
