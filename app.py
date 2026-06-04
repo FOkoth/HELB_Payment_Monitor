@@ -237,32 +237,33 @@ st.markdown("""
         border: 1px solid var(--gray-200);
     }
     
-    /* Approval Stages - Green Theme */
+    /* Approval Stages - Original Styling */
     .stage-completed {
-        background: #E8F5E9;
-        color: #00843D;
+        background-color: #00843D;
+        color: white;
         text-align: center;
         padding: 0.3rem;
-        border-radius: var(--radius-md);
+        border-radius: 8px;
         font-size: 0.7rem;
         font-weight: 500;
     }
     
     .stage-pending {
-        background: #FFF8E1;
+        background-color: #FFF8E1;
         color: #FFB81C;
         text-align: center;
         padding: 0.3rem;
-        border-radius: var(--radius-md);
+        border-radius: 8px;
         font-size: 0.7rem;
+        border: 1px solid #FFB81C;
     }
     
     .stage-current {
-        background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
+        background-color: #00843D;
         color: white;
         text-align: center;
         padding: 0.3rem;
-        border-radius: var(--radius-md);
+        border-radius: 8px;
         font-size: 0.7rem;
         font-weight: bold;
     }
@@ -546,11 +547,16 @@ def display_approval_stages(request_id, main_category):
         return
     
     status_map = {
-        'RECEIVED_BY_FINANCE': 'Received', 'PAYMENT_PREPARED': 'Prepared',
-        'PAYMENT_VERIFIED': 'Verified', 'PAYMENT_APPROVED': 'Approved',
-        'PAYMENT_AUTHORIZED': 'Authorized', 'PAID': 'Paid',
-        'SURRENDER_VERIFIED': 'Verified', 'SURRENDER_APPROVED': 'Approved',
-        'SURRENDER_AUTHORIZED': 'Authorized', 'CLEARED': 'Cleared'
+        'RECEIVED_BY_FINANCE': 'Received',
+        'PAYMENT_PREPARED': 'Prepared',
+        'PAYMENT_VERIFIED': 'Verified',
+        'PAYMENT_APPROVED': 'Approved',
+        'PAYMENT_AUTHORIZED': 'Authorized',
+        'PAID': 'Paid',
+        'SURRENDER_VERIFIED': 'Verified',
+        'SURRENDER_APPROVED': 'Approved',
+        'SURRENDER_AUTHORIZED': 'Authorized',
+        'CLEARED': 'Cleared'
     }
     current_stage = status_map.get(result[0], '')
     
@@ -559,7 +565,7 @@ def display_approval_stages(request_id, main_category):
         with cols[i]:
             if current_stage == stage:
                 st.markdown(f"<div class='stage-current'>⏳ {stage}</div>", unsafe_allow_html=True)
-            elif i < (stages.index(current_stage) if current_stage in stages else 999):
+            elif current_stage and i < stages.index(current_stage):
                 st.markdown(f"<div class='stage-completed'>✅ {stage}</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div class='stage-pending'>⏸ {stage}</div>", unsafe_allow_html=True)
@@ -722,7 +728,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST (simplified - keeping all existing functionality)
+# NEW REQUEST
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>📝 Create New Request</h2>", unsafe_allow_html=True)
