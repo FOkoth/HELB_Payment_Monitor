@@ -141,6 +141,7 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # Departments table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS departments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +158,7 @@ def init_database():
         )
     ''')
     
+    # Products table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,6 +170,7 @@ def init_database():
         )
     ''')
     
+    # Funders table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS funders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +178,7 @@ def init_database():
         )
     ''')
     
+    # Financial Years table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS financial_years (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,6 +187,7 @@ def init_database():
         )
     ''')
     
+    # Semesters table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS semesters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,6 +195,7 @@ def init_database():
         )
     ''')
     
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,6 +208,7 @@ def init_database():
         )
     ''')
     
+    # Requests table with all columns
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -255,6 +262,7 @@ def init_database():
         )
     ''')
     
+    # SLA Config table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sla_config (
             request_type TEXT PRIMARY KEY,
@@ -338,6 +346,7 @@ def init_database():
     conn.commit()
     conn.close()
     
+    # Create logs table
     create_logs_table()
     
     # Insert default users
@@ -927,10 +936,8 @@ def get_all_batch_numbers():
 
 
 def get_allowed_main_categories(user_role, user_dept):
-    # Management cannot submit
     if user_role == "MANAGEMENT":
         return []
-    # Finance CAN submit requests
     return ["Submit Payment Request", "Submit Surrender"]
 
 
@@ -943,7 +950,6 @@ def get_allowed_request_types(user_role, user_dept, main_category):
         else:
             return ["Surrender"]
     
-    # FINANCE can submit these request types
     if user_role == "FINANCE":
         if main_category == "Submit Payment Request":
             return ["Imprest", "Petty Cash", "Direct Payment"]
