@@ -113,6 +113,16 @@ def get_request_by_id(request_id):
     return None
 
 
+def get_column_names(table_name):
+    """Get list of column names for a table"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    columns = [column[1] for column in cursor.fetchall()]
+    conn.close()
+    return columns
+
+
 def init_database():
     """Create all tables if they don't exist"""
     conn = sqlite3.connect(DB_PATH)
@@ -616,62 +626,77 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     old_status = current[0] if current else None
     request_number = current[1] if current else None
     
+    # Get existing columns to avoid errors
+    cursor.execute("PRAGMA table_info(requests)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
     action = ""
     comment = finance_comment or return_reason
     
+    # Only add columns that exist in the database
     if status == 'RECEIVED_BY_FINANCE':
-        updates.append("date_received = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        updates.append("date_confirmed_by_finance = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        if checklist_approvals is not None:
+        if 'date_received' in existing_columns:
+            updates.append("date_received = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if 'date_confirmed_by_finance' in existing_columns:
+            updates.append("date_confirmed_by_finance = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if checklist_approvals is not None and 'finance_checklist_approvals' in existing_columns:
             updates.append("finance_checklist_approvals = ?")
             params.append(1 if checklist_approvals else 0)
-        if checklist_documents is not None:
+        if checklist_documents is not None and 'finance_checklist_documents' in existing_columns:
             updates.append("finance_checklist_documents = ?")
             params.append(1 if checklist_documents else 0)
-        if checklist_comments:
+        if checklist_comments and 'finance_checklist_comments' in existing_columns:
             updates.append("finance_checklist_comments = ?")
             params.append(checklist_comments)
         action = "RECEIVED"
     
     elif status == 'RETURNED':
-        updates.append("date_returned = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        if return_reason:
+        if 'date_returned' in existing_columns:
+            updates.append("date_returned = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if return_reason and 'return_reason' in existing_columns:
             updates.append("return_reason = ?")
             params.append(return_reason)
         action = "RETURNED"
     
     elif status == 'SUBMITTED':
-        updates.append("submission_date = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        updates.append("date_returned = ?")
-        params.append(None)
-        updates.append("return_reason = ?")
-        params.append(None)
+        if 'submission_date' in existing_columns:
+            updates.append("submission_date = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if 'date_returned' in existing_columns:
+            updates.append("date_returned = ?")
+            params.append(None)
+        if 'return_reason' in existing_columns:
+            updates.append("return_reason = ?")
+            params.append(None)
         action = "RESUBMITTED"
+    
+    elif status == 'PAID':
+        if 'payment_date' in existing_columns:
+            updates.append("payment_date = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if 'completion_date' in existing_columns:
+            updates.append("completion_date = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        action = "PAID"
+    
+    elif status == 'CLEARED':
+        if 'payment_date' in existing_columns:
+            updates.append("payment_date = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        if 'completion_date' in existing_columns:
+            updates.append("completion_date = ?")
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        action = "CLEARED"
     
     elif status in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED']:
         action = status
     
-    elif status == 'PAID':
-        updates.append("payment_date = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        updates.append("completion_date = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        action = "PAID"
-    
-    elif status == 'CLEARED':
-        updates.append("payment_date = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        updates.append("completion_date = ?")
-        params.append(datetime.now().strftime('%Y-%m-%d'))
-        action = "CLEARED"
-    
-    if finance_comment:
+    if finance_comment and 'finance_comment' in existing_columns:
         updates.append("finance_comment = ?")
         params.append(finance_comment)
     
