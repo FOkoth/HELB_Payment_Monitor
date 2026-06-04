@@ -23,7 +23,7 @@ from streamlit_option_menu import option_menu
 
 # Page config
 st.set_page_config(
-    page_title="HELB Finance Monitoring System",
+    page_title="HELB Payment & Surrender Monitoring System",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -390,7 +390,7 @@ def get_reference_number(row):
     elif row['request_type'] == "Refund Payment":
         return row.get('imprest_no', '-')
     elif row['request_type'] == "Direct Payment":
-        return row.get('direct_payment_details', '-')[:20] if row.get('direct_payment_details') else '-'
+        return row.get('invoice_no', '-')
     elif row['request_type'] == "Mileage Claim":
         return row.get('mileage_claim_details', '-')[:20] if row.get('mileage_claim_details') else '-'
     elif row['request_type'] == "Staff Training":
@@ -679,7 +679,7 @@ elif choice == "📈 Management Dashboard":
     if df.empty:
         st.info("No data available.")
     else:
-        tab1, tab2, tab3 = st.tabs(["📊 Overview", "📈 Performance", "📋 All Requests"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Performance", "📋 All Requests", "📊 SLA Analytics"])
         
         with tab1:
             total = len(df)
@@ -735,6 +735,77 @@ elif choice == "📈 Management Dashboard":
             st.dataframe(display_df[display_cols], use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+        
+        with tab4:
+            st.markdown("### 📊 SLA Compliance Analytics")
+            
+            sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+                       'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                       'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                       'Professional Body': 5, 'Direct Payment': 3}
+            
+            completed_requests = df[df['status'].isin(['PAID', 'CLEARED'])]
+            
+            if not completed_requests.empty:
+                compliance_data = []
+                for req_type in completed_requests['request_type'].unique():
+                    type_df = completed_requests[completed_requests['request_type'] == req_type]
+                    sla_days = sla_map.get(req_type, 5)
+                    breaches = 0
+                    for _, row in type_df.iterrows():
+                        if row.get('payment_date'):
+                            submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                            paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                            days = working_days_between(submitted, paid)
+                            if days > sla_days:
+                                breaches += 1
+                    total = len(type_df)
+                    compliant = total - breaches
+                    compliance_data.append({
+                        'Request Type': req_type,
+                        'Total': total,
+                        'Compliant': compliant,
+                        'Breached': breaches,
+                        'Compliance Rate': round((compliant / total * 100), 1),
+                        'SLA Days': sla_days
+                    })
+                
+                compliance_df = pd.DataFrame(compliance_data)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig = px.bar(compliance_df, x='Request Type', y='Compliance Rate',
+                                 title="SLA Compliance Rate by Request Type",
+                                 color='Compliance Rate',
+                                 color_continuous_scale=['#DC3545', '#FFB81C', '#00843D'],
+                                 text='Compliance Rate')
+                    fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                    fig.update_layout(height=450, yaxis_title="Compliance Rate (%)")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = px.bar(compliance_df, x='Request Type', y='Breached',
+                                 title="SLA Breaches by Request Type",
+                                 color='Breached',
+                                 color_continuous_scale=['#FFB81C', '#DC3545'])
+                    fig.update_layout(height=450, yaxis_title="Number of Breaches")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                total_compliant = compliance_df['Compliant'].sum()
+                total_requests = compliance_df['Total'].sum()
+                overall_rate = (total_compliant / total_requests * 100) if total_requests > 0 else 0
+                
+                st.markdown(f"""
+                <div style='background: linear-gradient(135deg, #00843D 0%, #00529B 100%); padding: 1rem; border-radius: 10px; margin-top: 1rem;'>
+                    <h3 style='color: white; margin: 0; text-align: center;'>Overall SLA Compliance Rate: {overall_rate:.1f}%</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                low_performers = compliance_df[compliance_df['Compliance Rate'] < 80]
+                if not low_performers.empty:
+                    st.warning(f"⚠️ Low SLA compliance (<80%) for: {', '.join(low_performers['Request Type'].tolist())}")
+            else:
+                st.info("No completed requests to calculate SLA metrics")
 
 
 # ================================================================
@@ -800,7 +871,8 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            if main_category == "Submit Payment Request" and selected_type == "Student Payment":
+            # Student Payment - Regular (Lending)
+            if main_category == "Submit Payment Request" and selected_type == "Student Payment" and st.session_state.user_dept != "External Resource Mobilization":
                 products = get_products()
                 product_list = products['name'].tolist() if not products.empty else ["Undergraduate", "TVET", "Jielimishe"]
                 product_type = st.selectbox("Product Type", product_list)
@@ -838,6 +910,46 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Student Payment - External Resource Mobilization (Partner Funds)
+            elif main_category == "Submit Payment Request" and selected_type == "Student Payment" and st.session_state.user_dept == "External Resource Mobilization":
+                with st.form(key="erm_student_form"):
+                    st.subheader("🎓 Student Payment Details (Partner Funds)")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    
+                    funders = get_funders()
+                    if funders:
+                        funder_name = st.selectbox("Partner / Funder", funders)
+                    else:
+                        funder_name = st.text_input("Partner / Funder Name *")
+                    
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    
+                    batch_no = st.text_input("Batch No. *")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    payment_description = st.text_area("Payment Details")
+                    
+                    if st.form_submit_button("Submit"):
+                        if not funder_name or not batch_no or amount <= 0:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': "Student Payment",
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'batch_no': batch_no, 'funder_name': funder_name,
+                                'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Imprest
             elif main_category == "Submit Payment Request" and selected_type == "Imprest":
                 with st.form(key="imprest_form"):
                     col1, col2 = st.columns(2)
@@ -865,6 +977,7 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Petty Cash
             elif main_category == "Submit Payment Request" and selected_type == "Petty Cash":
                 with st.form(key="petty_form"):
                     col1, col2 = st.columns(2)
@@ -892,20 +1005,25 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Direct Payment - With Invoice No.
             elif main_category == "Submit Payment Request" and selected_type == "Direct Payment":
                 with st.form(key="direct_form"):
+                    st.subheader("💸 Direct Payment Details")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.text_input("Department", value=st.session_state.user_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    
+                    invoice_no = st.text_input("Invoice No. *")
                     direct_payment_details = st.text_area("Payment Details (Payee, Purpose)")
                     amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
                     financial_years = get_financial_years()
                     financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
                     payment_description = st.text_area("Additional Notes")
+                    
                     if st.form_submit_button("Submit"):
-                        if not direct_payment_details or amount <= 0:
+                        if not invoice_no or not direct_payment_details or amount <= 0:
                             st.error("Please fill all required fields")
                         else:
                             request_data = {
@@ -913,12 +1031,14 @@ elif choice == "📝 New Request":
                                 'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
                                 'submitted_by': st.session_state.username, 'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
-                                'direct_payment_details': direct_payment_details, 'status': 'SUBMITTED'
+                                'direct_payment_details': direct_payment_details, 'invoice_no': invoice_no,
+                                'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Supplier Payment
             elif main_category == "Submit Payment Request" and selected_type == "Supplier Payment":
                 with st.form(key="supplier_form"):
                     col1, col2 = st.columns(2)
@@ -947,6 +1067,7 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Salary Payment
             elif main_category == "Submit Payment Request" and selected_type == "Salary Payment":
                 with st.form(key="salary_form"):
                     col1, col2 = st.columns(2)
@@ -975,6 +1096,7 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Refund Payment
             elif main_category == "Submit Payment Request" and selected_type == "Refund Payment":
                 with st.form(key="refund_form"):
                     col1, col2 = st.columns(2)
@@ -1003,20 +1125,25 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Mileage Claim - With Staff Name
             elif main_category == "Submit Payment Request" and selected_type == "Mileage Claim":
                 with st.form(key="mileage_form"):
+                    st.subheader("⛽ Mileage Claim Details")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.text_input("Department", value=st.session_state.user_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    
+                    staff_name = st.text_input("Staff Name *")
                     mileage_claim_details = st.text_area("Trip Details (From, To, Distance, Vehicle Reg No.)")
                     amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=100.0)
                     financial_years = get_financial_years()
                     financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
                     payment_description = st.text_area("Additional Notes")
+                    
                     if st.form_submit_button("Submit"):
-                        if not mileage_claim_details or amount <= 0:
+                        if not staff_name or not mileage_claim_details or amount <= 0:
                             st.error("Please fill all required fields")
                         else:
                             request_data = {
@@ -1024,12 +1151,14 @@ elif choice == "📝 New Request":
                                 'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
                                 'submitted_by': st.session_state.username, 'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
-                                'mileage_claim_details': mileage_claim_details, 'status': 'SUBMITTED'
+                                'mileage_claim_details': mileage_claim_details, 'staff_name': staff_name,
+                                'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Staff Training
             elif main_category == "Submit Payment Request" and selected_type == "Staff Training":
                 with st.form(key="training_form"):
                     col1, col2 = st.columns(2)
@@ -1057,6 +1186,7 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Professional Body
             elif main_category == "Submit Payment Request" and selected_type == "Professional Body":
                 with st.form(key="professional_form"):
                     col1, col2 = st.columns(2)
@@ -1084,6 +1214,7 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
+            # Surrender
             elif main_category == "Submit Surrender":
                 with st.form(key="surrender_form"):
                     col1, col2 = st.columns(2)
