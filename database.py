@@ -133,11 +133,7 @@ def migrate_database():
         'finance_checklist_documents': 'INTEGER DEFAULT 0',
         'finance_checklist_comments': 'TEXT', 'date_confirmed_by_finance': 'TEXT',
         'main_category': 'TEXT', 'mileage_claim_details': 'TEXT', 'training_details': 'TEXT',
-        'professional_body': 'TEXT', 'direct_payment_details': 'TEXT',
-        'payment_prepared_by': 'TEXT', 'payment_prepared_date': 'TEXT',
-        'payment_verified_by': 'TEXT', 'payment_verified_date': 'TEXT',
-        'payment_approved_by': 'TEXT', 'payment_approved_date': 'TEXT',
-        'payment_authorized_by': 'TEXT', 'payment_authorized_date': 'TEXT'
+        'professional_body': 'TEXT', 'direct_payment_details': 'TEXT'
     }
     
     for col_name, col_type in required_columns.items():
@@ -273,15 +269,7 @@ def init_database():
             mileage_claim_details TEXT,
             training_details TEXT,
             professional_body TEXT,
-            direct_payment_details TEXT,
-            payment_prepared_by TEXT,
-            payment_prepared_date TEXT,
-            payment_verified_by TEXT,
-            payment_verified_date TEXT,
-            payment_approved_by TEXT,
-            payment_approved_date TEXT,
-            payment_authorized_by TEXT,
-            payment_authorized_date TEXT
+            direct_payment_details TEXT
         )
     ''')
     
@@ -653,8 +641,7 @@ def save_request(data):
 
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
-                          checklist_approvals=None, checklist_documents=None, checklist_comments=None,
-                          stage_comment=None):
+                          checklist_approvals=None, checklist_documents=None, checklist_comments=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT status, request_number, main_category FROM requests WHERE id = ?", (request_id,))
@@ -666,7 +653,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
     action = ""
-    comment = finance_comment or return_reason or stage_comment
+    comment = finance_comment or return_reason
     
     if status == 'RECEIVED_BY_FINANCE':
         updates.append("date_received = ?")
@@ -702,31 +689,15 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         action = "RESUBMITTED"
     
     elif status == 'PAYMENT_PREPARED':
-        updates.append("payment_prepared_by = ?")
-        params.append(performed_by)
-        updates.append("payment_prepared_date = ?")
-        params.append(datetime.now().isoformat())
         action = "PAYMENT_PREPARED"
     
     elif status == 'PAYMENT_VERIFIED':
-        updates.append("payment_verified_by = ?")
-        params.append(performed_by)
-        updates.append("payment_verified_date = ?")
-        params.append(datetime.now().isoformat())
         action = "PAYMENT_VERIFIED"
     
     elif status == 'PAYMENT_APPROVED':
-        updates.append("payment_approved_by = ?")
-        params.append(performed_by)
-        updates.append("payment_approved_date = ?")
-        params.append(datetime.now().isoformat())
         action = "PAYMENT_APPROVED"
     
     elif status == 'PAYMENT_AUTHORIZED':
-        updates.append("payment_authorized_by = ?")
-        params.append(performed_by)
-        updates.append("payment_authorized_date = ?")
-        params.append(datetime.now().isoformat())
         action = "PAYMENT_AUTHORIZED"
     
     elif status == 'PAID':
