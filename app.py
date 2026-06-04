@@ -23,7 +23,7 @@ from streamlit_option_menu import option_menu
 
 # Page config
 st.set_page_config(
-    page_title="HELB Payment & Surrender Monitoring System",
+    page_title="HELB Finance Monitoring System",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
