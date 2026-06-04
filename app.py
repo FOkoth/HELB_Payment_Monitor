@@ -175,6 +175,8 @@ if 'full_name' not in st.session_state:
     st.session_state.full_name = None
 if 'show_password_change' not in st.session_state:
     st.session_state.show_password_change = False
+if 'student_product_type' not in st.session_state:
+    st.session_state.student_product_type = "Undergraduate"
 
 # Login Screen
 if not st.session_state.authenticated:
@@ -575,31 +577,31 @@ elif choice == "🔍 Check Payment Status":
                         <tr>
                             <td><strong>Request Number:</strong></td>
                             <td>{result['request_number']}</td>
-                         </tr>
-                         <tr>
-                             <td><strong>Department:</strong></td>
-                             <td>{result['department']}</td>
-                         </tr>
-                         <tr>
-                             <td><strong>Amount:</strong></td>
-                             <td>KES {result['amount']:,.2f}</td>
-                         </tr>
-                         <tr>
-                             <td><strong>Submission Date:</strong></td>
-                             <td>{result['submission_date']}</td>
-                         </tr>
+                        </tr>
+                        <tr>
+                            <td><strong>Department:</strong></td>
+                            <td>{result['department']}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Amount:</strong></td>
+                            <td>KES {result['amount']:,.2f}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Submission Date:</strong></td>
+                            <td>{result['submission_date']}</td>
+                        </tr>
                 """, unsafe_allow_html=True)
                 
                 if result['payment_date']:
                     st.markdown(f"""
-                         <tr>
-                             <td><strong>Payment Date:</strong></td>
-                             <td>{result['payment_date']}</td>
-                         </tr>
-                         <tr>
-                             <td><strong>Payment Reference:</strong></td>
-                             <td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td>
-                         </tr>
+                        <tr>
+                            <td><strong>Payment Date:</strong></td>
+                            <td>{result['payment_date']}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Payment Reference:</strong></td>
+                            <td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td>
+                        </tr>
                     """, unsafe_allow_html=True)
                 
                 st.markdown("</table></div>", unsafe_allow_html=True)
@@ -614,7 +616,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST - WITH PROPER CONDITIONAL STUDENT PAYMENT FIELDS
+# NEW REQUEST - WITH PROPER STUDENT PAYMENT FIELDS
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -642,8 +644,8 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            # Common fields for all
             with st.form(key="request_form"):
+                # Common fields
                 col1, col2 = st.columns(2)
                 with col1:
                     st.text_input("Department", value=st.session_state.user_dept, disabled=True)
@@ -658,176 +660,104 @@ elif choice == "📝 New Request":
                 st.markdown("---")
                 
                 # ======================================================
-                # PAYMENT REQUEST TYPES
+                # STUDENT PAYMENT - WITH DYNAMIC FIELDS
                 # ======================================================
-                if main_category == "Submit Payment Request":
+                if main_category == "Submit Payment Request" and selected_type == "Student Payment":
+                    st.subheader("🎓 Student Payment Details")
                     
-                    # STUDENT PAYMENT - WITH PROPER CONDITIONAL FIELDS
-                    if selected_type == "Student Payment":
-                        st.subheader("🎓 Student Payment Details")
-                        
-                        # Product Type selection (OUTSIDE form for dynamic updates)
-                        products = get_products()
-                        if not products.empty:
-                            product_type = st.selectbox("Product Type", products['name'].tolist(), key="student_product_type")
-                        else:
-                            product_type = st.selectbox("Product Type", ["Undergraduate", "TVET", "Jielimishe"], key="student_product_type")
-                        
-                        st.markdown("---")
-                        
-                        # Conditional fields based on Product Type
-                        semester = None
-                        payment_category = None
-                        
-                        if product_type == "Undergraduate":
-                            st.markdown("**Undergraduate Payment Details**")
-                            semesters = get_semesters()
-                            semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
-                            payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                        
-                        elif product_type == "TVET":
-                            st.markdown("**TVET Payment Details**")
-                            semesters = get_semesters()
-                            semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
-                            payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
-                        
-                        else:
-                            # Jielimishe - No semester, no payment category
-                            semester = None
-                            payment_category = "Tuition"
-                        
-                        st.markdown("---")
-                        
-                        # Batch Number (for ALL student payments)
-                        batch_no = st.text_input("Batch No.", placeholder="Enter batch number")
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'batch_no': batch_no,
-                            'product_type': product_type,
-                            'semester': semester,
-                            'payment_type': payment_category,
-                            'status': 'SUBMITTED'
-                        }
+                    # Product Type selection - this will trigger a rerun when changed
+                    products = get_products()
+                    if not products.empty:
+                        product_list = products['name'].tolist()
+                    else:
+                        product_list = ["Undergraduate", "TVET", "Jielimishe"]
                     
-                    # IMPREST
-                    elif selected_type == "Imprest":
-                        st.subheader("💰 Imprest Payment Details")
-                        imprest_no = st.text_input("Imprest No.", placeholder="Enter imprest number")
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'imprest_no': imprest_no,
-                            'status': 'SUBMITTED'
-                        }
+                    # Use session state to track selected product type
+                    current_product = st.selectbox(
+                        "Product Type", 
+                        product_list,
+                        key="student_product_select"
+                    )
                     
-                    # PETTY CASH
-                    elif selected_type == "Petty Cash":
-                        st.subheader("💵 Petty Cash Payment Details")
-                        petty_cash_no = st.text_input("Petty Cash No.", placeholder="Enter petty cash number")
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'imprest_no': petty_cash_no,
-                            'status': 'SUBMITTED'
-                        }
+                    # Store in session state
+                    st.session_state.student_product_type = current_product
                     
-                    # SUPPLIER PAYMENT
-                    elif selected_type == "Supplier Payment":
-                        st.subheader("🏢 Supplier Payment Details")
-                        invoice_no = st.text_input("Invoice No.", placeholder="Enter invoice number")
-                        supplier_name = st.text_input("Supplier Name")
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'invoice_no': invoice_no,
-                            'supplier_name': supplier_name,
-                            'status': 'SUBMITTED'
-                        }
+                    st.markdown("---")
                     
-                    # SALARY PAYMENT
-                    elif selected_type == "Salary Payment":
-                        st.subheader("👔 Salary Payment Details")
-                        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-                        salary_month = st.selectbox("Salary Month", months)
-                        current_year = datetime.now().year
-                        salary_year = st.number_input("Year", min_value=2020, max_value=2030, value=current_year)
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'salary_month': salary_month,
-                            'salary_year': salary_year,
-                            'status': 'SUBMITTED'
-                        }
+                    # Initialize variables
+                    semester = None
+                    payment_category = None
                     
-                    # REFUND PAYMENT
-                    elif selected_type == "Refund Payment":
-                        st.subheader("🔄 Refund Payment Details")
-                        refund_id = st.text_input("Refund ID", placeholder="Enter refund ID")
-                        customer_name = st.text_input("Customer Name")
-                        customer_id = st.text_input("Customer ID Number")
-                        
-                        request_data = {
-                            'main_category': main_category,
-                            'request_type': selected_type,
-                            'department_id': st.session_state.user_dept_id,
-                            'department_name': st.session_state.user_dept,
-                            'submitted_by': st.session_state.username,
-                            'amount': amount,
-                            'payment_description': payment_description,
-                            'financial_year': financial_year,
-                            'imprest_no': refund_id,
-                            'customer_name': customer_name,
-                            'customer_id': customer_id,
-                            'status': 'SUBMITTED'
-                        }
+                    # Show conditional fields based on product type
+                    if current_product == "Undergraduate":
+                        st.markdown("**Undergraduate Payment Details**")
+                        semesters = get_semesters()
+                        semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                        payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
+                    
+                    elif current_product == "TVET":
+                        st.markdown("**TVET Payment Details**")
+                        semesters = get_semesters()
+                        semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
+                        payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
                     
                     else:
-                        st.error("Invalid request type")
-                        st.stop()
+                        # Jielimishe - No semester, no payment category
+                        semester = None
+                        payment_category = "Tuition"
+                    
+                    st.markdown("---")
+                    
+                    # Batch Number for all student payments
+                    batch_no = st.text_input("Batch No.", placeholder="Enter batch number")
+                    
+                    # Prepare request data
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': selected_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
+                        'batch_no': batch_no,
+                        'product_type': current_product,
+                        'semester': semester,
+                        'payment_type': payment_category,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not batch_no:
+                            errors.append("Batch No. is required")
+                        if current_product in ["Undergraduate", "TVET"]:
+                            if not semester:
+                                errors.append("Semester is required")
+                            if not payment_category:
+                                errors.append("Payment Category is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
                 
                 # ======================================================
-                # SURRENDER
+                # IMPREST
                 # ======================================================
-                else:  # Submit Surrender
-                    st.subheader("📤 Surrender Details")
-                    surrender_no = st.text_input("Surrender No.", placeholder="Enter surrender number")
-                    staff_name = st.text_input("Staff Name")
+                elif main_category == "Submit Payment Request" and selected_type == "Imprest":
+                    st.subheader("💰 Imprest Payment Details")
+                    imprest_no = st.text_input("Imprest No.", placeholder="Enter imprest number")
                     
                     request_data = {
                         'main_category': main_category,
@@ -838,53 +768,241 @@ elif choice == "📝 New Request":
                         'amount': amount,
                         'payment_description': payment_description,
                         'financial_year': financial_year,
+                        'imprest_no': imprest_no,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not imprest_no:
+                            errors.append("Imprest No. is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
+                
+                # ======================================================
+                # PETTY CASH
+                # ======================================================
+                elif main_category == "Submit Payment Request" and selected_type == "Petty Cash":
+                    st.subheader("💵 Petty Cash Payment Details")
+                    petty_cash_no = st.text_input("Petty Cash No.", placeholder="Enter petty cash number")
+                    
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': selected_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
+                        'imprest_no': petty_cash_no,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not petty_cash_no:
+                            errors.append("Petty Cash No. is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
+                
+                # ======================================================
+                # SUPPLIER PAYMENT
+                # ======================================================
+                elif main_category == "Submit Payment Request" and selected_type == "Supplier Payment":
+                    st.subheader("🏢 Supplier Payment Details")
+                    invoice_no = st.text_input("Invoice No.", placeholder="Enter invoice number")
+                    supplier_name = st.text_input("Supplier Name")
+                    
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': selected_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
+                        'invoice_no': invoice_no,
+                        'supplier_name': supplier_name,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not invoice_no:
+                            errors.append("Invoice No. is required")
+                        if not supplier_name:
+                            errors.append("Supplier Name is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
+                
+                # ======================================================
+                # SALARY PAYMENT
+                # ======================================================
+                elif main_category == "Submit Payment Request" and selected_type == "Salary Payment":
+                    st.subheader("👔 Salary Payment Details")
+                    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                    salary_month = st.selectbox("Salary Month", months)
+                    current_year = datetime.now().year
+                    salary_year = st.number_input("Year", min_value=2020, max_value=2030, value=current_year)
+                    
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': selected_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
+                        'salary_month': salary_month,
+                        'salary_year': salary_year,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not salary_month:
+                            errors.append("Salary Month is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
+                
+                # ======================================================
+                # REFUND PAYMENT
+                # ======================================================
+                elif main_category == "Submit Payment Request" and selected_type == "Refund Payment":
+                    st.subheader("🔄 Refund Payment Details")
+                    refund_id = st.text_input("Refund ID", placeholder="Enter refund ID")
+                    customer_name = st.text_input("Customer Name")
+                    customer_id = st.text_input("Customer ID Number")
+                    
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': selected_type,
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
+                        'imprest_no': refund_id,
+                        'customer_name': customer_name,
+                        'customer_id': customer_id,
+                        'status': 'SUBMITTED'
+                    }
+                    
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not refund_id:
+                            errors.append("Refund ID is required")
+                        if not customer_name:
+                            errors.append("Customer Name is required")
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
+                
+                # ======================================================
+                # SURRENDER
+                # ======================================================
+                elif main_category == "Submit Surrender":
+                    st.subheader("📤 Surrender Details")
+                    surrender_no = st.text_input("Surrender No.", placeholder="Enter surrender number")
+                    staff_name = st.text_input("Staff Name")
+                    
+                    request_data = {
+                        'main_category': main_category,
+                        'request_type': "Surrender",
+                        'department_id': st.session_state.user_dept_id,
+                        'department_name': st.session_state.user_dept,
+                        'submitted_by': st.session_state.username,
+                        'amount': amount,
+                        'payment_description': payment_description,
+                        'financial_year': financial_year,
                         'surrender_number': surrender_no,
                         'staff_name': staff_name,
                         'status': 'SUBMITTED'
                     }
-                
-                submitted = st.form_submit_button("Submit Request", use_container_width=True)
-                
-                if submitted:
-                    errors = []
-                    if amount <= 0:
-                        errors.append("Amount must be greater than 0")
-                    if not payment_description:
-                        errors.append("Payment Description is required")
                     
-                    # Validation based on type
-                    if main_category == "Submit Payment Request":
-                        if selected_type == "Student Payment":
-                            if not request_data.get('batch_no'):
-                                errors.append("Batch No. is required")
-                            if request_data.get('product_type') in ["Undergraduate", "TVET"]:
-                                if not request_data.get('semester'):
-                                    errors.append("Semester is required")
-                                if not request_data.get('payment_type'):
-                                    errors.append("Payment Category is required")
-                        elif selected_type == "Imprest" and not request_data.get('imprest_no'):
-                            errors.append("Imprest No. is required")
-                        elif selected_type == "Petty Cash" and not request_data.get('imprest_no'):
-                            errors.append("Petty Cash No. is required")
-                        elif selected_type == "Supplier Payment" and (not request_data.get('invoice_no') or not request_data.get('supplier_name')):
-                            errors.append("Invoice No. and Supplier Name are required")
-                        elif selected_type == "Salary Payment" and not request_data.get('salary_month'):
-                            errors.append("Salary Month is required")
-                        elif selected_type == "Refund Payment" and (not request_data.get('imprest_no') or not request_data.get('customer_name')):
-                            errors.append("Refund ID and Customer Name are required")
-                    else:  # Surrender
-                        if not request_data.get('surrender_number'):
+                    submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if submitted:
+                        errors = []
+                        if amount <= 0:
+                            errors.append("Amount must be greater than 0")
+                        if not payment_description:
+                            errors.append("Payment Description is required")
+                        if not surrender_no:
                             errors.append("Surrender No. is required")
-                        if not request_data.get('staff_name'):
+                        if not staff_name:
                             errors.append("Staff Name is required")
-                    
-                    if errors:
-                        for error in errors:
-                            st.error(f"❌ {error}")
-                    else:
-                        request_number = save_request(request_data)
-                        st.success(f"✅ Request {request_number} submitted successfully!")
-                        st.balloons()
+                        
+                        if errors:
+                            for error in errors:
+                                st.error(f"❌ {error}")
+                        else:
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted successfully!")
+                            st.balloons()
 
 
 # ================================================================
@@ -929,6 +1047,9 @@ elif choice == "📋 My Requests":
                         st.write(f"**Financial Year:** {row.get('financial_year', 'N/A')}")
                         st.markdown(f"**Status:** {status_display}", unsafe_allow_html=True)
                     
+                    if row.get('payment_description'):
+                        st.write(f"**Description:** {row['payment_description']}")
+                    
                     # Show reference number based on type
                     if row['main_category'] == "Submit Payment Request":
                         if row['request_type'] == "Student Payment" and row.get('batch_no'):
@@ -955,9 +1076,6 @@ elif choice == "📋 My Requests":
                     else:
                         if row.get('surrender_number'):
                             st.write(f"**Surrender No.:** {row['surrender_number']}")
-                    
-                    if row.get('payment_description'):
-                        st.write(f"**Description:** {row['payment_description']}")
                     
                     if row['status'] == 'RETURNED' and row.get('return_reason'):
                         st.error(f"**Return Reason:** {row['return_reason']}")
