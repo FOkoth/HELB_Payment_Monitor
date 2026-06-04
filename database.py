@@ -114,7 +114,6 @@ def get_request_by_id(request_id):
 
 
 def get_column_names(table_name):
-    """Get list of column names for a table"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(f"PRAGMA table_info({table_name})")
@@ -123,12 +122,25 @@ def get_column_names(table_name):
     return columns
 
 
+def calculate_tat(submission_date, payment_date=None):
+    """Calculate Turnaround Time in working days (excluding weekends and public holidays)"""
+    from utils.holidays_ke import working_days_between
+    
+    sub_date = datetime.strptime(submission_date, '%Y-%m-%d').date()
+    
+    if payment_date:
+        pay_date = datetime.strptime(payment_date, '%Y-%m-%d').date()
+        return working_days_between(sub_date, pay_date)
+    else:
+        today = date.today()
+        return working_days_between(sub_date, today)
+
+
 def init_database():
     """Create all tables if they don't exist"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Departments table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS departments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +157,6 @@ def init_database():
         )
     ''')
     
-    # Products table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,7 +168,6 @@ def init_database():
         )
     ''')
     
-    # Funders table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS funders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,7 +175,6 @@ def init_database():
         )
     ''')
     
-    # Financial Years table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS financial_years (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +183,6 @@ def init_database():
         )
     ''')
     
-    # Semesters table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS semesters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,7 +190,6 @@ def init_database():
         )
     ''')
     
-    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,7 +202,6 @@ def init_database():
         )
     ''')
     
-    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,7 +255,6 @@ def init_database():
         )
     ''')
     
-    # SLA Config table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sla_config (
             request_type TEXT PRIMARY KEY,
@@ -333,7 +338,6 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Create logs table
     create_logs_table()
     
     # Insert default users
@@ -626,7 +630,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     old_status = current[0] if current else None
     request_number = current[1] if current else None
     
-    # Get existing columns to avoid errors
     cursor.execute("PRAGMA table_info(requests)")
     existing_columns = [col[1] for col in cursor.fetchall()]
     
@@ -635,7 +638,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     action = ""
     comment = finance_comment or return_reason
     
-    # Only add columns that exist in the database
     if status == 'RECEIVED_BY_FINANCE':
         if 'date_received' in existing_columns:
             updates.append("date_received = ?")
@@ -675,6 +677,18 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             params.append(None)
         action = "RESUBMITTED"
     
+    elif status == 'PAYMENT_PREPARED':
+        action = "Payment Prepared"
+    
+    elif status == 'PAYMENT_VERIFIED':
+        action = "Payment Verified"
+    
+    elif status == 'PAYMENT_APPROVED':
+        action = "Payment Approved"
+    
+    elif status == 'PAYMENT_AUTHORIZED':
+        action = "Payment Authorized"
+    
     elif status == 'PAID':
         if 'payment_date' in existing_columns:
             updates.append("payment_date = ?")
@@ -692,9 +706,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             updates.append("completion_date = ?")
             params.append(datetime.now().strftime('%Y-%m-%d'))
         action = "CLEARED"
-    
-    elif status in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED']:
-        action = status
     
     if finance_comment and 'finance_comment' in existing_columns:
         updates.append("finance_comment = ?")
@@ -916,8 +927,10 @@ def get_all_batch_numbers():
 
 
 def get_allowed_main_categories(user_role, user_dept):
-    if user_role in ["MANAGEMENT", "FINANCE"]:
+    # Management cannot submit
+    if user_role == "MANAGEMENT":
         return []
+    # Finance CAN submit requests
     return ["Submit Payment Request", "Submit Surrender"]
 
 
@@ -929,10 +942,17 @@ def get_allowed_request_types(user_role, user_dept, main_category):
                     "Professional Body", "Direct Payment"]
         else:
             return ["Surrender"]
+    
+    # FINANCE can submit these request types
     if user_role == "FINANCE":
-        return []
+        if main_category == "Submit Payment Request":
+            return ["Imprest", "Petty Cash", "Direct Payment"]
+        else:
+            return ["Surrender"]
+    
     if user_role == "MANAGEMENT":
         return []
+    
     if main_category == "Submit Payment Request":
         allowed = ["Imprest", "Petty Cash", "Direct Payment"]
         if user_dept in ["Lending", "External Resource Mobilization"]:
