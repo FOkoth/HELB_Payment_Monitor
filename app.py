@@ -121,13 +121,6 @@ st.markdown("""
     .log-paid { background-color: #e8f5e9; border-left: 3px solid #00843D; }
     .log-confirmed { background-color: #e0f7fa; border-left: 3px solid #00BCD4; }
     
-    .checklist-item {
-        padding: 0.5rem;
-        margin: 0.5rem 0;
-        border-radius: 5px;
-        background-color: #f8f9fa;
-    }
-    
     .status-paid {
         background-color: #00843D20;
         color: #00843D;
@@ -372,7 +365,10 @@ if choice == "📊 Department Dashboard":
                 status_display = '<span class="status-cleared">✅ Cleared</span>'
             elif row['status'] == 'CONFIRMED_BY_FINANCE':
                 time_lapsed = get_time_lapsed_from_confirmation(row['id'])
-                status_display = f'<span class="status-confirmed">📌 Confirmed ({time_lapsed} days)</span>'
+                if time_lapsed:
+                    status_display = f'<span class="status-confirmed">📌 Confirmed ({time_lapsed} days)</span>'
+                else:
+                    status_display = '<span class="status-confirmed">📌 Confirmed</span>'
             elif row['status'] == 'RETURNED':
                 status_display = f'<span class="status-pending">↩️ Returned on {row["date_returned"]}</span>'
             else:
@@ -393,6 +389,35 @@ if choice == "📊 Department Dashboard":
                 
                 if row.get('payment_description'):
                     st.write(f"**Description:** {row['payment_description']}")
+                
+                # Show reference number based on type
+                if row['main_category'] == "Submit Payment Request":
+                    if row['request_type'] == "Student Payment" and row.get('batch_no'):
+                        st.write(f"**Batch No.:** {row['batch_no']}")
+                        if row.get('product_type'):
+                            st.write(f"**Product:** {row['product_type']}")
+                        if row.get('semester'):
+                            st.write(f"**Semester:** {row['semester']}")
+                        if row.get('payment_type'):
+                            st.write(f"**Payment Category:** {row['payment_type']}")
+                    elif row['request_type'] == "Imprest" and row.get('imprest_no'):
+                        st.write(f"**Imprest No.:** {row['imprest_no']}")
+                    elif row['request_type'] == "Petty Cash" and row.get('imprest_no'):
+                        st.write(f"**Petty Cash No.:** {row['imprest_no']}")
+                    elif row['request_type'] == "Supplier Payment" and row.get('invoice_no'):
+                        st.write(f"**Invoice No.:** {row['invoice_no']}")
+                        st.write(f"**Supplier:** {row.get('supplier_name', 'N/A')}")
+                    elif row['request_type'] == "Salary Payment":
+                        st.write(f"**Month:** {row.get('salary_month', 'N/A')}")
+                        st.write(f"**Year:** {row.get('salary_year', 'N/A')}")
+                    elif row['request_type'] == "Refund Payment" and row.get('imprest_no'):
+                        st.write(f"**Refund ID:** {row['imprest_no']}")
+                        st.write(f"**Customer:** {row.get('customer_name', 'N/A')}")
+                else:  # Surrender
+                    if row.get('surrender_number'):
+                        st.write(f"**Surrender No.:** {row['surrender_number']}")
+                    if row.get('staff_name'):
+                        st.write(f"**Staff Name:** {row['staff_name']}")
                 
                 st.markdown("---")
                 st.subheader("📜 Transaction Logs")
@@ -550,31 +575,31 @@ elif choice == "🔍 Check Payment Status":
                         <tr>
                             <td><strong>Request Number:</strong></td>
                             <td>{result['request_number']}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Department:</strong></td>
-                            <td>{result['department']}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Amount:</strong></td>
-                            <td>KES {result['amount']:,.2f}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Submission Date:</strong></td>
-                            <td>{result['submission_date']}</td>
-                        </tr>
+                         </tr>
+                         <tr>
+                             <td><strong>Department:</strong></td>
+                             <td>{result['department']}</td>
+                         </tr>
+                         <tr>
+                             <td><strong>Amount:</strong></td>
+                             <td>KES {result['amount']:,.2f}</td>
+                         </tr>
+                         <tr>
+                             <td><strong>Submission Date:</strong></td>
+                             <td>{result['submission_date']}</td>
+                         </tr>
                 """, unsafe_allow_html=True)
                 
                 if result['payment_date']:
                     st.markdown(f"""
-                        <tr>
-                            <td><strong>Payment Date:</strong></td>
-                            <td>{result['payment_date']}</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Payment Reference:</strong></td>
-                            <td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td>
-                        </tr>
+                         <tr>
+                             <td><strong>Payment Date:</strong></td>
+                             <td>{result['payment_date']}</td>
+                         </tr>
+                         <tr>
+                             <td><strong>Payment Reference:</strong></td>
+                             <td>{result['payment_reference'] if result['payment_reference'] else 'N/A'}</td>
+                         </tr>
                     """, unsafe_allow_html=True)
                 
                 st.markdown("</table></div>", unsafe_allow_html=True)
@@ -589,7 +614,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST - WITH MAIN CATEGORIES
+# NEW REQUEST - WITH MAIN CATEGORIES AND FIXED STUDENT PAYMENT
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h1 style='color: #00843D;'>📝 Create New Request</h1>", unsafe_allow_html=True)
@@ -637,7 +662,7 @@ elif choice == "📝 New Request":
                 # ======================================================
                 if main_category == "Submit Payment Request":
                     
-                    # STUDENT PAYMENT
+                    # STUDENT PAYMENT - WITH FULL FIELDS
                     if selected_type == "Student Payment":
                         st.subheader("🎓 Student Payment Details")
                         
@@ -650,15 +675,16 @@ elif choice == "📝 New Request":
                         semester = None
                         payment_category = None
                         
+                        # Show Semester and Payment Category ONLY for Undergraduate and TVET
                         if product_type in ["Undergraduate", "TVET"]:
                             semesters = get_semesters()
                             semester = st.selectbox("Semester", semesters if semesters else ["Semester 1", "Semester 2"])
                             payment_category = st.selectbox("Payment Category", ["Tuition", "Upkeep"])
                         else:
+                            # Jielimishe - no semester, tuition only
                             semester = None
                             payment_category = "Tuition"
                         
-                        # Batch No. for Student Payment
                         batch_no = st.text_input("Batch No.", placeholder="Enter batch number")
                         
                         request_data = {
@@ -822,6 +848,8 @@ elif choice == "📝 New Request":
                             errors.append("Petty Cash No. is required")
                         elif selected_type == "Supplier Payment" and (not request_data.get('invoice_no') or not request_data.get('supplier_name')):
                             errors.append("Invoice No. and Supplier Name are required")
+                        elif selected_type == "Salary Payment" and not request_data.get('salary_month'):
+                            errors.append("Salary Month is required")
                         elif selected_type == "Refund Payment" and (not request_data.get('imprest_no') or not request_data.get('customer_name')):
                             errors.append("Refund ID and Customer Name are required")
                     else:  # Surrender
@@ -859,7 +887,10 @@ elif choice == "📋 My Requests":
                     status_display = '<span class="status-cleared">✅ Cleared</span>'
                 elif row['status'] == 'CONFIRMED_BY_FINANCE':
                     time_lapsed = get_time_lapsed_from_confirmation(row['id'])
-                    status_display = f'<span class="status-confirmed">📌 Confirmed ({time_lapsed} days)</span>'
+                    if time_lapsed:
+                        status_display = f'<span class="status-confirmed">📌 Confirmed ({time_lapsed} days)</span>'
+                    else:
+                        status_display = '<span class="status-confirmed">📌 Confirmed</span>'
                 elif row['status'] == 'RETURNED':
                     status_display = f'<span class="status-pending">↩️ Returned on {row["date_returned"]}</span>'
                 else:
@@ -882,14 +913,25 @@ elif choice == "📋 My Requests":
                     if row['main_category'] == "Submit Payment Request":
                         if row['request_type'] == "Student Payment" and row.get('batch_no'):
                             st.write(f"**Batch No.:** {row['batch_no']}")
+                            if row.get('product_type'):
+                                st.write(f"**Product:** {row['product_type']}")
+                            if row.get('semester'):
+                                st.write(f"**Semester:** {row['semester']}")
+                            if row.get('payment_type'):
+                                st.write(f"**Payment Category:** {row['payment_type']}")
                         elif row['request_type'] == "Imprest" and row.get('imprest_no'):
                             st.write(f"**Imprest No.:** {row['imprest_no']}")
                         elif row['request_type'] == "Petty Cash" and row.get('imprest_no'):
                             st.write(f"**Petty Cash No.:** {row['imprest_no']}")
                         elif row['request_type'] == "Supplier Payment" and row.get('invoice_no'):
                             st.write(f"**Invoice No.:** {row['invoice_no']}")
+                            st.write(f"**Supplier:** {row.get('supplier_name', 'N/A')}")
+                        elif row['request_type'] == "Salary Payment":
+                            st.write(f"**Month:** {row.get('salary_month', 'N/A')}")
+                            st.write(f"**Year:** {row.get('salary_year', 'N/A')}")
                         elif row['request_type'] == "Refund Payment" and row.get('imprest_no'):
                             st.write(f"**Refund ID:** {row['imprest_no']}")
+                            st.write(f"**Customer:** {row.get('customer_name', 'N/A')}")
                     else:
                         if row.get('surrender_number'):
                             st.write(f"**Surrender No.:** {row['surrender_number']}")
@@ -1045,7 +1087,10 @@ elif choice == "✅ Approval Queue":
                     status_color = "#DC3545"
                 else:
                     time_lapsed = get_time_lapsed_from_confirmation(req['id'])
-                    status_text = f"Confirmed - Awaiting Payment ({time_lapsed} days)"
+                    if time_lapsed:
+                        status_text = f"Confirmed - Awaiting Payment ({time_lapsed} days)"
+                    else:
+                        status_text = "Confirmed - Awaiting Payment"
                     status_color = "#00BCD4"
                 
                 with st.expander(f"📄 {req['request_number']} - {req['main_category']} - {req['request_type']} - {req['department_name']} - {status_text}"):
@@ -1060,6 +1105,10 @@ elif choice == "✅ Approval Queue":
                         if req['main_category'] == "Submit Payment Request":
                             if req['request_type'] == "Student Payment" and req.get('batch_no'):
                                 st.write(f"**Batch No.:** {req['batch_no']}")
+                                if req.get('product_type'):
+                                    st.write(f"**Product:** {req['product_type']}")
+                                if req.get('semester'):
+                                    st.write(f"**Semester:** {req['semester']}")
                             elif req['request_type'] == "Imprest" and req.get('imprest_no'):
                                 st.write(f"**Imprest No.:** {req['imprest_no']}")
                             elif req['request_type'] == "Supplier Payment" and req.get('invoice_no'):
