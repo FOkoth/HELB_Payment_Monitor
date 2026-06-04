@@ -155,13 +155,15 @@ def migrate_database():
         'finance_checklist_approvals': 'INTEGER DEFAULT 0',
         'finance_checklist_documents': 'INTEGER DEFAULT 0',
         'finance_checklist_comments': 'TEXT',
-        'date_confirmed_by_finance': 'TEXT'
+        'date_confirmed_by_finance': 'TEXT',
+        'main_category': 'TEXT'
     }
     
     for col_name, col_type in required_columns.items():
         if col_name not in existing_columns:
             try:
                 cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
+                print(f"Added column: {col_name}")
             except Exception as e:
                 print(f"Error adding {col_name}: {e}")
     
@@ -170,11 +172,13 @@ def migrate_database():
     if 'full_name' not in user_columns:
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+            print("Added column: full_name to users")
         except Exception as e:
             print(f"Error adding full_name: {e}")
     
     conn.commit()
     conn.close()
+    print("Database migration completed!")
 
 
 def init_database():
@@ -887,7 +891,7 @@ def search_by_batch_number(batch_no):
         SELECT request_number, main_category, amount, status, payment_date, 
                payment_reference, department_name, submission_date
         FROM requests 
-        WHERE batch_no = ? AND main_category = 'Payment Request'
+        WHERE batch_no = ? AND main_category = 'Submit Payment Request'
         ORDER BY submission_date DESC
     ''', (batch_no,))
     results = cursor.fetchall()
@@ -907,7 +911,7 @@ def get_all_batch_numbers():
     cursor = conn.cursor()
     cursor.execute('''
         SELECT DISTINCT batch_no FROM requests 
-        WHERE main_category = 'Payment Request' AND batch_no IS NOT NULL
+        WHERE main_category = 'Submit Payment Request' AND batch_no IS NOT NULL
         ORDER BY batch_no DESC
     ''')
     results = cursor.fetchall()
@@ -952,7 +956,7 @@ def get_allowed_request_types(user_role, user_dept, main_category):
             allowed.append("Refund Payment")
         return allowed
     else:  # Surrender
-        return ["Surrender" if user_dept != "Finance" else "Surrender"]
+        return ["Surrender"]
 
 
 def get_reports_data(user_role, user_dept):
