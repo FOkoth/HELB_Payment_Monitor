@@ -1,12 +1,13 @@
 import os
 import sqlite3
 
-# Delete the existing database
-db_path = "helb_data.db"
-if os.path.exists(db_path):
-    os.remove(db_path)
-    print(f"✅ Deleted old database: {db_path}")
-else:
-    print(f"ℹ️ No existing database found at {db_path}")
+DB_PATH = "helb_data.db"
 
-print("✅ Database reset complete. Restart your app to recreate the database.")
+# Delete the existing database
+if os.path.exists(DB_PATH):
+    os.remove(DB_PATH)
+    print("✅ Old database deleted successfully!")
+else:
+    print("ℹ️ No existing database found.")
+
+print("✅ Database reset complete. The app will create a fresh database on next run.")
