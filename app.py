@@ -16,7 +16,8 @@ from database import (
     get_reports_data, get_returned_requests, resubmit_request, get_request_logs, 
     add_request_log, get_pending_confirmation_count, get_pending_completion_count,
     get_time_lapsed_from_confirmation, verify_finance_password, update_finance_password,
-    get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat
+    get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat,
+    delete_funder, delete_product, delete_financial_year, delete_semester
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -929,8 +930,8 @@ elif choice == "📝 New Request":
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
                     funders = get_funders()
-                    if funders:
-                        funder_name = st.selectbox("Partner / Funder", funders)
+                    if not funders.empty:
+                        funder_name = st.selectbox("Partner / Funder", funders['name'].tolist())
                     else:
                         funder_name = st.text_input("Partner / Funder Name *")
                     
@@ -1310,7 +1311,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE - WITH COMPLETELY UNIQUE KEYS
+# APPROVAL QUEUE - WITH SEPARATE PAYMENT AND SURRENDER (NO OVERLAP)
 # ================================================================
 elif choice == "✅ Approval Queue":
     if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
@@ -1322,8 +1323,12 @@ elif choice == "✅ Approval Queue":
         
         df = get_requests()
         
-        payment_pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
-        surrender_pending = df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
+        # Separate Payment and Surrender requests - NO OVERLAP
+        payment_pending = df[df['main_category'] == "Submit Payment Request"]
+        payment_pending = payment_pending[payment_pending['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
+        
+        surrender_pending = df[df['main_category'] == "Submit Surrender"]
+        surrender_pending = surrender_pending[surrender_pending['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
         
         if payment_pending.empty and surrender_pending.empty:
             st.info("No pending requests.")
@@ -1552,7 +1557,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL
+# ADMIN PANEL - UPDATED WITH DELETE FUNCTIONALITY
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>⚙️ Admin Panel</h2>", unsafe_allow_html=True)
@@ -1560,7 +1565,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings"])
     
     with tab1:
-        st.subheader("User Management")
+        st.subheader("👥 User Management")
         users_df = get_all_users()
         st.dataframe(users_df, use_container_width=True, hide_index=True)
         with st.expander("➕ Add New User"):
@@ -1578,72 +1583,183 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     st.rerun()
     
     with tab2:
-        st.subheader("Department Management")
-        st.dataframe(get_departments(), use_container_width=True)
+        st.subheader("🏢 Department Management")
+        depts = get_departments()
+        st.dataframe(depts, use_container_width=True, hide_index=True)
         with st.expander("➕ Add New Department"):
             with st.form("add_dept_form"):
                 dept_name = st.text_input("Department Name")
-                if st.form_submit_button("Create"):
-                    perms = [True, True, False, False, True, False, False, False, False]
-                    create_department(dept_name, perms)
-                    st.rerun()
+                col1, col2 = st.columns(2)
+                with col1:
+                    can_imprest = st.checkbox("Imprest", True)
+                    can_petty = st.checkbox("Petty Cash", True)
+                    can_supplier = st.checkbox("Supplier", False)
+                with col2:
+                    can_student = st.checkbox("Student Payment", False)
+                    can_surrender = st.checkbox("Surrender", True)
+                    can_refund = st.checkbox("Refund", False)
+                requires_product = st.checkbox("Requires Product Type", False)
+                requires_funder = st.checkbox("Requires Funder", False)
+                is_finance = st.checkbox("Finance Department", False)
+                if st.form_submit_button("Create Department"):
+                    if dept_name:
+                        perms = [can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance]
+                        create_department(dept_name, perms)
+                        st.rerun()
     
     with tab3:
-        st.subheader("Product Management")
-        st.dataframe(get_products(), use_container_width=True)
-        with st.expander("➕ Add New Product"):
-            with st.form("add_product_form"):
-                name = st.text_input("Product Name")
-                if st.form_submit_button("Add"):
-                    add_product(name, "LOAN", True, True)
-                    st.rerun()
-    
-    with tab4:
-        st.subheader("Funder Management")
-        for f in get_funders():
-            st.write(f"• {f}")
-        with st.expander("➕ Add New Funder"):
-            with st.form("add_funder_form"):
-                name = st.text_input("Funder Name")
-                if st.form_submit_button("Add"):
-                    add_funder(name)
-                    st.rerun()
-    
-    with tab5:
-        st.subheader("Financial Year Management")
-        for y in get_financial_years():
-            st.write(f"• {y}")
-        with st.expander("➕ Add New Financial Year"):
-            with st.form("add_fy_form"):
-                year = st.text_input("Financial Year (e.g., 2027/2028)")
-                if st.form_submit_button("Add"):
-                    add_financial_year(year)
-                    st.rerun()
+        st.subheader("📦 Product Management (Lending)")
+        
+        # Display existing products with delete buttons
+        products_df = get_products()
+        if not products_df.empty:
+            for idx, product in products_df.iterrows():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"• {product['name']} ({product['category']})")
+                with col2:
+                    if st.button(f"🗑️ Delete", key=f"del_product_{idx}"):
+                        conn = sqlite3.connect("helb_data.db")
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT id FROM products WHERE name = ?", (product['name'],))
+                        prod_id = cursor.fetchone()
+                        conn.close()
+                        if prod_id:
+                            delete_product(prod_id[0])
+                            st.success(f"Product '{product['name']}' deleted!")
+                            st.rerun()
+        else:
+            st.info("No products added yet.")
         
         st.markdown("---")
-        st.subheader("Semester Management")
-        for s in get_semesters():
-            st.write(f"• {s}")
-        with st.expander("➕ Add New Semester"):
-            with st.form("add_semester_form"):
-                sem = st.text_input("Semester Name")
-                if st.form_submit_button("Add"):
-                    add_semester(sem)
-                    st.rerun()
+        st.subheader("➕ Add New Product")
+        with st.form("add_product_form"):
+            name = st.text_input("Product Name")
+            category = st.selectbox("Category", ["LOAN", "SCHOLARSHIP"])
+            has_payment = st.checkbox("Has Payment Category (Tuition/Upkeep)")
+            has_sem = st.checkbox("Has Semester", True)
+            if st.form_submit_button("Add Product"):
+                if name:
+                    success = add_product(name, category, has_payment, has_sem)
+                    if success:
+                        st.success(f"✅ Product {name} added!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Product name already exists!")
+    
+    with tab4:
+        st.subheader("💰 Funder Management (ERM)")
+        
+        # Display existing funders with delete buttons
+        funders_df = get_funders()
+        if not funders_df.empty:
+            for _, funder in funders_df.iterrows():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"• {funder['name']}")
+                with col2:
+                    if st.button(f"🗑️ Delete", key=f"del_funder_{funder['id']}"):
+                        delete_funder(funder['id'])
+                        st.success(f"Funder '{funder['name']}' deleted!")
+                        st.rerun()
+        else:
+            st.info("No funders added yet.")
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Funder")
+        with st.form("add_funder_form"):
+            funder_name = st.text_input("Funder/Partner Name")
+            if st.form_submit_button("Add Funder"):
+                if funder_name:
+                    success = add_funder(funder_name)
+                    if success:
+                        st.success(f"✅ Funder {funder_name} added!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Funder name already exists!")
+    
+    with tab5:
+        st.subheader("📅 Financial Year Management")
+        
+        # Display existing financial years with delete buttons
+        conn = sqlite3.connect("helb_data.db")
+        years_df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
+        conn.close()
+        
+        if not years_df.empty:
+            for _, year in years_df.iterrows():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"• {year['name']}")
+                with col2:
+                    if st.button(f"🗑️ Delete", key=f"del_year_{year['id']}"):
+                        delete_financial_year(year['id'])
+                        st.success(f"Financial Year '{year['name']}' deleted!")
+                        st.rerun()
+        else:
+            st.info("No financial years added yet.")
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Financial Year")
+        with st.form("add_fy_form"):
+            fy_name = st.text_input("Financial Year (e.g., 2027/2028)")
+            if st.form_submit_button("Add Financial Year"):
+                if fy_name:
+                    success = add_financial_year(fy_name)
+                    if success:
+                        st.success(f"✅ Financial Year {fy_name} added!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Financial year already exists!")
+        
+        st.markdown("---")
+        st.subheader("📚 Semester Management")
+        
+        # Display existing semesters with delete buttons
+        conn = sqlite3.connect("helb_data.db")
+        sems_df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
+        conn.close()
+        
+        if not sems_df.empty:
+            for _, sem in sems_df.iterrows():
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"• {sem['name']}")
+                with col2:
+                    if st.button(f"🗑️ Delete", key=f"del_sem_{sem['id']}"):
+                        delete_semester(sem['id'])
+                        st.success(f"Semester '{sem['name']}' deleted!")
+                        st.rerun()
+        else:
+            st.info("No semesters added yet.")
+        
+        st.markdown("---")
+        st.subheader("➕ Add New Semester")
+        with st.form("add_semester_form"):
+            sem_name = st.text_input("Semester Name (e.g., Semester 3)")
+            if st.form_submit_button("Add Semester"):
+                if sem_name:
+                    success = add_semester(sem_name)
+                    if success:
+                        st.success(f"✅ Semester {sem_name} added!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Semester name already exists!")
     
     with tab6:
-        st.subheader("Finance Password Settings")
+        st.subheader("🔐 Finance Password Settings")
+        st.info("This password is required for all finance actions (Confirm, Prepare, Verify, Approve, Authorize, Pay/Clear).")
         st.text_input("Current Password", value="••••••••", disabled=True)
-        with st.form("update_pwd_form"):
-            new_pwd = st.text_input("New Password", type="password")
-            confirm_pwd = st.text_input("Confirm Password", type="password")
-            if st.form_submit_button("Update"):
-                if new_pwd and len(new_pwd) >= 4 and new_pwd == confirm_pwd:
-                    update_finance_password(new_pwd)
-                    st.success("Password updated!")
+        with st.form("update_finance_pwd_form"):
+            new_password = st.text_input("New Finance Password", type="password")
+            confirm_password = st.text_input("Confirm New Password", type="password")
+            if st.form_submit_button("Update Finance Password"):
+                if new_password and len(new_password) >= 4 and new_password == confirm_password:
+                    update_finance_password(new_password)
+                    st.success("✅ Finance password updated successfully!")
                     st.rerun()
                 else:
-                    st.error("Invalid password!")
+                    st.error("❌ Invalid password!")
 
 
 # ================================================================
