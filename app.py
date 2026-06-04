@@ -16,7 +16,7 @@ from database import (
     get_reports_data, get_returned_requests, resubmit_request, get_request_logs, 
     add_request_log, get_pending_confirmation_count, get_pending_completion_count,
     get_time_lapsed_from_confirmation, verify_finance_password, update_finance_password,
-    get_finance_password, add_financial_year, add_semester, add_funder
+    get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -40,7 +40,6 @@ st.markdown("""
         --helb-green-dark: #006030;
         --helb-gold: #FFB81C;
         --helb-blue: #00529B;
-        --helb-red: #DC3545;
         --gray-50: #F9FAFB;
         --gray-100: #F3F4F6;
         --gray-200: #E5E7EB;
@@ -49,7 +48,6 @@ st.markdown("""
         --gray-500: #6B7280;
         --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         --radius-sm: 0.375rem;
         --radius-md: 0.5rem;
         --radius-lg: 0.75rem;
@@ -567,8 +565,8 @@ def display_transaction_logs(request_id):
                 st.markdown(f"<div class='log-submitted'>📝 **{timestamp}** - Submitted by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RECEIVED':
                 st.markdown(f"<div class='log-received'>📥 **{timestamp}** - Received by {log['performed_by']}</div>", unsafe_allow_html=True)
-            elif action in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED']:
-                st.markdown(f"<div class='log-stage'>⚙️ **{timestamp}** - {action.replace('_', ' ').title()} by {log['performed_by']}</div>", unsafe_allow_html=True)
+            elif action in ['Payment Prepared', 'Payment Verified', 'Payment Approved', 'Payment Authorized']:
+                st.markdown(f"<div class='log-stage'>⚙️ **{timestamp}** - {action} by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action == 'RETURNED':
                 st.markdown(f"<div class='log-returned'>↩️ **{timestamp}** - Returned by {log['performed_by']}</div>", unsafe_allow_html=True)
             elif action in ['PAID', 'CLEARED']:
@@ -619,590 +617,124 @@ def display_approval_stages(request_id, main_category):
 
 
 # ================================================================
-# DEPARTMENT DASHBOARD - DETAILED
+# DEPARTMENT DASHBOARD
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 0.5rem; font-size: 1.3rem;'>📊 Department Dashboard</h2>", unsafe_allow_html=True)
     st.markdown(f"<p style='color: #6B7280; margin-bottom: 1rem; font-size: 0.75rem;'>Viewing data for: <strong style='color: #00843D;'>{st.session_state.user_dept}</strong></p>", unsafe_allow_html=True)
     
-    # Get data
     df = get_department_requests(st.session_state.user_dept)
-    df_filtered = filter_by_filters(df, st.session_state.selected_financial_year, st.session_state.selected_quarter, st.session_state.selected_month)
-    df_previous = filter_by_filters(df, "All", "All", "All")
+    df = filter_by_filters(df, st.session_state.selected_financial_year, st.session_state.selected_quarter, st.session_state.selected_month)
     
-    if df_filtered.empty:
-        st.info("No requests found for your department with the selected filters.")
+    if df.empty:
+        st.info("No requests found.")
     else:
-        # Tabs
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "💰 Financial Analytics", "📈 Performance", "📋 History"])
+        tab1, tab2, tab3 = st.tabs(["📊 Overview", "📋 Recent", "📜 History"])
         
         with tab1:
-            # Key Metrics
-            total = len(df_filtered)
-            total_prev = len(df_previous) if not df_previous.empty else 0
-            
-            pending = len(df_filtered[df_filtered['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
-            pending_prev = len(df_previous[df_previous['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]) if not df_previous.empty else 0
-            
-            completed = len(df_filtered[df_filtered['status'].isin(['PAID', 'CLEARED'])])
-            completed_prev = len(df_previous[df_previous['status'].isin(['PAID', 'CLEARED'])]) if not df_previous.empty else 0
-            
-            returned = len(df_filtered[df_filtered['status'] == 'RETURNED'])
-            amount = df_filtered['amount'].sum()
+            total = len(df)
+            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
+            completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+            amount = df['amount'].sum()
             
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{total}</h3>
-                        <p>Total Requests</p>
-                        <small>{get_trend_indicator(total, total_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{pending}</h3>
-                        <p>Pending</p>
-                        <small>{get_trend_indicator(pending, pending_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col3:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{completed}</h3>
-                        <p>Completed</p>
-                        <small>{get_trend_indicator(completed, completed_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col4:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>KES {amount:,.0f}</h3>
-                        <p>Total Amount</p>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            # Charts
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**📊 Request Type Distribution**")
-                type_counts = df_filtered['request_type'].value_counts().reset_index()
-                type_counts.columns = ['Type', 'Count']
-                if not type_counts.empty:
-                    fig = px.pie(type_counts, values='Count', names='Type', hole=0.3,
-                                color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#DC3545', '#00BCD4', '#9C27B0'])
-                    fig.update_layout(height=350, margin=dict(l=10, r=10, t=20, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                st.markdown("**💰 Amount by Request Type**")
-                amount_by_type = df_filtered.groupby('request_type')['amount'].sum().reset_index()
-                if not amount_by_type.empty:
-                    fig = px.bar(amount_by_type, x='request_type', y='amount',
-                                color='amount', color_continuous_scale=['#FFB81C', '#00843D'])
-                    fig.update_layout(height=350, xaxis_title="", yaxis_title="Amount (KES)", margin=dict(l=10, r=10, t=20, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Monthly Trend
-            st.markdown("**📈 Monthly Request Trend**")
-            df_filtered['month'] = pd.to_datetime(df_filtered['submission_date']).dt.strftime('%b %Y')
-            monthly = df_filtered.groupby('month').agg({
-                'request_number': 'count',
-                'amount': 'sum'
-            }).reset_index()
-            monthly.columns = ['month', 'requests', 'amount']
-            if not monthly.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(name='Request Count', x=monthly['month'], y=monthly['requests'], 
-                                      marker_color='#FFB81C', yaxis='y'))
-                fig.add_trace(go.Scatter(name='Amount (KES)', x=monthly['month'], y=monthly['amount'],
-                                          marker_color='#00843D', yaxis='y2', mode='lines+markers'))
-                fig.update_layout(
-                    height=350,
-                    xaxis_title="Month",
-                    yaxis=dict(title="Request Count", side="left"),
-                    yaxis2=dict(title="Amount (KES)", side="right", overlaying="y", showgrid=False),
-                    margin=dict(l=10, r=10, t=20, b=10)
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Insights
-            st.markdown("**💡 Key Insights**")
-            insights = []
-            if returned > 0:
-                insights.append(f"<div class='warning-box'>⚠️ You have <strong>{returned}</strong> returned request(s) that need your attention.</div>")
-            if pending > 7:
-                insights.append(f"<div class='alert-box'>🔔 <strong>{pending}</strong> request(s) have been pending for review. Please follow up.</div>")
-            if completed > 0:
-                completion_rate = (completed / total) * 100
-                if completion_rate > 80:
-                    insights.append(f"<div class='insight-box'>✅ Excellent! Your department has a <strong>{completion_rate:.1f}%</strong> completion rate.</div>")
-                elif completion_rate < 50:
-                    insights.append(f"<div class='warning-box'>📊 Your completion rate is <strong>{completion_rate:.1f}%</strong>. Consider reviewing pending requests.</div>")
-            
-            for insight in insights:
-                st.markdown(insight, unsafe_allow_html=True)
+            with col1: st.markdown(f"<div class='metric-card'><h3>{total}</h3><p>Total Requests</p></div>", unsafe_allow_html=True)
+            with col2: st.markdown(f"<div class='metric-card'><h3>{pending}</h3><p>Pending</p></div>", unsafe_allow_html=True)
+            with col3: st.markdown(f"<div class='metric-card'><h3>{completed}</h3><p>Completed</p></div>", unsafe_allow_html=True)
+            with col4: st.markdown(f"<div class='metric-card'><h3>KES {amount:,.0f}</h3><p>Total Amount</p></div>", unsafe_allow_html=True)
         
         with tab2:
-            st.markdown("**💰 Financial Overview**")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Amount by Request Type**")
-                amount_by_type = df_filtered.groupby('request_type')['amount'].sum().reset_index()
-                if not amount_by_type.empty:
-                    fig = px.pie(amount_by_type, values='amount', names='request_type', hole=0.3,
-                                color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#DC3545'])
-                    fig.update_layout(height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                st.markdown("**Average Amount by Request Type**")
-                avg_by_type = df_filtered.groupby('request_type')['amount'].mean().reset_index()
-                if not avg_by_type.empty:
-                    fig = px.bar(avg_by_type, x='request_type', y='amount',
-                                color='amount', color_continuous_scale=['#FFB81C', '#00843D'])
-                    fig.update_layout(height=400, xaxis_title="", yaxis_title="Average Amount (KES)")
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown("**📅 Monthly Financial Impact**")
-            if not monthly.empty:
-                fig = px.line(monthly, x='month', y='amount', markers=True,
-                             title="Total Amount Over Time",
-                             color_discrete_sequence=['#00843D'])
-                fig.update_layout(height=350, xaxis_title="Month", yaxis_title="Amount (KES)")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with tab3:
-            st.markdown("**⏱️ Processing Performance**")
-            
-            # Calculate processing times
-            processing_times = []
-            for _, row in df_filtered.iterrows():
+            for _, row in df.head(15).iterrows():
                 if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
-                    submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                    paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                    days = working_days_between(submitted, paid)
-                    processing_times.append({'request_type': row['request_type'], 'days': days})
-            
-            if processing_times:
-                time_df = pd.DataFrame(processing_times)
-                avg_by_type = time_df.groupby('request_type')['days'].mean().reset_index()
-                fig = px.bar(avg_by_type, x='request_type', y='days',
-                             title="Average Processing Time (Working Days)",
-                             color='days', color_continuous_scale=['#00843D', '#FFB81C', '#DC3545'])
-                fig.update_layout(height=400, xaxis_title="", yaxis_title="Working Days")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                overall_avg = time_df['days'].mean()
-                st.markdown(f"<div class='insight-box'>📊 Overall average processing time: <strong>{overall_avg:.1f} working days</strong></div>", unsafe_allow_html=True)
-            else:
-                st.info("No completed requests to calculate processing times")
-        
-        with tab4:
-            st.markdown("**📋 Complete Request History**")
-            for _, row in df_filtered.head(50).iterrows():
-                status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
+                    tat = calculate_tat(row['submission_date'], row['payment_date'])
+                    status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                else:
+                    pending_days = calculate_tat(row['submission_date'])
+                    status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
                 ref_number = get_reference_number(row)
                 with st.expander(f"📄 {row['request_number']} - {row['request_type']} - Ref: {ref_number}"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write(f"**Amount:** KES {row['amount']:,.2f}")
-                        st.write(f"**Submitted:** {row['submission_date']}")
-                    with col2:
-                        st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
+                    st.write(f"**Amount:** KES {row['amount']:,.2f}")
+                    st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
                     if row.get('payment_description'):
                         st.write(f"**Description:** {row['payment_description']}")
                     display_approval_stages(row['id'], row['main_category'])
-                    st.markdown("---")
+        
+        with tab3:
+            for _, row in df.head(30).iterrows():
+                with st.expander(f"📄 {row['request_number']} - {row['request_type']}"):
+                    st.write(f"**Amount:** KES {row['amount']:,.2f}")
+                    st.write(f"**Submitted:** {row['submission_date']}")
                     display_transaction_logs(row['id'])
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD - DETAILED
+# MANAGEMENT DASHBOARD
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 0.5rem; font-size: 1.3rem;'>📈 Management Dashboard</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #6B7280; margin-bottom: 1rem; font-size: 0.75rem;'><strong>Executive View</strong> - All departments, all requests</p>", unsafe_allow_html=True)
     
-    # Get data
     df = get_requests()
-    df_filtered = filter_by_filters(df, st.session_state.selected_financial_year, st.session_state.selected_quarter, st.session_state.selected_month)
-    df_previous = filter_by_filters(df, "All", "All", "All")
+    df = filter_by_filters(df, st.session_state.selected_financial_year, st.session_state.selected_quarter, st.session_state.selected_month)
     
-    if df_filtered.empty:
-        st.info("No data available with the selected filters.")
+    if df.empty:
+        st.info("No data available.")
     else:
-        # Tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "💰 Financial Analytics", "🏢 Department Performance", "⏱️ SLA & Processing", "📋 All Requests"])
+        tab1, tab2, tab3 = st.tabs(["📊 Overview", "📈 Performance", "📋 All Requests"])
         
         with tab1:
-            # Key Metrics
-            total = len(df_filtered)
-            total_prev = len(df_previous) if not df_previous.empty else 0
+            total = len(df)
+            pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
+            completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+            amount = df['amount'].sum()
             
-            pending = len(df_filtered[df_filtered['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])])
-            pending_prev = len(df_previous[df_previous['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]) if not df_previous.empty else 0
-            
-            completed = len(df_filtered[df_filtered['status'].isin(['PAID', 'CLEARED'])])
-            completed_prev = len(df_previous[df_previous['status'].isin(['PAID', 'CLEARED'])]) if not df_previous.empty else 0
-            
-            amount = df_filtered['amount'].sum()
-            amount_prev = df_previous['amount'].sum() if not df_previous.empty else 0
-            
-            returned = len(df_filtered[df_filtered['status'] == 'RETURNED'])
-            returned_prev = len(df_previous[df_previous['status'] == 'RETURNED']) if not df_previous.empty else 0
-            
-            # Row 1 - Main KPIs
             col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{total}</h3>
-                        <p>Total Requests</p>
-                        <small>{get_trend_indicator(total, total_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>KES {amount:,.0f}</h3>
-                        <p>Total Amount</p>
-                        <small>{get_trend_indicator(amount, amount_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col3:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{completed}</h3>
-                        <p>Completed</p>
-                        <small>{get_trend_indicator(completed, completed_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col4:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3>{returned}</h3>
-                        <p>Returned</p>
-                        <small>{get_trend_indicator(returned, returned_prev)}</small>
-                    </div>
-                """, unsafe_allow_html=True)
+            with col1: st.markdown(f"<div class='metric-card'><h3>{total}</h3><p>Total Requests</p></div>", unsafe_allow_html=True)
+            with col2: st.markdown(f"<div class='metric-card'><h3>{pending}</h3><p>Pending</p></div>", unsafe_allow_html=True)
+            with col3: st.markdown(f"<div class='metric-card'><h3>{completed}</h3><p>Completed</p></div>", unsafe_allow_html=True)
+            with col4: st.markdown(f"<div class='metric-card'><h3>KES {amount:,.0f}</h3><p>Total Amount</p></div>", unsafe_allow_html=True)
             
             st.markdown("---")
-            
-            # Row 2 - Pipeline KPIs
-            st.markdown("**📊 Workflow Pipeline**")
-            col1, col2, col3 = st.columns(3)
-            pending_receive = len(df_filtered[df_filtered['status'] == 'SUBMITTED'])
-            pending_stages = len(df_filtered[df_filtered['status'].isin(['RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED'])])
-            pending_payment = len(df_filtered[df_filtered['status'].isin(['PAYMENT_AUTHORIZED'])])
-            
-            with col1:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3 style='color: #DC3545;'>{pending_receive}</h3>
-                        <p>Pending Receive</p>
-                        <small>Awaiting Finance confirmation</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col2:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3 style='color: #FFB81C;'>{pending_stages}</h3>
-                        <p>In Progress</p>
-                        <small>At various approval stages</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            with col3:
-                st.markdown(f"""
-                    <div class='metric-card'>
-                        <h3 style='color: #00843D;'>{pending_payment}</h3>
-                        <p>Pending Payment</p>
-                        <small>Authorized - Awaiting release</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            # Charts
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**📊 Request Type Distribution**")
-                type_counts = df_filtered['request_type'].value_counts().reset_index()
+                st.markdown("**Request Type Distribution**")
+                type_counts = df['request_type'].value_counts().reset_index()
                 type_counts.columns = ['Type', 'Count']
-                if not type_counts.empty:
-                    fig = px.pie(type_counts, values='Count', names='Type', hole=0.3,
-                                color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#DC3545', '#00BCD4', '#9C27B0', '#FF9800'])
-                    fig.update_layout(height=400, margin=dict(l=10, r=10, t=20, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
-            
+                fig = px.pie(type_counts, values='Count', names='Type', hole=0.3,
+                            color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#DC3545'])
+                fig.update_layout(height=350)
+                st.plotly_chart(fig, use_container_width=True)
             with col2:
-                st.markdown("**💰 Amount by Request Type**")
-                amount_by_type = df_filtered.groupby('request_type')['amount'].sum().reset_index()
-                if not amount_by_type.empty:
-                    fig = px.bar(amount_by_type, x='request_type', y='amount',
-                                color='amount', color_continuous_scale=['#FFB81C', '#00843D'])
-                    fig.update_layout(height=400, xaxis_title="", yaxis_title="Amount (KES)", margin=dict(l=10, r=10, t=20, b=10))
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Monthly Trends
-            st.markdown("**📈 Monthly Trends**")
-            df_filtered['month'] = pd.to_datetime(df_filtered['submission_date']).dt.strftime('%b %Y')
-            monthly = df_filtered.groupby('month').agg({
-                'request_number': 'count',
-                'amount': 'sum'
-            }).reset_index()
-            monthly.columns = ['month', 'requests', 'amount']
-            
-            if not monthly.empty:
-                col1, col2 = st.columns(2)
-                with col1:
-                    fig = px.line(monthly, x='month', y='requests', markers=True,
-                                 title="Request Volume Trend",
-                                 color_discrete_sequence=['#00843D'])
-                    fig.update_layout(height=350, xaxis_title="Month", yaxis_title="Number of Requests")
-                    st.plotly_chart(fig, use_container_width=True)
-                with col2:
-                    fig = px.line(monthly, x='month', y='amount', markers=True,
-                                 title="Amount Trend",
-                                 color_discrete_sequence=['#FFB81C'])
-                    fig.update_layout(height=350, xaxis_title="Month", yaxis_title="Amount (KES)")
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            # Executive Insights
-            st.markdown("**💡 Executive Insights**")
-            insights = []
-            
-            if pending_receive > 10:
-                insights.append(f"<div class='alert-box'>🚨 <strong>{pending_receive}</strong> requests are pending Finance confirmation. Action required.</div>")
-            if returned > 5:
-                insights.append(f"<div class='warning-box'>⚠️ <strong>{returned}</strong> requests have been returned to departments for correction.</div>")
-            if pending_payment > 5:
-                insights.append(f"<div class='warning-box'>💰 <strong>{pending_payment}</strong> authorized requests are pending payment release.</div>")
-            
-            # Calculate SLA compliance
-            completed_requests = df_filtered[df_filtered['status'].isin(['PAID', 'CLEARED'])]
-            if not completed_requests.empty:
-                sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                           'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                           'Professional Body': 5, 'Direct Payment': 3}
-                breaches = 0
-                for _, row in completed_requests.iterrows():
-                    if row['payment_date']:
-                        submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                        paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                        days = working_days_between(submitted, paid)
-                        sla_days = sla_map.get(row['request_type'], 5)
-                        if days > sla_days:
-                            breaches += 1
-                compliance_rate = ((len(completed_requests) - breaches) / len(completed_requests)) * 100
-                if compliance_rate < 80:
-                    insights.append(f"<div class='alert-box'>📉 SLA compliance rate is <strong>{compliance_rate:.1f}%</strong>. Below target of 90%.</div>")
-                elif compliance_rate < 90:
-                    insights.append(f"<div class='warning-box'>📊 SLA compliance rate is <strong>{compliance_rate:.1f}%</strong>. Room for improvement.</div>")
-                else:
-                    insights.append(f"<div class='insight-box'>✅ SLA compliance rate is <strong>{compliance_rate:.1f}%</strong>. Excellent performance!</div>")
-            
-            if not insights:
-                insights.append("<div class='insight-box'>✅ All metrics are within acceptable ranges. Good performance!</div>")
-            
-            for insight in insights:
-                st.markdown(insight, unsafe_allow_html=True)
-        
-        with tab2:
-            st.markdown("**💰 Financial Analytics**")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Amount by Request Type**")
-                amount_by_type = df_filtered.groupby('request_type')['amount'].sum().reset_index()
-                if not amount_by_type.empty:
-                    fig = px.pie(amount_by_type, values='amount', names='request_type', hole=0.3,
-                                color_discrete_sequence=['#00843D', '#FFB81C', '#00529B', '#DC3545', '#00BCD4'])
-                    fig.update_layout(height=450)
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                st.markdown("**Amount by Department (Top 10)**")
-                amount_by_dept = df_filtered.groupby('department_name')['amount'].sum().reset_index()
-                amount_by_dept = amount_by_dept.sort_values('amount', ascending=True).tail(10)
-                if not amount_by_dept.empty:
-                    fig = px.bar(amount_by_dept, x='amount', y='department_name', orientation='h',
-                                color='amount', color_continuous_scale=['#FFB81C', '#00843D'])
-                    fig.update_layout(height=450, xaxis_title="Amount (KES)", yaxis_title="")
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown("**📅 Monthly Financial Impact**")
-            if not monthly.empty:
-                fig = px.area(monthly, x='month', y='amount',
-                             title="Cumulative Amount Over Time",
-                             color_discrete_sequence=['#00843D'])
-                fig.update_layout(height=350, xaxis_title="Month", yaxis_title="Amount (KES)")
+                st.markdown("**Monthly Trend**")
+                df['month'] = pd.to_datetime(df['submission_date']).dt.strftime('%b %Y')
+                monthly = df.groupby('month')['request_number'].count().reset_index()
+                monthly.columns = ['month', 'count']
+                fig = px.line(monthly, x='month', y='count', markers=True, color_discrete_sequence=['#00843D'])
+                fig.update_layout(height=350)
                 st.plotly_chart(fig, use_container_width=True)
         
-        with tab3:
-            st.markdown("**🏢 Department Performance**")
-            
-            # Department summary
-            dept_summary = df_filtered.groupby('department_name').agg({
-                'request_number': 'count',
-                'amount': 'sum'
-            }).reset_index()
+        with tab2:
+            st.markdown("**Department Performance**")
+            dept_summary = df.groupby('department_name').agg({'request_number': 'count', 'amount': 'sum'}).reset_index()
             dept_summary.columns = ['Department', 'Requests', 'Amount']
-            
-            # Add completion rates
             completion_rates = []
-            avg_times = []
             for dept in dept_summary['Department']:
-                dept_df = df_filtered[df_filtered['department_name'] == dept]
+                dept_df = df[df['department_name'] == dept]
                 completed = len(dept_df[dept_df['status'].isin(['PAID', 'CLEARED'])])
                 total = len(dept_df)
                 rate = (completed / total * 100) if total > 0 else 0
                 completion_rates.append(round(rate, 1))
-                
-                # Average processing time
-                times = []
-                for _, row in dept_df.iterrows():
-                    if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
-                        submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                        paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                        days = working_days_between(submitted, paid)
-                        times.append(days)
-                avg_times.append(round(sum(times)/len(times), 1) if times else 0)
-            
             dept_summary['Completion %'] = completion_rates
-            dept_summary['Avg Days'] = avg_times
             dept_summary = dept_summary.sort_values('Completion %', ascending=False)
-            
             st.dataframe(dept_summary, use_container_width=True, hide_index=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                fig = px.bar(dept_summary, x='Department', y='Completion %',
-                             title="Completion Rate by Department",
-                             color='Completion %',
-                             color_continuous_scale=['#DC3545', '#FFB81C', '#00843D'])
-                fig.update_layout(height=450, xaxis_title="", yaxis_title="Completion Rate (%)")
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                fig = px.bar(dept_summary, x='Department', y='Avg Days',
-                             title="Average Processing Time by Department",
-                             color='Avg Days',
-                             color_continuous_scale=['#00843D', '#FFB81C', '#DC3545'])
-                fig.update_layout(height=450, xaxis_title="", yaxis_title="Working Days")
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Top Submitters
-            st.markdown("**📝 Top Submitters**")
-            top_submitters = df_filtered.groupby('submitted_by')['request_number'].count().reset_index()
-            top_submitters.columns = ['User', 'Requests']
-            top_submitters = top_submitters.sort_values('Requests', ascending=False).head(10)
-            
-            if not top_submitters.empty:
-                fig = px.bar(top_submitters, x='User', y='Requests',
-                             title="Top 10 Request Submitters",
-                             color='Requests',
-                             color_continuous_scale=['#FFB81C', '#00843D'])
-                fig.update_layout(height=400, xaxis_title="", yaxis_title="Number of Requests")
-                st.plotly_chart(fig, use_container_width=True)
         
-        with tab4:
-            st.markdown("**⏱️ SLA & Processing Analytics**")
-            
-            # Overall SLA Gauge
-            completed_requests = df_filtered[df_filtered['status'].isin(['PAID', 'CLEARED'])]
-            if not completed_requests.empty:
-                sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                           'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                           'Professional Body': 5, 'Direct Payment': 3}
-                
-                breaches = 0
-                type_breaches = {}
-                for _, row in completed_requests.iterrows():
-                    if row['payment_date']:
-                        submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                        paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                        days = working_days_between(submitted, paid)
-                        sla_days = sla_map.get(row['request_type'], 5)
-                        if days > sla_days:
-                            breaches += 1
-                            req_type = row['request_type']
-                            type_breaches[req_type] = type_breaches.get(req_type, 0) + 1
-                
-                compliance_rate = ((len(completed_requests) - breaches) / len(completed_requests)) * 100
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    fig = go.Figure(go.Indicator(
-                        mode = "gauge+number+delta",
-                        value = compliance_rate,
-                        title = {'text': "SLA Compliance Rate", 'font': {'size': 16}},
-                        delta = {'reference': 90, 'increasing': {'color': "#00843D"}, 'decreasing': {'color': "#DC3545"}},
-                        gauge = {
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': "#00843D"},
-                            'steps': [
-                                {'range': [0, 70], 'color': '#FFEBEE'},
-                                {'range': [70, 90], 'color': '#FFF8E1'},
-                                {'range': [90, 100], 'color': '#E8F5E9'}
-                            ],
-                            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 90}
-                        }
-                    ))
-                    fig.update_layout(height=350, margin=dict(l=20, r=20, t=50, b=20))
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    if type_breaches:
-                        breach_df = pd.DataFrame(list(type_breaches.items()), columns=['Request Type', 'Breaches'])
-                        breach_df = breach_df.sort_values('Breaches', ascending=False)
-                        fig = px.bar(breach_df, x='Request Type', y='Breaches',
-                                     title="Breaches by Request Type",
-                                     color='Breaches',
-                                     color_continuous_scale=['#FFB81C', '#DC3545'])
-                        fig.update_layout(height=350)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.markdown("<div class='insight-box'>✅ No SLA breaches detected. Great job!</div>", unsafe_allow_html=True)
-            
-            # Processing time by stage
-            st.markdown("**⏱️ Average Processing Time by Stage**")
-            stage_times = []
-            for _, row in df_filtered.iterrows():
-                if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
-                    submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                    paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                    days = working_days_between(submitted, paid)
-                    stage_times.append({'request_type': row['request_type'], 'days': days})
-            
-            if stage_times:
-                stage_df = pd.DataFrame(stage_times)
-                avg_by_type = stage_df.groupby('request_type')['days'].mean().reset_index()
-                avg_by_type = avg_by_type.sort_values('days', ascending=False)
-                fig = px.bar(avg_by_type, x='request_type', y='days',
-                             title="Average Processing Time by Request Type (Working Days)",
-                             color='days',
-                             color_continuous_scale=['#00843D', '#FFB81C', '#DC3545'])
-                fig.update_layout(height=400, xaxis_title="", yaxis_title="Working Days")
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with tab5:
-            st.markdown("**📋 All Requests**")
-            display_df = df_filtered.copy()
+        with tab3:
+            display_df = df.copy()
             display_df['Reference No.'] = display_df.apply(get_reference_number, axis=1)
-            display_cols = ['request_number', 'request_type', 'department_name', 'Reference No.', 'amount', 'status', 'submission_date']
-            if 'payment_date' in display_df.columns:
-                display_cols.append('payment_date')
+            display_df['TAT (Days)'] = display_df.apply(lambda x: calculate_tat(x['submission_date'], x['payment_date']) if x['status'] in ['PAID', 'CLEARED'] else calculate_tat(x['submission_date']), axis=1)
+            display_cols = ['request_number', 'request_type', 'department_name', 'Reference No.', 'amount', 'status', 'TAT (Days)', 'submission_date']
             st.dataframe(display_df[display_cols], use_container_width=True, hide_index=True)
-            
-            csv = df_filtered.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Export to CSV", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Export", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
 
 # ================================================================
@@ -1229,7 +761,12 @@ elif choice == "🔍 Check Payment Status":
             
             if not results.empty:
                 for _, row in results.iterrows():
-                    status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
+                    if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
+                        tat = calculate_tat(row['submission_date'], row['payment_date'])
+                        status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                    else:
+                        pending_days = calculate_tat(row['submission_date'])
+                        status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
                     ref_number = get_reference_number(row)
                     st.markdown(f"""
                     <div style='background:#F9FAFB; padding:0.75rem; border-radius:10px; margin-bottom:0.5rem; border-left:4px solid #00843D;'>
@@ -1245,7 +782,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST (same as before - keep all existing functionality)
+# NEW REQUEST
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>📝 Create New Request</h2>", unsafe_allow_html=True)
@@ -1263,7 +800,6 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            # Student Payment
             if main_category == "Submit Payment Request" and selected_type == "Student Payment":
                 products = get_products()
                 product_list = products['name'].tolist() if not products.empty else ["Undergraduate", "TVET", "Jielimishe"]
@@ -1302,7 +838,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Imprest
             elif main_category == "Submit Payment Request" and selected_type == "Imprest":
                 with st.form(key="imprest_form"):
                     col1, col2 = st.columns(2)
@@ -1330,7 +865,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Petty Cash
             elif main_category == "Submit Payment Request" and selected_type == "Petty Cash":
                 with st.form(key="petty_form"):
                     col1, col2 = st.columns(2)
@@ -1358,7 +892,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Direct Payment
             elif main_category == "Submit Payment Request" and selected_type == "Direct Payment":
                 with st.form(key="direct_form"):
                     col1, col2 = st.columns(2)
@@ -1386,7 +919,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Supplier Payment
             elif main_category == "Submit Payment Request" and selected_type == "Supplier Payment":
                 with st.form(key="supplier_form"):
                     col1, col2 = st.columns(2)
@@ -1415,7 +947,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Salary Payment
             elif main_category == "Submit Payment Request" and selected_type == "Salary Payment":
                 with st.form(key="salary_form"):
                     col1, col2 = st.columns(2)
@@ -1444,7 +975,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Refund Payment
             elif main_category == "Submit Payment Request" and selected_type == "Refund Payment":
                 with st.form(key="refund_form"):
                     col1, col2 = st.columns(2)
@@ -1473,7 +1003,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Mileage Claim
             elif main_category == "Submit Payment Request" and selected_type == "Mileage Claim":
                 with st.form(key="mileage_form"):
                     col1, col2 = st.columns(2)
@@ -1501,7 +1030,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Staff Training
             elif main_category == "Submit Payment Request" and selected_type == "Staff Training":
                 with st.form(key="training_form"):
                     col1, col2 = st.columns(2)
@@ -1529,7 +1057,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Professional Body
             elif main_category == "Submit Payment Request" and selected_type == "Professional Body":
                 with st.form(key="professional_form"):
                     col1, col2 = st.columns(2)
@@ -1557,7 +1084,6 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # Surrender
             elif main_category == "Submit Surrender":
                 with st.form(key="surrender_form"):
                     col1, col2 = st.columns(2)
@@ -1601,7 +1127,12 @@ elif choice == "📋 My Requests":
             st.info("You haven't submitted any requests yet.")
         else:
             for _, row in user_requests.iterrows():
-                status_badge = '<span class="status-paid">✅ Paid</span>' if row['status'] == 'PAID' else '<span class="status-pending">⏳ Pending</span>'
+                if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
+                    tat = calculate_tat(row['submission_date'], row['payment_date'])
+                    status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
+                else:
+                    pending_days = calculate_tat(row['submission_date'])
+                    status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
                 ref_number = get_reference_number(row)
                 with st.expander(f"📄 {row['request_number']} - {row['request_type']} - Ref: {ref_number}"):
                     st.write(f"**Amount:** KES {row['amount']:,.2f}")
@@ -1664,11 +1195,11 @@ elif choice == "✅ Approval Queue":
                             checklist_documents = st.checkbox("✓ Documents", key=f"doc_{idx}")
                         with col2:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_{idx}")
-                            if st.button(f"Confirm", key=f"confirm_{idx}"):
+                            if st.button(f"📋 Receive Request", key=f"confirm_{idx}"):
                                 if checklist_approvals and checklist_documents:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(req['id'], 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
-                                        st.success(f"Confirmed!")
+                                        st.success(f"Request received!")
                                         st.rerun()
                                     else:
                                         st.error("Incorrect password!")
@@ -1676,51 +1207,51 @@ elif choice == "✅ Approval Queue":
                                     st.error("Check both boxes!")
                         
                         reason = st.text_input("Return Reason", key=f"ret_{idx}")
-                        if st.button(f"Return", key=f"return_{idx}"):
+                        if st.button(f"↩️ Return Request", key=f"return_{idx}"):
                             if reason:
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
-                                    st.warning(f"Returned!")
+                                    st.warning(f"Request returned!")
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
                     
                     elif req['status'] == 'RECEIVED_BY_FINANCE':
                         pwd = st.text_input("Finance Password", type="password", key=f"pwd_prep_{idx}")
-                        if st.button(f"Prepare", key=f"prepare_{idx}"):
+                        if st.button(f"📋 Prepare Payment", key=f"prepare_{idx}"):
                             if pwd and verify_finance_password(pwd):
                                 update_request_status(req['id'], 'PAYMENT_PREPARED', performed_by=st.session_state.username)
-                                st.success(f"Prepared!")
+                                st.success(f"Payment prepared!")
                                 st.rerun()
                             else:
                                 st.error("Incorrect password!")
                     
                     elif req['status'] == 'PAYMENT_PREPARED':
                         pwd = st.text_input("Finance Password", type="password", key=f"pwd_ver_{idx}")
-                        if st.button(f"Verify", key=f"verify_{idx}"):
+                        if st.button(f"✅ Verify Payment", key=f"verify_{idx}"):
                             if pwd and verify_finance_password(pwd):
                                 update_request_status(req['id'], 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
-                                st.success(f"Verified!")
+                                st.success(f"Payment verified!")
                                 st.rerun()
                             else:
                                 st.error("Incorrect password!")
                     
                     elif req['status'] == 'PAYMENT_VERIFIED':
                         pwd = st.text_input("Finance Password", type="password", key=f"pwd_app_{idx}")
-                        if st.button(f"Approve", key=f"approve_{idx}"):
+                        if st.button(f"✅ Approve Payment", key=f"approve_{idx}"):
                             if pwd and verify_finance_password(pwd):
                                 update_request_status(req['id'], 'PAYMENT_APPROVED', performed_by=st.session_state.username)
-                                st.success(f"Approved!")
+                                st.success(f"Payment approved!")
                                 st.rerun()
                             else:
                                 st.error("Incorrect password!")
                     
                     elif req['status'] == 'PAYMENT_APPROVED':
                         pwd = st.text_input("Finance Password", type="password", key=f"pwd_auth_{idx}")
-                        if st.button(f"Authorize", key=f"authorize_{idx}"):
+                        if st.button(f"✅ Authorize Payment", key=f"authorize_{idx}"):
                             if pwd and verify_finance_password(pwd):
                                 update_request_status(req['id'], 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
-                                st.success(f"Authorized!")
+                                st.success(f"Payment authorized!")
                                 st.rerun()
                             else:
                                 st.error("Incorrect password!")
@@ -1728,13 +1259,14 @@ elif choice == "✅ Approval Queue":
                     elif req['status'] == 'PAYMENT_AUTHORIZED':
                         payment_ref = st.text_input("Payment Reference", key=f"ref_{idx}")
                         pwd = st.text_input("Finance Password", type="password", key=f"pwd_pay_{idx}")
-                        if st.button(f"Mark Paid", key=f"paid_{idx}"):
+                        if st.button(f"💰 Mark as Paid", key=f"paid_{idx}"):
                             if payment_ref:
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'PAID', performed_by=st.session_state.username)
                                     update_payment_details(req['id'], payment_ref)
+                                    tat = calculate_tat(req['submission_date'], datetime.now().strftime('%Y-%m-%d'))
                                     st.balloons()
-                                    st.success(f"Paid!")
+                                    st.success(f"Payment completed! TAT: {tat} working days")
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
@@ -1763,6 +1295,7 @@ elif choice == "📑 Reports":
         display_df['Reference No.'] = df.apply(get_reference_number, axis=1)
         display_df['Amount'] = df['amount'].apply(lambda x: f"KES {x:,.2f}")
         display_df['Status'] = df['status']
+        display_df['TAT (Days)'] = df.apply(lambda x: calculate_tat(x['submission_date'], x['payment_date']) if x['status'] in ['PAID', 'CLEARED'] else calculate_tat(x['submission_date']), axis=1)
         display_df['Submitted'] = df['submission_date']
         
         st.dataframe(display_df, use_container_width=True, hide_index=True)
