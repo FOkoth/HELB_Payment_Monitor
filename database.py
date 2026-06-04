@@ -622,7 +622,7 @@ def get_pending_confirmation_count():
 def get_pending_completion_count():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests WHERE status IN ('RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED', 'SURRENDER_VERIFIED', 'SURRENDER_APPROVED', 'SURRENDER_AUTHORIZED')")
+    cursor.execute("SELECT COUNT(*) FROM requests WHERE status NOT IN ('PAID', 'CLEARED', 'RETURNED')")
     count = cursor.fetchone()[0]
     conn.close()
     return count
@@ -653,7 +653,8 @@ def save_request(data):
 
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
-                          checklist_approvals=None, checklist_documents=None, checklist_comments=None):
+                          checklist_approvals=None, checklist_documents=None, checklist_comments=None,
+                          stage_comment=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT status, request_number, main_category FROM requests WHERE id = ?", (request_id,))
@@ -665,7 +666,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
     action = ""
-    comment = finance_comment or return_reason
+    comment = finance_comment or return_reason or stage_comment
     
     if status == 'RECEIVED_BY_FINANCE':
         updates.append("date_received = ?")
@@ -682,6 +683,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             updates.append("finance_checklist_comments = ?")
             params.append(checklist_comments)
         action = "RECEIVED"
+    
     elif status == 'RETURNED':
         updates.append("date_returned = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
@@ -689,6 +691,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             updates.append("return_reason = ?")
             params.append(return_reason)
         action = "RETURNED"
+    
     elif status == 'SUBMITTED':
         updates.append("submission_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
@@ -697,60 +700,48 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         updates.append("return_reason = ?")
         params.append(None)
         action = "RESUBMITTED"
+    
     elif status == 'PAYMENT_PREPARED':
         updates.append("payment_prepared_by = ?")
         params.append(performed_by)
         updates.append("payment_prepared_date = ?")
         params.append(datetime.now().isoformat())
         action = "PAYMENT_PREPARED"
+    
     elif status == 'PAYMENT_VERIFIED':
         updates.append("payment_verified_by = ?")
         params.append(performed_by)
         updates.append("payment_verified_date = ?")
         params.append(datetime.now().isoformat())
         action = "PAYMENT_VERIFIED"
+    
     elif status == 'PAYMENT_APPROVED':
         updates.append("payment_approved_by = ?")
         params.append(performed_by)
         updates.append("payment_approved_date = ?")
         params.append(datetime.now().isoformat())
         action = "PAYMENT_APPROVED"
+    
     elif status == 'PAYMENT_AUTHORIZED':
         updates.append("payment_authorized_by = ?")
         params.append(performed_by)
         updates.append("payment_authorized_date = ?")
         params.append(datetime.now().isoformat())
         action = "PAYMENT_AUTHORIZED"
+    
     elif status == 'PAID':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         action = "PAID"
+    
     elif status == 'CLEARED':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         action = "CLEARED"
-    elif status == 'SURRENDER_VERIFIED':
-        updates.append("payment_verified_by = ?")
-        params.append(performed_by)
-        updates.append("payment_verified_date = ?")
-        params.append(datetime.now().isoformat())
-        action = "SURRENDER_VERIFIED"
-    elif status == 'SURRENDER_APPROVED':
-        updates.append("payment_approved_by = ?")
-        params.append(performed_by)
-        updates.append("payment_approved_date = ?")
-        params.append(datetime.now().isoformat())
-        action = "SURRENDER_APPROVED"
-    elif status == 'SURRENDER_AUTHORIZED':
-        updates.append("payment_authorized_by = ?")
-        params.append(performed_by)
-        updates.append("payment_authorized_date = ?")
-        params.append(datetime.now().isoformat())
-        action = "SURRENDER_AUTHORIZED"
     
     if finance_comment:
         updates.append("finance_comment = ?")
@@ -881,6 +872,7 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
             df = df[df['submission_date_dt'].dt.month.isin([1, 2, 3])]
         elif quarter == "Q4 (Apr-Jun)":
             df = df[df['submission_date_dt'].dt.month.isin([4, 5, 6])]
+    
     total_requests = len(df)
     total_received = len(df[df['date_received'].notna()])
     total_returned = len(df[df['date_returned'].notna()])
