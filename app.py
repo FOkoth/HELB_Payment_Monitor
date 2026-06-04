@@ -861,7 +861,7 @@ elif choice == "🔍 Check Payment Status":
 
 
 # ================================================================
-# NEW REQUEST (simplified - keeping all existing functionality)
+# NEW REQUEST
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>📝 Create New Request</h2>", unsafe_allow_html=True)
@@ -1310,7 +1310,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE - WITH UNIQUE KEYS (FIXED)
+# APPROVAL QUEUE - WITH COMPLETELY UNIQUE KEYS
 # ================================================================
 elif choice == "✅ Approval Queue":
     if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
@@ -1340,11 +1340,11 @@ elif choice == "✅ Approval Queue":
                         if req['status'] == 'SUBMITTED':
                             col1, col2 = st.columns(2)
                             with col1:
-                                checklist_approvals = st.checkbox("✓ Approvals", key=f"pay_app_{rid}")
-                                checklist_documents = st.checkbox("✓ Documents", key=f"pay_doc_{rid}")
+                                checklist_approvals = st.checkbox("✓ Approvals", key=f"pay_chk_app_{rid}")
+                                checklist_documents = st.checkbox("✓ Documents", key=f"pay_chk_doc_{rid}")
                             with col2:
                                 pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_{rid}")
-                                if st.button(f"📋 Receive Request", key=f"pay_receive_{rid}"):
+                                if st.button(f"📋 Receive Request", key=f"pay_btn_receive_{rid}"):
                                     if checklist_approvals and checklist_documents:
                                         if pwd and verify_finance_password(pwd):
                                             update_request_status(rid, 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
@@ -1355,8 +1355,8 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("Check both boxes!")
                             
-                            reason = st.text_input("Return Reason", key=f"pay_ret_{rid}")
-                            if st.button(f"↩️ Return Request", key=f"pay_return_{rid}"):
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return_{rid}"):
                                 if reason:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
@@ -1368,8 +1368,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Please provide a return reason")
                         
                         elif req['status'] == 'RECEIVED_BY_FINANCE':
-                            pwd = st.text_input("Finance Password", type="password", key=f"pay_prep_{rid}")
-                            if st.button(f"📋 Prepare Payment", key=f"pay_prepare_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_prep_{rid}")
+                            if st.button(f"📋 Prepare Payment", key=f"pay_btn_prepare_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_PREPARED', performed_by=st.session_state.username)
                                     st.success(f"Payment prepared!")
@@ -1378,8 +1378,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'PAYMENT_PREPARED':
-                            pwd = st.text_input("Finance Password", type="password", key=f"pay_ver_{rid}")
-                            if st.button(f"✅ Verify Payment", key=f"pay_verify_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_ver_{rid}")
+                            if st.button(f"✅ Verify Payment", key=f"pay_btn_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
                                     st.success(f"Payment verified!")
@@ -1388,8 +1388,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'PAYMENT_VERIFIED':
-                            pwd = st.text_input("Finance Password", type="password", key=f"pay_app_{rid}")
-                            if st.button(f"✅ Approve Payment", key=f"pay_approve_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_app_{rid}")
+                            if st.button(f"✅ Approve Payment", key=f"pay_btn_approve_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_APPROVED', performed_by=st.session_state.username)
                                     st.success(f"Payment approved!")
@@ -1398,8 +1398,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'PAYMENT_APPROVED':
-                            pwd = st.text_input("Finance Password", type="password", key=f"pay_auth_{rid}")
-                            if st.button(f"✅ Authorize Payment", key=f"pay_authorize_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_auth_{rid}")
+                            if st.button(f"✅ Authorize Payment", key=f"pay_btn_authorize_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
                                     st.success(f"Payment authorized!")
@@ -1410,7 +1410,7 @@ elif choice == "✅ Approval Queue":
                         elif req['status'] == 'PAYMENT_AUTHORIZED':
                             payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{rid}")
-                            if st.button(f"💰 Mark as Paid", key=f"pay_paid_{rid}"):
+                            if st.button(f"💰 Mark as Paid", key=f"pay_btn_paid_{rid}"):
                                 if payment_ref:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'PAID', performed_by=st.session_state.username)
@@ -1436,11 +1436,11 @@ elif choice == "✅ Approval Queue":
                         if req['status'] == 'SUBMITTED':
                             col1, col2 = st.columns(2)
                             with col1:
-                                checklist_approvals = st.checkbox("✓ Approvals", key=f"surr_app_{rid}")
-                                checklist_documents = st.checkbox("✓ Documents", key=f"surr_doc_{rid}")
+                                checklist_approvals = st.checkbox("✓ Approvals", key=f"surr_chk_app_{rid}")
+                                checklist_documents = st.checkbox("✓ Documents", key=f"surr_chk_doc_{rid}")
                             with col2:
                                 pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_{rid}")
-                                if st.button(f"📋 Receive Surrender", key=f"surr_receive_{rid}"):
+                                if st.button(f"📋 Receive Surrender", key=f"surr_btn_receive_{rid}"):
                                     if checklist_approvals and checklist_documents:
                                         if pwd and verify_finance_password(pwd):
                                             update_request_status(rid, 'RECEIVED_BY_FINANCE', performed_by=st.session_state.username)
@@ -1451,8 +1451,8 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("Check both boxes!")
                             
-                            reason = st.text_input("Return Reason", key=f"surr_ret_{rid}")
-                            if st.button(f"↩️ Return Request", key=f"surr_return_{rid}"):
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return_{rid}"):
                                 if reason:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
@@ -1464,8 +1464,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Please provide a return reason")
                         
                         elif req['status'] == 'RECEIVED_BY_FINANCE':
-                            pwd = st.text_input("Finance Password", type="password", key=f"surr_first_{rid}")
-                            if st.button(f"🔍 First Verification", key=f"surr_first_verify_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_first_{rid}")
+                            if st.button(f"🔍 First Verification", key=f"surr_btn_first_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'SURRENDER_FIRST_VERIFICATION', performed_by=st.session_state.username)
                                     st.success(f"First verification completed!")
@@ -1474,8 +1474,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'SURRENDER_FIRST_VERIFICATION':
-                            pwd = st.text_input("Finance Password", type="password", key=f"surr_second_{rid}")
-                            if st.button(f"🔍 Second Verification", key=f"surr_second_verify_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_second_{rid}")
+                            if st.button(f"🔍 Second Verification", key=f"surr_btn_second_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'SURRENDER_SECOND_VERIFICATION', performed_by=st.session_state.username)
                                     st.success(f"Second verification completed!")
@@ -1484,8 +1484,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'SURRENDER_SECOND_VERIFICATION':
-                            pwd = st.text_input("Finance Password", type="password", key=f"surr_app_{rid}")
-                            if st.button(f"✅ Approve Surrender", key=f"surr_approve_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_approve_{rid}")
+                            if st.button(f"✅ Approve Surrender", key=f"surr_btn_approve_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'SURRENDER_APPROVAL', performed_by=st.session_state.username)
                                     st.success(f"Surrender approved!")
@@ -1494,8 +1494,8 @@ elif choice == "✅ Approval Queue":
                                     st.error("Incorrect password!")
                         
                         elif req['status'] == 'SURRENDER_APPROVAL':
-                            pwd = st.text_input("Finance Password", type="password", key=f"surr_post_{rid}")
-                            if st.button(f"📋 Post Surrender", key=f"surr_post_{rid}"):
+                            pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_post_{rid}")
+                            if st.button(f"📋 Post Surrender", key=f"surr_btn_post_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'SURRENDER_POSTING', performed_by=st.session_state.username)
                                     st.success(f"Surrender posted!")
@@ -1506,7 +1506,7 @@ elif choice == "✅ Approval Queue":
                         elif req['status'] == 'SURRENDER_POSTING':
                             reference = st.text_input("Reference Number", key=f"surr_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_clear_{rid}")
-                            if st.button(f"✅ Mark as Cleared", key=f"surr_cleared_{rid}"):
+                            if st.button(f"✅ Mark as Cleared", key=f"surr_btn_cleared_{rid}"):
                                 if reference:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'CLEARED', performed_by=st.session_state.username)
