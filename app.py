@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import sqlite3
 from datetime import datetime, date
 from database import (
     init_database, get_requests, save_request, update_request_status, 
@@ -374,16 +375,26 @@ def display_approval_stages(request_id, main_category):
     conn = sqlite3.connect("helb_data.db")
     cursor = conn.cursor()
     cursor.execute("SELECT status FROM requests WHERE id = ?", (request_id,))
-    current_status = cursor.fetchone()[0]
+    result = cursor.fetchone()
     conn.close()
+    
+    if not result:
+        return
+    
+    current_status = result[0]
     
     cols = st.columns(len(stages))
     for i, (status_code, status_name) in enumerate(stages):
         with cols[i]:
             if current_status == status_code:
                 st.markdown(f"<div class='stage-current'>⏳ {status_name}<br><small>Current</small></div>", unsafe_allow_html=True)
-            elif i < stages.index([(s, n) for s, n in stages if s == current_status][0]) if any(s == current_status for s, _ in stages) else False:
-                st.markdown(f"<div class='stage-completed'>✅ {status_name}</div>", unsafe_allow_html=True)
+            elif any(s == current_status for s, _ in stages):
+                # Find index of current status
+                current_index = next(j for j, (s, _) in enumerate(stages) if s == current_status)
+                if i < current_index:
+                    st.markdown(f"<div class='stage-completed'>✅ {status_name}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='stage-pending'>⏸ {status_name}</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div class='stage-pending'>⏸ {status_name}</div>", unsafe_allow_html=True)
 
@@ -1001,114 +1012,124 @@ elif choice == "✅ Approval Queue":
                         checklist_documents = st.checkbox("✓ All relevant documents attached", key=f"documents_{idx}")
                         checklist_comments = st.text_area("Additional Comments (optional)", key=f"checklist_comments_{idx}")
                         
-                        if st.button(f"📋 Confirm & Receive Request", key=f"receive_{idx}"):
-                            if checklist_approvals and checklist_documents:
-                                if verify_finance_password(st.text_input("Finance Password", type="password", key=f"pwd_receive_{idx}")):
-                                    update_request_status(
-                                        req['id'], 'RECEIVED_BY_FINANCE',
-                                        performed_by=st.session_state.username,
-                                        performed_by_role=st.session_state.user_role,
-                                        performed_by_dept=st.session_state.user_dept,
-                                        checklist_approvals=checklist_approvals,
-                                        checklist_documents=checklist_documents,
-                                        checklist_comments=checklist_comments
-                                    )
-                                    st.success(f"✅ Request {req['request_number']} confirmed and received!")
-                                    st.rerun()
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
+                            pwd = st.text_input("Finance Password", type="password", key=f"pwd_receive_{idx}")
+                        with col_btn:
+                            if st.button(f"📋 Confirm & Receive Request", key=f"receive_{idx}"):
+                                if checklist_approvals and checklist_documents:
+                                    if pwd and verify_finance_password(pwd):
+                                        update_request_status(
+                                            req['id'], 'RECEIVED_BY_FINANCE',
+                                            performed_by=st.session_state.username,
+                                            performed_by_role=st.session_state.user_role,
+                                            performed_by_dept=st.session_state.user_dept,
+                                            checklist_approvals=checklist_approvals,
+                                            checklist_documents=checklist_documents,
+                                            checklist_comments=checklist_comments
+                                        )
+                                        st.success(f"✅ Request {req['request_number']} confirmed and received!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Incorrect Finance Password!")
                                 else:
-                                    st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.error("❌ Please check both boxes to confirm the request")
+                                    st.error("❌ Please check both boxes to confirm the request")
                         
                         return_reason = st.text_input("Return Reason", key=f"return_{idx}")
-                        if st.button(f"↩️ Return Request", key=f"return_btn_{idx}"):
-                            if return_reason:
-                                if verify_finance_password(st.text_input("Finance Password", type="password", key=f"pwd_return_{idx}")):
-                                    update_request_status(
-                                        req['id'], 'RETURNED', return_reason=return_reason,
-                                        performed_by=st.session_state.username,
-                                        performed_by_role=st.session_state.user_role,
-                                        performed_by_dept=st.session_state.user_dept
-                                    )
-                                    st.warning(f"⚠️ Request {req['request_number']} returned!")
-                                    st.rerun()
+                        col_pwd2, col_btn2 = st.columns(2)
+                        with col_pwd2:
+                            pwd2 = st.text_input("Finance Password", type="password", key=f"pwd_return_{idx}")
+                        with col_btn2:
+                            if st.button(f"↩️ Return Request", key=f"return_btn_{idx}"):
+                                if return_reason:
+                                    if pwd2 and verify_finance_password(pwd2):
+                                        update_request_status(
+                                            req['id'], 'RETURNED', return_reason=return_reason,
+                                            performed_by=st.session_state.username,
+                                            performed_by_role=st.session_state.user_role,
+                                            performed_by_dept=st.session_state.user_dept
+                                        )
+                                        st.warning(f"⚠️ Request {req['request_number']} returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Incorrect Finance Password!")
                                 else:
-                                    st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.error("❌ Please provide a return reason")
+                                    st.error("❌ Please provide a return reason")
                     
                     elif current_status == 'RECEIVED_BY_FINANCE':
                         if req['main_category'] == "Submit Payment Request":
-                            if st.button(f"📋 Mark as Payment Prepared", key=f"prepare_{idx}"):
+                            col_pwd, col_btn = st.columns(2)
+                            with col_pwd:
                                 pwd = st.text_input("Finance Password", type="password", key=f"pwd_prepare_{idx}")
-                                if pwd:
-                                    if verify_finance_password(pwd):
+                            with col_btn:
+                                if st.button(f"📋 Mark as Payment Prepared", key=f"prepare_{idx}"):
+                                    if pwd and verify_finance_password(pwd):
                                         update_request_status(req['id'], 'PAYMENT_PREPARED', performed_by=st.session_state.username)
                                         st.success(f"Request {req['request_number']} marked as Payment Prepared!")
                                         st.rerun()
                                     else:
                                         st.error("❌ Incorrect Finance Password!")
-                                else:
-                                    st.warning("Please enter Finance Password")
                         else:
-                            if st.button(f"📋 Mark as Surrender Verified", key=f"verify_surr_{idx}"):
+                            col_pwd, col_btn = st.columns(2)
+                            with col_pwd:
                                 pwd = st.text_input("Finance Password", type="password", key=f"pwd_verify_surr_{idx}")
-                                if pwd:
-                                    if verify_finance_password(pwd):
+                            with col_btn:
+                                if st.button(f"📋 Mark as Surrender Verified", key=f"verify_surr_{idx}"):
+                                    if pwd and verify_finance_password(pwd):
                                         update_request_status(req['id'], 'SURRENDER_VERIFIED', performed_by=st.session_state.username)
                                         st.success(f"Request {req['request_number']} marked as Surrender Verified!")
                                         st.rerun()
                                     else:
                                         st.error("❌ Incorrect Finance Password!")
-                                else:
-                                    st.warning("Please enter Finance Password")
                     
                     elif current_status == 'PAYMENT_PREPARED':
-                        if st.button(f"✅ Mark as Payment Verified", key=f"verify_{idx}"):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_verify_{idx}")
-                            if pwd:
-                                if verify_finance_password(pwd):
+                        with col_btn:
+                            if st.button(f"✅ Mark as Payment Verified", key=f"verify_{idx}"):
+                                if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
                                     st.success(f"Request {req['request_number']} marked as Payment Verified!")
                                     st.rerun()
                                 else:
                                     st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.warning("Please enter Finance Password")
                     
                     elif current_status == 'PAYMENT_VERIFIED':
-                        if st.button(f"✅ Mark as Payment Approved", key=f"approve_{idx}"):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_approve_{idx}")
-                            if pwd:
-                                if verify_finance_password(pwd):
+                        with col_btn:
+                            if st.button(f"✅ Mark as Payment Approved", key=f"approve_{idx}"):
+                                if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'PAYMENT_APPROVED', performed_by=st.session_state.username)
                                     st.success(f"Request {req['request_number']} marked as Payment Approved!")
                                     st.rerun()
                                 else:
                                     st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.warning("Please enter Finance Password")
                     
                     elif current_status == 'PAYMENT_APPROVED':
-                        if st.button(f"✅ Mark as Payment Authorized", key=f"authorize_{idx}"):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_authorize_{idx}")
-                            if pwd:
-                                if verify_finance_password(pwd):
+                        with col_btn:
+                            if st.button(f"✅ Mark as Payment Authorized", key=f"authorize_{idx}"):
+                                if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
                                     st.success(f"Request {req['request_number']} marked as Payment Authorized!")
                                     st.rerun()
                                 else:
                                     st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.warning("Please enter Finance Password")
                     
                     elif current_status == 'PAYMENT_AUTHORIZED':
                         payment_ref = st.text_input("Payment Reference Number", key=f"ref_{idx}")
-                        if st.button(f"💰 Mark as Paid", key=f"paid_{idx}"):
-                            if payment_ref:
-                                pwd = st.text_input("Finance Password", type="password", key=f"pwd_paid_{idx}")
-                                if pwd:
-                                    if verify_finance_password(pwd):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
+                            pwd = st.text_input("Finance Password", type="password", key=f"pwd_paid_{idx}")
+                        with col_btn:
+                            if st.button(f"💰 Mark as Paid", key=f"paid_{idx}"):
+                                if payment_ref:
+                                    if pwd and verify_finance_password(pwd):
                                         update_request_status(req['id'], 'PAID', performed_by=st.session_state.username)
                                         update_payment_details(req['id'], payment_ref)
                                         submitted_date = datetime.strptime(req['submission_date'], '%Y-%m-%d').date()
@@ -1119,43 +1140,43 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("❌ Incorrect Finance Password!")
                                 else:
-                                    st.warning("Please enter Finance Password")
-                            else:
-                                st.error("❌ Please enter a payment reference number")
+                                    st.error("❌ Please enter a payment reference number")
                     
                     elif current_status == 'SURRENDER_VERIFIED':
-                        if st.button(f"✅ Mark as Surrender Approved", key=f"approve_surr_{idx}"):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_approve_surr_{idx}")
-                            if pwd:
-                                if verify_finance_password(pwd):
+                        with col_btn:
+                            if st.button(f"✅ Mark as Surrender Approved", key=f"approve_surr_{idx}"):
+                                if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'SURRENDER_APPROVED', performed_by=st.session_state.username)
                                     st.success(f"Request {req['request_number']} marked as Surrender Approved!")
                                     st.rerun()
                                 else:
                                     st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.warning("Please enter Finance Password")
                     
                     elif current_status == 'SURRENDER_APPROVED':
-                        if st.button(f"✅ Mark as Surrender Authorized", key=f"authorize_surr_{idx}"):
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
                             pwd = st.text_input("Finance Password", type="password", key=f"pwd_authorize_surr_{idx}")
-                            if pwd:
-                                if verify_finance_password(pwd):
+                        with col_btn:
+                            if st.button(f"✅ Mark as Surrender Authorized", key=f"authorize_surr_{idx}"):
+                                if pwd and verify_finance_password(pwd):
                                     update_request_status(req['id'], 'SURRENDER_AUTHORIZED', performed_by=st.session_state.username)
                                     st.success(f"Request {req['request_number']} marked as Surrender Authorized!")
                                     st.rerun()
                                 else:
                                     st.error("❌ Incorrect Finance Password!")
-                            else:
-                                st.warning("Please enter Finance Password")
                     
                     elif current_status == 'SURRENDER_AUTHORIZED':
-                        payment_ref = st.text_input("Payment Reference Number", key=f"ref_surr_{idx}")
-                        if st.button(f"💰 Mark as Cleared", key=f"cleared_{idx}"):
-                            if payment_ref:
-                                pwd = st.text_input("Finance Password", type="password", key=f"pwd_cleared_{idx}")
-                                if pwd:
-                                    if verify_finance_password(pwd):
+                        payment_ref = st.text_input("Reference Number", key=f"ref_surr_{idx}")
+                        col_pwd, col_btn = st.columns(2)
+                        with col_pwd:
+                            pwd = st.text_input("Finance Password", type="password", key=f"pwd_cleared_{idx}")
+                        with col_btn:
+                            if st.button(f"💰 Mark as Cleared", key=f"cleared_{idx}"):
+                                if payment_ref:
+                                    if pwd and verify_finance_password(pwd):
                                         update_request_status(req['id'], 'CLEARED', performed_by=st.session_state.username)
                                         update_payment_details(req['id'], payment_ref)
                                         st.balloons()
@@ -1164,9 +1185,7 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("❌ Incorrect Finance Password!")
                                 else:
-                                    st.warning("Please enter Finance Password")
-                            else:
-                                st.error("❌ Please enter a reference number")
+                                    st.error("❌ Please enter a reference number")
                     
                     # Show transaction logs
                     st.markdown("---")
@@ -1191,7 +1210,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL - FULL 5 TABS
+# ADMIN PANEL - FULL 6 TABS
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<h1 style='color: #00843D;'>⚙️ Admin Panel</h1>", unsafe_allow_html=True)
