@@ -4,8 +4,10 @@ from datetime import datetime, date
 
 DB_PATH = "helb_data.db"
 
+# ================================================================
+# LOGS TABLE
+# ================================================================
 def create_logs_table():
-    """Create request_logs table if it doesn't exist"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -30,7 +32,6 @@ def create_logs_table():
 
 def add_request_log(request_id, request_number, action, status_from, status_to, 
                     comment, performed_by, performed_by_role, performed_by_dept, details=None):
-    """Add a log entry for a request action"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -52,7 +53,6 @@ def add_request_log(request_id, request_number, action, status_from, status_to,
 
 
 def get_request_logs(request_id):
-    """Get all logs for a specific request"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -63,7 +63,6 @@ def get_request_logs(request_id):
         ''', (request_id,))
         logs = cursor.fetchall()
         conn.close()
-        
         if logs:
             columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
                        'status_to', 'comment', 'performed_by', 'performed_by_role', 
@@ -75,8 +74,158 @@ def get_request_logs(request_id):
         return []
 
 
+# ================================================================
+# APPROVAL STAGES TABLE
+# ================================================================
+def create_approval_stages_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS approval_stages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER,
+            request_number TEXT,
+            stage_name TEXT NOT NULL,
+            stage_order INTEGER,
+            status TEXT DEFAULT 'PENDING',
+            performed_by TEXT,
+            performed_by_role TEXT,
+            comment TEXT,
+            timestamp TEXT,
+            days_taken REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def add_approval_stage(request_id, request_number, stage_name, stage_order, performed_by, performed_by_role, comment=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id FROM approval_stages WHERE request_id = ? AND stage_name = ?
+    ''', (request_id, stage_name))
+    existing = cursor.fetchone()
+    if not existing:
+        cursor.execute('''
+            INSERT INTO approval_stages (
+                request_id, request_number, stage_name, stage_order, 
+                status, performed_by, performed_by_role, comment, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (request_id, request_number, stage_name, stage_order, 
+              'PENDING', performed_by, performed_by_role, comment, datetime.now().isoformat()))
+        conn.commit()
+    conn.close()
+
+
+def update_approval_stage(request_id, stage_name, performed_by, performed_by_role, comment=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE approval_stages 
+        SET status = 'COMPLETED', performed_by = ?, performed_by_role = ?, 
+            comment = ?, timestamp = ?
+        WHERE request_id = ? AND stage_name = ?
+    ''', (performed_by, performed_by_role, comment, datetime.now().isoformat(), request_id, stage_name))
+    conn.commit()
+    conn.close()
+
+
+def get_approval_stages(request_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT stage_name, stage_order, status, performed_by, performed_by_role, 
+               comment, timestamp
+        FROM approval_stages 
+        WHERE request_id = ? 
+        ORDER BY stage_order ASC
+    ''', (request_id,))
+    stages = cursor.fetchall()
+    conn.close()
+    if stages:
+        return [{
+            'stage_name': s[0], 'stage_order': s[1], 'status': s[2],
+            'performed_by': s[3], 'performed_by_role': s[4],
+            'comment': s[5], 'timestamp': s[6]
+        } for s in stages]
+    return []
+
+
+# ================================================================
+# NOTIFICATIONS TABLE
+# ================================================================
+def create_notifications_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER,
+            request_number TEXT,
+            notification_type TEXT,
+            message TEXT,
+            recipient_role TEXT,
+            is_read INTEGER DEFAULT 0,
+            created_at TEXT,
+            read_at TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def add_notification(request_id, request_number, notification_type, message, recipient_role):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO notifications (
+            request_id, request_number, notification_type, message, 
+            recipient_role, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+    ''', (request_id, request_number, notification_type, message, 
+          recipient_role, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def get_notifications(role):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, request_number, notification_type, message, created_at, is_read
+        FROM notifications 
+        WHERE recipient_role = ? AND is_read = 0
+        ORDER BY created_at DESC
+    ''', (role,))
+    notifications = cursor.fetchall()
+    conn.close()
+    return [{'id': n[0], 'request_number': n[1], 'notification_type': n[2],
+             'message': n[3], 'created_at': n[4], 'is_read': n[5]} for n in notifications]
+
+
+def mark_notification_read(notification_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE notifications SET is_read = 1, read_at = ? WHERE id = ?', 
+                   (datetime.now().isoformat(), notification_id))
+    conn.commit()
+    conn.close()
+
+
+def get_notification_count(role):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM notifications WHERE recipient_role = ? AND is_read = 0", (role,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+# ================================================================
+# BASIC REQUEST FUNCTIONS
+# ================================================================
 def get_returned_requests(department_name):
-    """Get all returned requests for a department"""
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query(
         "SELECT * FROM requests WHERE status = 'RETURNED' AND department_name = ? ORDER BY date_returned DESC",
@@ -87,14 +236,11 @@ def get_returned_requests(department_name):
 
 
 def resubmit_request(request_id, updated_data):
-    """Resubmit a returned request with new data"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     set_clause = ', '.join([f"{k} = ?" for k in updated_data.keys()])
     values = list(updated_data.values())
     values.append(request_id)
-    
     cursor.execute(f"UPDATE requests SET {set_clause}, last_updated = ? WHERE id = ?", 
                    values + [datetime.now().isoformat()])
     conn.commit()
@@ -102,12 +248,10 @@ def resubmit_request(request_id, updated_data):
 
 
 def get_request_by_id(request_id):
-    """Get a single request by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
     row = cursor.fetchone()
-    
     if row:
         columns = [description[0] for description in cursor.description]
         result = dict(zip(columns, row))
@@ -118,75 +262,51 @@ def get_request_by_id(request_id):
 
 
 def migrate_database():
-    """Add missing columns to existing tables"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     cursor.execute("PRAGMA table_info(requests)")
     existing_columns = [column[1] for column in cursor.fetchall()]
     
     required_columns = {
-        'payment_description': 'TEXT',
-        'financial_year': 'TEXT',
-        'batch_no': 'TEXT',
-        'product_type': 'TEXT',
-        'semester': 'TEXT',
-        'payment_type': 'TEXT',
-        'imprest_no': 'TEXT',
-        'supplier_name': 'TEXT',
-        'invoice_no': 'TEXT',
-        'lpo_no': 'TEXT',
-        'salary_month': 'TEXT',
-        'salary_year': 'INTEGER',
-        'customer_name': 'TEXT',
-        'customer_id': 'TEXT',
-        'surrender_number': 'TEXT',
-        'staff_name': 'TEXT',
-        'funder_name': 'TEXT',
-        'refund_reason': 'TEXT',
-        'original_payment_ref': 'TEXT',
-        'previous_imprest_no': 'TEXT',
-        'date_received': 'TEXT',
-        'date_returned': 'TEXT',
-        'payment_date': 'TEXT',
-        'payment_reference': 'TEXT',
-        'completed_by': 'TEXT',
-        'completion_notes': 'TEXT',
+        'payment_description': 'TEXT', 'financial_year': 'TEXT', 'batch_no': 'TEXT',
+        'product_type': 'TEXT', 'semester': 'TEXT', 'payment_type': 'TEXT',
+        'imprest_no': 'TEXT', 'supplier_name': 'TEXT', 'invoice_no': 'TEXT',
+        'lpo_no': 'TEXT', 'salary_month': 'TEXT', 'salary_year': 'INTEGER',
+        'customer_name': 'TEXT', 'customer_id': 'TEXT', 'surrender_number': 'TEXT',
+        'staff_name': 'TEXT', 'funder_name': 'TEXT', 'refund_reason': 'TEXT',
+        'original_payment_ref': 'TEXT', 'previous_imprest_no': 'TEXT',
+        'date_received': 'TEXT', 'date_returned': 'TEXT', 'payment_date': 'TEXT',
+        'payment_reference': 'TEXT', 'completed_by': 'TEXT', 'completion_notes': 'TEXT',
         'finance_checklist_approvals': 'INTEGER DEFAULT 0',
         'finance_checklist_documents': 'INTEGER DEFAULT 0',
-        'finance_checklist_comments': 'TEXT',
-        'date_confirmed_by_finance': 'TEXT',
-        'main_category': 'TEXT'
+        'finance_checklist_comments': 'TEXT', 'date_confirmed_by_finance': 'TEXT',
+        'main_category': 'TEXT', 'mileage_claim_details': 'TEXT', 'training_details': 'TEXT',
+        'professional_body': 'TEXT', 'direct_payment_details': 'TEXT'
     }
     
     for col_name, col_type in required_columns.items():
         if col_name not in existing_columns:
             try:
                 cursor.execute(f"ALTER TABLE requests ADD COLUMN {col_name} {col_type}")
-                print(f"Added column: {col_name}")
-            except Exception as e:
-                print(f"Error adding {col_name}: {e}")
+            except:
+                pass
     
     cursor.execute("PRAGMA table_info(users)")
     user_columns = [column[1] for column in cursor.fetchall()]
     if 'full_name' not in user_columns:
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
-            print("Added column: full_name to users")
-        except Exception as e:
-            print(f"Error adding full_name: {e}")
+        except:
+            pass
     
     conn.commit()
     conn.close()
-    print("Database migration completed!")
 
 
 def init_database():
-    """Create all tables if they don't exist"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Departments table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS departments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,7 +323,6 @@ def init_database():
         )
     ''')
     
-    # Products table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,7 +334,6 @@ def init_database():
         )
     ''')
     
-    # Funders table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS funders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,7 +341,6 @@ def init_database():
         )
     ''')
     
-    # Financial Years table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS financial_years (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -232,7 +349,6 @@ def init_database():
         )
     ''')
     
-    # Semesters table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS semesters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,7 +356,6 @@ def init_database():
         )
     ''')
     
-    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,7 +368,6 @@ def init_database():
         )
     ''')
     
-    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,11 +413,14 @@ def init_database():
             finance_checklist_approvals INTEGER DEFAULT 0,
             finance_checklist_documents INTEGER DEFAULT 0,
             finance_checklist_comments TEXT,
-            date_confirmed_by_finance TEXT
+            date_confirmed_by_finance TEXT,
+            mileage_claim_details TEXT,
+            training_details TEXT,
+            professional_body TEXT,
+            direct_payment_details TEXT
         )
     ''')
     
-    # SLA Config table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sla_config (
             request_type TEXT PRIMARY KEY,
@@ -311,7 +428,6 @@ def init_database():
         )
     ''')
     
-    # Insert default departments
     cursor.execute("SELECT COUNT(*) FROM departments")
     if cursor.fetchone()[0] == 0:
         default_depts = [
@@ -339,7 +455,6 @@ def init_database():
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', dept)
     
-    # Insert default products
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
         default_products = [
@@ -352,7 +467,6 @@ def init_database():
             default_products
         )
     
-    # Insert default funders
     cursor.execute("SELECT COUNT(*) FROM funders")
     if cursor.fetchone()[0] == 0:
         default_funders = [
@@ -361,55 +475,36 @@ def init_database():
         ]
         cursor.executemany("INSERT INTO funders (name) VALUES (?)", default_funders)
     
-    # Insert financial years
     cursor.execute("SELECT COUNT(*) FROM financial_years")
     if cursor.fetchone()[0] == 0:
-        default_years = [
-            ('2024/2025', 0),
-            ('2025/2026', 1),
-            ('2026/2027', 1),
-        ]
+        default_years = [('2024/2025', 0), ('2025/2026', 1), ('2026/2027', 1)]
         cursor.executemany("INSERT INTO financial_years (name, is_active) VALUES (?, ?)", default_years)
     
-    # Insert semesters
     cursor.execute("SELECT COUNT(*) FROM semesters")
     if cursor.fetchone()[0] == 0:
-        default_semesters = [
-            ('Semester 1',),
-            ('Semester 2',),
-        ]
+        default_semesters = [('Semester 1',), ('Semester 2',)]
         cursor.executemany("INSERT INTO semesters (name) VALUES (?)", default_semesters)
     
-    # Insert SLA defaults
     cursor.execute("SELECT COUNT(*) FROM sla_config")
     if cursor.fetchone()[0] == 0:
         sla_defaults = [
-            ('Student Payment', 3),
-            ('Imprest', 5),
-            ('Petty Cash', 3),
-            ('Supplier Payment', 7),
-            ('Salary Payment', 5),
-            ('Refund Payment', 10),
-            ('Surrender', 4),
+            ('Student Payment', 3), ('Imprest', 5), ('Petty Cash', 3),
+            ('Supplier Payment', 7), ('Salary Payment', 5), ('Refund Payment', 10),
+            ('Surrender', 4), ('Mileage Claim', 3), ('Staff Training', 5),
+            ('Professional Body', 5), ('Direct Payment', 3)
         ]
-        cursor.executemany(
-            "INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)",
-            sla_defaults
-        )
+        cursor.executemany("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla_defaults)
     
     conn.commit()
     conn.close()
     
-    # Create logs table
     create_logs_table()
-    
-    # Run migration
+    create_approval_stages_table()
+    create_notifications_table()
     migrate_database()
     
-    # Insert default users
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     cursor.execute("SELECT id, name FROM departments")
     dept_map = {name: id for id, name in cursor.fetchall()}
     
@@ -417,7 +512,9 @@ def init_database():
     if cursor.fetchone()[0] == 0:
         default_users = [
             ('admin', 'admin123', 'ADMIN', None, 'System Administrator'),
-            ('finance_user', 'fin123', 'FINANCE', dept_map.get('Finance'), 'Finance Officer'),
+            ('finance_receiver', 'receiver123', 'FINANCE_RECEIVER', dept_map.get('Finance'), 'Finance Receiver'),
+            ('finance_senior', 'senior123', 'FINANCE_SENIOR', dept_map.get('Finance'), 'Senior Finance Officer'),
+            ('finance_payments', 'payments123', 'FINANCE_PAYMENTS', dept_map.get('Finance'), 'Payments Officer'),
             ('management_user', 'management123', 'MANAGEMENT', None, 'Management User'),
             ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer'),
             ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer'),
@@ -436,15 +533,13 @@ def init_database():
             "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
             default_users
         )
-    
     conn.commit()
     conn.close()
 
 
 # ================================================================
-# BASIC GET FUNCTIONS
+# GET FUNCTIONS
 # ================================================================
-
 def get_departments():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
@@ -469,7 +564,7 @@ def add_product(name, category, has_payment_type, has_semester):
         )
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except:
         return False
     finally:
         conn.close()
@@ -532,7 +627,7 @@ def create_user(username, password, role, department_id, full_name):
         )
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except:
         return False
     finally:
         conn.close()
@@ -552,22 +647,20 @@ def create_department(name, permissions):
         ''', (name, *permissions))
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except:
         return False
     finally:
         conn.close()
 
 
-def get_requests(filters=None):
+def get_requests():
     conn = sqlite3.connect(DB_PATH)
-    query = "SELECT * FROM requests ORDER BY submission_date DESC"
-    df = pd.read_sql_query(query, conn)
+    df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
     conn.close()
     return df
 
 
-def get_pending_confirmation_count():
-    """Get count of requests pending finance confirmation"""
+def get_pending_receive_count():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM requests WHERE status = 'SUBMITTED'")
@@ -576,11 +669,19 @@ def get_pending_confirmation_count():
     return count
 
 
-def get_pending_completion_count():
-    """Get count of requests confirmed but not yet paid/cleared"""
+def get_pending_stage_count():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests WHERE status = 'CONFIRMED_BY_FINANCE'")
+    cursor.execute("SELECT COUNT(*) FROM requests WHERE status IN ('RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'SURRENDER_VERIFIED', 'SURRENDER_APPROVED')")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_pending_payment_count():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM requests WHERE status IN ('PAYMENT_AUTHORIZED', 'SURRENDER_AUTHORIZED')")
     count = cursor.fetchone()[0]
     conn.close()
     return count
@@ -589,51 +690,59 @@ def get_pending_completion_count():
 def save_request(data):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     cursor.execute("SELECT COUNT(*) FROM requests")
     count = cursor.fetchone()[0] + 1
     request_number = f"HELB-{datetime.now().strftime('%Y%m')}-{count:04d}"
-    
     data['request_number'] = request_number
     data['submission_date'] = datetime.now().strftime('%Y-%m-%d')
     data['last_updated'] = datetime.now().isoformat()
-    
     columns = ', '.join(data.keys())
     placeholders = ', '.join(['?' for _ in data])
-    
     cursor.execute(f"INSERT INTO requests ({columns}) VALUES ({placeholders})", list(data.values()))
     request_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
     try:
-        add_request_log(
-            request_id, request_number, "SUBMITTED", None, "SUBMITTED",
-            "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name')
-        )
-    except Exception as e:
-        print(f"Could not add log: {e}")
-    
+        add_request_log(request_id, request_number, "SUBMITTED", None, "SUBMITTED",
+                       "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
+        add_notification(request_id, request_number, "PENDING_RECEIVE",
+                        f"New {data.get('main_category')} request {request_number} from {data.get('department_name')}",
+                        "FINANCE_RECEIVER")
+    except:
+        pass
     return request_number
 
 
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
-                          checklist_approvals=None, checklist_documents=None, checklist_comments=None):
+                          checklist_approvals=None, checklist_documents=None, checklist_comments=None,
+                          stage_comment=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
-    cursor.execute("SELECT status, request_number FROM requests WHERE id = ?", (request_id,))
+    cursor.execute("SELECT status, request_number, main_category FROM requests WHERE id = ?", (request_id,))
     current = cursor.fetchone()
     old_status = current[0] if current else None
     request_number = current[1] if current else None
+    main_category = current[2] if current else None
     
     updates = ["status = ?", "last_updated = ?"]
     params = [status, datetime.now().isoformat()]
     action = ""
-    comment = finance_comment or return_reason
+    comment = finance_comment or return_reason or stage_comment
     
-    if status == 'CONFIRMED_BY_FINANCE':
+    payment_stages = {
+        'PAYMENT_PREPARED': {'order': 1, 'name': 'Payment Prepared'},
+        'PAYMENT_VERIFIED': {'order': 2, 'name': 'Payment Verified'},
+        'PAYMENT_APPROVED': {'order': 3, 'name': 'Payment Approved'},
+        'PAYMENT_AUTHORIZED': {'order': 4, 'name': 'Payment Authorized'}
+    }
+    surrender_stages = {
+        'SURRENDER_VERIFIED': {'order': 1, 'name': 'Surrender Verified'},
+        'SURRENDER_APPROVED': {'order': 2, 'name': 'Surrender Approved'},
+        'SURRENDER_AUTHORIZED': {'order': 3, 'name': 'Surrender Authorized'}
+    }
+    
+    if status == 'RECEIVED_BY_FINANCE':
         updates.append("date_received = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("date_confirmed_by_finance = ?")
@@ -647,7 +756,19 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         if checklist_comments:
             updates.append("finance_checklist_comments = ?")
             params.append(checklist_comments)
-        action = "CONFIRMED"
+        action = "RECEIVED"
+        if main_category == "Submit Payment Request":
+            for stage_status, stage_info in payment_stages.items():
+                add_approval_stage(request_id, request_number, stage_info['name'], 
+                                  stage_info['order'], performed_by, performed_by_role)
+        else:
+            for stage_status, stage_info in surrender_stages.items():
+                add_approval_stage(request_id, request_number, stage_info['name'], 
+                                  stage_info['order'], performed_by, performed_by_role)
+        add_notification(request_id, request_number, "PENDING_STAGE",
+                        f"Request {request_number} is ready for stage processing",
+                        "FINANCE_SENIOR")
+    
     elif status == 'RETURNED':
         updates.append("date_returned = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
@@ -655,6 +776,10 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             updates.append("return_reason = ?")
             params.append(return_reason)
         action = "RETURNED"
+        add_notification(request_id, request_number, "REQUEST_RETURNED",
+                        f"Request {request_number} has been returned. Reason: {return_reason}",
+                        "DEPARTMENT")
+    
     elif status == 'SUBMITTED':
         updates.append("submission_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
@@ -663,18 +788,44 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         updates.append("return_reason = ?")
         params.append(None)
         action = "RESUBMITTED"
+    
+    elif status in payment_stages:
+        action = payment_stages[status]['name']
+        update_approval_stage(request_id, action, performed_by, performed_by_role, stage_comment)
+        if status == 'PAYMENT_PREPARED':
+            add_notification(request_id, request_number, "PENDING_STAGE", f"Request {request_number} ready for verification", "FINANCE_SENIOR")
+        elif status == 'PAYMENT_VERIFIED':
+            add_notification(request_id, request_number, "PENDING_STAGE", f"Request {request_number} ready for approval", "FINANCE_SENIOR")
+        elif status == 'PAYMENT_APPROVED':
+            add_notification(request_id, request_number, "PENDING_STAGE", f"Request {request_number} ready for authorization", "FINANCE_SENIOR")
+        elif status == 'PAYMENT_AUTHORIZED':
+            add_notification(request_id, request_number, "PENDING_PAYMENT", f"Request {request_number} ready for payment", "FINANCE_PAYMENTS")
+    
+    elif status in surrender_stages:
+        action = surrender_stages[status]['name']
+        update_approval_stage(request_id, action, performed_by, performed_by_role, stage_comment)
+        if status == 'SURRENDER_VERIFIED':
+            add_notification(request_id, request_number, "PENDING_STAGE", f"Request {request_number} ready for approval", "FINANCE_SENIOR")
+        elif status == 'SURRENDER_APPROVED':
+            add_notification(request_id, request_number, "PENDING_STAGE", f"Request {request_number} ready for authorization", "FINANCE_SENIOR")
+        elif status == 'SURRENDER_AUTHORIZED':
+            add_notification(request_id, request_number, "PENDING_CLEARANCE", f"Request {request_number} ready to be cleared", "FINANCE_PAYMENTS")
+    
     elif status == 'PAID':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         action = "PAID"
+        add_notification(request_id, request_number, "REQUEST_COMPLETED", f"Request {request_number} has been paid", "DEPARTMENT")
+    
     elif status == 'CLEARED':
         updates.append("payment_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         updates.append("completion_date = ?")
         params.append(datetime.now().strftime('%Y-%m-%d'))
         action = "CLEARED"
+        add_notification(request_id, request_number, "REQUEST_COMPLETED", f"Request {request_number} has been cleared", "DEPARTMENT")
     
     if finance_comment:
         updates.append("finance_comment = ?")
@@ -687,12 +838,10 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     
     if action:
         try:
-            add_request_log(
-                request_id, request_number, action, old_status, status,
-                comment, performed_by, performed_by_role, performed_by_dept
-            )
-        except Exception as e:
-            print(f"Could not add log: {e}")
+            add_request_log(request_id, request_number, action, old_status, status,
+                           comment, performed_by, performed_by_role, performed_by_dept)
+        except:
+            pass
 
 
 def update_payment_details(request_id, payment_reference):
@@ -719,7 +868,7 @@ def authenticate_user(username, password):
         user = cursor.fetchone()
         conn.close()
         return user if user else None
-    except Exception as e:
+    except:
         conn.close()
         return None
 
@@ -755,30 +904,25 @@ def get_pending_duration(request_date):
 
 
 def get_time_lapsed_from_confirmation(request_id):
-    """Calculate time lapsed from finance confirmation to completion"""
     from utils.holidays_ke import working_days_between
-    
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT date_confirmed_by_finance, payment_date, completion_date FROM requests WHERE id = ?", (request_id,))
         result = cursor.fetchone()
         conn.close()
-        
         if result and result[0]:
             confirmed_date = datetime.strptime(result[0], '%Y-%m-%d').date()
-            if result[1]:  # payment_date exists
+            if result[1]:
                 completion_date = datetime.strptime(result[1], '%Y-%m-%d').date()
                 return working_days_between(confirmed_date, completion_date)
-            elif result[2]:  # completion_date exists
+            elif result[2]:
                 completion_date = datetime.strptime(result[2], '%Y-%m-%d').date()
                 return working_days_between(confirmed_date, completion_date)
             else:
-                today = date.today()
-                return working_days_between(confirmed_date, today)
+                return working_days_between(confirmed_date, date.today())
         return None
-    except Exception as e:
-        print(f"Error in get_time_lapsed_from_confirmation: {e}")
+    except:
         return None
 
 
@@ -792,23 +936,31 @@ def get_department_requests(department_name):
     return df
 
 
+def get_requests_by_stage(role):
+    conn = sqlite3.connect(DB_PATH)
+    if role == "FINANCE_RECEIVER":
+        df = pd.read_sql_query("SELECT * FROM requests WHERE status = 'SUBMITTED' ORDER BY submission_date ASC", conn)
+    elif role == "FINANCE_SENIOR":
+        df = pd.read_sql_query("SELECT * FROM requests WHERE status IN ('RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'SURRENDER_VERIFIED', 'SURRENDER_APPROVED') ORDER BY submission_date ASC", conn)
+    elif role == "FINANCE_PAYMENTS":
+        df = pd.read_sql_query("SELECT * FROM requests WHERE status IN ('PAYMENT_AUTHORIZED', 'SURRENDER_AUTHORIZED') ORDER BY submission_date ASC", conn)
+    else:
+        df = pd.read_sql_query("SELECT * FROM requests WHERE 1=0", conn)
+    conn.close()
+    return df
+
+
 def get_management_dashboard_stats(financial_year=None, quarter=None):
     from utils.holidays_ke import working_days_between
-    
     df = get_requests()
-    
     if df.empty:
-        return {
-            'total_requests': 0, 'total_received': 0, 'total_returned': 0,
-            'total_paid': 0, 'total_amount': 0, 'avg_completion_time': 0,
-            'total_breaches': 0, 'breach_rate': 0, 'completed_count': 0
-        }
-    
+        return {'total_requests': 0, 'total_received': 0, 'total_returned': 0,
+                'total_paid': 0, 'total_amount': 0, 'avg_completion_time': 0,
+                'total_breaches': 0, 'breach_rate': 0, 'completed_count': 0,
+                'pending_receive': 0, 'pending_stages': 0, 'pending_payment': 0}
     df = df.copy()
-    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
-    
     if quarter and quarter != "All":
         df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
         if quarter == "Q1 (Jul-Sep)":
@@ -819,76 +971,63 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
             df = df[df['submission_date_dt'].dt.month.isin([1, 2, 3])]
         elif quarter == "Q4 (Apr-Jun)":
             df = df[df['submission_date_dt'].dt.month.isin([4, 5, 6])]
-    
     total_requests = len(df)
-    total_received = len(df[df['date_received'].notna()]) if 'date_received' in df.columns else 0
-    total_returned = len(df[df['date_returned'].notna()]) if 'date_returned' in df.columns else 0
-    total_paid = len(df[df['status'].isin(['PAID', 'CLEARED'])]) if 'status' in df.columns else 0
-    total_amount = df['amount'].sum() if 'amount' in df.columns else 0
-    
+    total_received = len(df[df['date_received'].notna()])
+    total_returned = len(df[df['date_returned'].notna()])
+    total_paid = len(df[df['status'].isin(['PAID', 'CLEARED'])])
+    total_amount = df['amount'].sum()
+    pending_receive = len(df[df['status'] == 'SUBMITTED'])
+    pending_stages = len(df[df['status'].isin(['RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'SURRENDER_VERIFIED', 'SURRENDER_APPROVED'])])
+    pending_payment = len(df[df['status'].isin(['PAYMENT_AUTHORIZED', 'SURRENDER_AUTHORIZED'])])
     breaches = 0
     completion_times = []
-    
-    if 'status' in df.columns and 'payment_date' in df.columns and 'submission_date' in df.columns:
-        for _, row in df.iterrows():
-            if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
-                try:
-                    submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                    paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
-                    days = working_days_between(submitted, paid)
-                    completion_times.append(days)
-                    
-                    sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10, 'Surrender': 4}
-                    sla_days = sla_map.get(row['request_type'], 5)
-                    if days > sla_days:
-                        breaches += 1
-                except:
-                    pass
-    
+    for _, row in df.iterrows():
+        if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
+            try:
+                submitted = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
+                days = working_days_between(submitted, paid)
+                completion_times.append(days)
+                sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                           'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                           'Professional Body': 5, 'Direct Payment': 3}
+                sla_days = sla_map.get(row['request_type'], 5)
+                if days > sla_days:
+                    breaches += 1
+            except:
+                pass
     avg_completion_time = sum(completion_times) / len(completion_times) if completion_times else 0
     breach_rate = (breaches / total_paid * 100) if total_paid > 0 else 0
-    
-    return {
-        'total_requests': total_requests, 'total_received': total_received,
-        'total_returned': total_returned, 'total_paid': total_paid,
-        'total_amount': total_amount, 'avg_completion_time': avg_completion_time,
-        'total_breaches': breaches, 'breach_rate': breach_rate, 'completed_count': total_paid
-    }
+    return {'total_requests': total_requests, 'total_received': total_received,
+            'total_returned': total_returned, 'total_paid': total_paid,
+            'total_amount': total_amount, 'avg_completion_time': avg_completion_time,
+            'total_breaches': breaches, 'breach_rate': breach_rate, 'completed_count': total_paid,
+            'pending_receive': pending_receive, 'pending_stages': pending_stages,
+            'pending_payment': pending_payment}
 
 
 def get_trend_data(financial_year=None):
     df = get_requests()
     if df.empty:
         return pd.DataFrame()
-    
     if financial_year and financial_year != "All":
         df = df[df['financial_year'] == financial_year]
-    
     df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
     df['month'] = df['submission_date_dt'].dt.strftime('%b %Y')
-    
-    monthly = df.groupby('month').agg({
-        'amount': 'sum',
-        'request_number': 'count'
-    }).reset_index()
+    monthly = df.groupby('month').agg({'amount': 'sum', 'request_number': 'count'}).reset_index()
     monthly.columns = ['month', 'total_amount', 'request_count']
-    
     return monthly.sort_values('month')
 
 
 def get_all_departments_summary():
     conn = sqlite3.connect(DB_PATH)
     query = '''
-        SELECT 
-            department_name,
-            COUNT(*) as total_requests,
-            SUM(CASE WHEN status IN ('PAID', 'CLEARED') THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN status = 'RETURNED' THEN 1 ELSE 0 END) as returned,
-            SUM(amount) as total_amount
-        FROM requests
-        GROUP BY department_name
-        ORDER BY total_requests DESC
+        SELECT department_name, COUNT(*) as total_requests,
+               SUM(CASE WHEN status IN ('PAID', 'CLEARED') THEN 1 ELSE 0 END) as completed,
+               SUM(CASE WHEN status = 'RETURNED' THEN 1 ELSE 0 END) as returned,
+               SUM(amount) as total_amount
+        FROM requests GROUP BY department_name ORDER BY total_requests DESC
     '''
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -901,19 +1040,15 @@ def search_by_batch_number(batch_no):
     cursor.execute('''
         SELECT request_number, main_category, amount, status, payment_date, 
                payment_reference, department_name, submission_date
-        FROM requests 
-        WHERE batch_no = ? AND main_category = 'Submit Payment Request'
+        FROM requests WHERE batch_no = ? AND main_category = 'Submit Payment Request'
         ORDER BY submission_date DESC
     ''', (batch_no,))
     results = cursor.fetchall()
     conn.close()
-    
     if results:
-        return [{
-            'request_number': r[0], 'main_category': r[1], 'amount': r[2],
-            'status': r[3], 'payment_date': r[4], 'payment_reference': r[5],
-            'department': r[6], 'submission_date': r[7]
-        } for r in results]
+        return [{'request_number': r[0], 'main_category': r[1], 'amount': r[2],
+                 'status': r[3], 'payment_date': r[4], 'payment_reference': r[5],
+                 'department': r[6], 'submission_date': r[7]} for r in results]
     return []
 
 
@@ -931,56 +1066,46 @@ def get_all_batch_numbers():
 
 
 def get_allowed_main_categories(user_role, user_dept):
-    """Get allowed main categories (Payment Request or Surrender)"""
-    if user_role == "MANAGEMENT":
+    if user_role in ["MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_SENIOR", "FINANCE_PAYMENTS"]:
         return []
     return ["Submit Payment Request", "Submit Surrender"]
 
 
 def get_allowed_request_types(user_role, user_dept, main_category):
-    """Get allowed request types based on main category"""
     if user_role == "ADMIN":
         if main_category == "Submit Payment Request":
-            return ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", "Salary Payment", "Refund Payment"]
+            return ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", 
+                    "Salary Payment", "Refund Payment", "Mileage Claim", "Staff Training", 
+                    "Professional Body", "Direct Payment"]
         else:
             return ["Surrender"]
-    
-    if user_role == "FINANCE":
-        if main_category == "Submit Payment Request":
-            return ["Imprest", "Petty Cash"]
-        else:
-            return ["Surrender"]
-    
+    if user_role in ["FINANCE_RECEIVER", "FINANCE_SENIOR", "FINANCE_PAYMENTS"]:
+        return []
     if user_role == "MANAGEMENT":
         return []
-    
-    # DEPARTMENT users
     if main_category == "Submit Payment Request":
-        allowed = ["Imprest", "Petty Cash"]
+        allowed = ["Imprest", "Petty Cash", "Direct Payment"]
         if user_dept in ["Lending", "External Resource Mobilization"]:
             allowed.append("Student Payment")
         if user_dept == "Supply Chain Management":
             allowed.append("Supplier Payment")
         if user_dept == "Human Resource":
             allowed.append("Salary Payment")
+            allowed.append("Mileage Claim")
+            allowed.append("Staff Training")
+            allowed.append("Professional Body")
         if user_dept == "Debt Management":
             allowed.append("Refund Payment")
         return allowed
-    else:  # Surrender
+    else:
         return ["Surrender"]
 
 
 def get_reports_data(user_role, user_dept):
     df = get_requests()
-    
     if df.empty:
         return df
-    
-    if user_role == "ADMIN":
-        return df
-    elif user_role == "MANAGEMENT":
-        return df
-    elif user_role == "FINANCE":
+    if user_role in ["ADMIN", "MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_SENIOR", "FINANCE_PAYMENTS"]:
         return df
     else:
         return df[df['department_name'] == user_dept]
