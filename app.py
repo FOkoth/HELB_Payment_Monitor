@@ -17,7 +17,9 @@ from database import (
     add_request_log, get_pending_confirmation_count, get_pending_completion_count,
     get_time_lapsed_from_confirmation, verify_finance_password, update_finance_password,
     get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat,
-    delete_funder, delete_product, delete_financial_year, delete_semester
+    delete_funder, delete_product, delete_financial_year, delete_semester,
+    search_payment_records, update_user_permissions, delete_user,
+    get_user_permissions
 )
 from utils.holidays_ke import working_days_between
 from streamlit_option_menu import option_menu
@@ -521,17 +523,17 @@ with st.sidebar:
     
     menu_options = []
     if st.session_state.user_role == "MANAGEMENT":
-        menu_options = ["📈 Management Dashboard", "🔍 Check Payment Status", "📑 Reports", "🔐 Change Password"]
+        menu_options = ["📈 Management Dashboard", "🔍 Search Payment Records", "📑 Reports", "🔐 Change Password"]
     elif st.session_state.user_role == "ADMIN":
-        menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Check Payment Status", 
+        menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Search Payment Records", 
                        "📝 New Request", "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", 
                        "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
-    elif st.session_state.user_role == "FINANCE":
-        menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Check Payment Status", 
+    elif st.session_state.user_role in ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+        menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Search Payment Records", 
                        "📝 New Request", "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", 
                        "📑 Reports", "🔐 Change Password"]
     else:
-        menu_options = ["📊 Department Dashboard", "🔍 Check Payment Status", "📝 New Request", 
+        menu_options = ["📊 Department Dashboard", "🔍 Search Payment Records", "📝 New Request", 
                        "📋 My Requests", "↩️ Returned Requests", "📑 Reports", "🔐 Change Password"]
     
     choice = option_menu(
@@ -815,50 +817,124 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# CHECK PAYMENT STATUS
+# SEARCH PAYMENT RECORDS (Enhanced)
 # ================================================================
-elif choice == "🔍 Check Payment Status":
-    st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>🔍 Check Payment Status</h2>", unsafe_allow_html=True)
+elif choice == "🔍 Search Payment Records":
+    st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>🔍 Search Payment Records</h2>", unsafe_allow_html=True)
     
-    search_term = st.text_input("Enter Batch No., Imprest No., Invoice No., or Surrender No.")
+    st.markdown("""
+    <div style='background: #F0F9FF; padding: 0.75rem; border-radius: 10px; margin-bottom: 1rem;'>
+        <p style='margin: 0; font-size: 0.8rem;'>🔎 Search by any reference number: Request Number, Batch No., Imprest No., Invoice No., 
+        Surrender No., Customer Name, Supplier Name, Staff Name, or Payment Reference</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    if st.button("Search"):
-        df = get_requests()
-        if df.empty:
-            st.error("No records found")
-        else:
-            mask = (
-                df['batch_no'].str.contains(search_term, case=False, na=False) |
-                df['imprest_no'].str.contains(search_term, case=False, na=False) |
-                df['invoice_no'].str.contains(search_term, case=False, na=False) |
-                df['surrender_number'].str.contains(search_term, case=False, na=False) |
-                df['request_number'].str.contains(search_term, case=False, na=False)
-            )
-            results = df[mask]
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        search_term = st.text_input("Enter search term", placeholder="e.g., HELB-202503-0001, BATCH001, INV-12345...")
+    with col2:
+        search_type = st.selectbox("Search by", ["All Fields", "Request Number", "Batch No.", "Imprest No.", 
+                                                  "Invoice No.", "Surrender No.", "Customer/Supplier/Staff", "Payment Reference"])
+    with col3:
+        status_filter = st.selectbox("Status", ["All", "SUBMITTED", "RECEIVED_BY_FINANCE", "PAYMENT_PREPARED", 
+                                                "PAYMENT_VERIFIED", "PAYMENT_APPROVED", "PAYMENT_AUTHORIZED", 
+                                                "PAID", "CLEARED", "RETURNED"])
+    
+    if st.button("🔍 Search", type="primary", use_container_width=False):
+        if search_term:
+            # Map search type to database field
+            type_map = {
+                "Request Number": "request_number",
+                "Batch No.": "batch_no",
+                "Imprest No.": "imprest_no",
+                "Invoice No.": "invoice_no",
+                "Surrender No.": "surrender_number",
+                "Customer/Supplier/Staff": "all_names",
+                "Payment Reference": "payment_reference",
+                "All Fields": "all"
+            }
+            db_search_type = type_map.get(search_type, "all")
+            
+            results = search_payment_records(search_term, db_search_type)
+            
+            if status_filter != "All":
+                results = results[results['status'] == status_filter]
             
             if not results.empty:
+                st.markdown(f"### 📋 Search Results ({len(results)} records found)")
+                
+                # Display results in a nice format
                 for _, row in results.iterrows():
+                    # Calculate TAT
                     if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                         tat = calculate_tat(row['submission_date'], row['payment_date'])
-                        if row['status'] == 'PAID':
-                            status_badge = f'<span class="status-paid">✅ Paid (TAT: {tat} days)</span>'
-                        else:
-                            status_badge = f'<span class="status-cleared">✅ Cleared (TAT: {tat} days)</span>'
+                        status_badge = f'<span class="status-paid">✅ {row["status"]} (TAT: {tat} days)</span>'
+                    elif row['status'] == 'RETURNED':
+                        status_badge = f'<span class="status-pending">↩️ RETURNED</span>'
                     else:
                         pending_days = calculate_tat(row['submission_date'])
-                        status_badge = f'<span class="status-pending">⏳ Pending ({pending_days} days)</span>'
-                    ref_number = get_reference_number(row)
-                    st.markdown(f"""
-                    <div style='background:#F9FAFB; padding:0.75rem; border-radius:10px; margin-bottom:0.5rem; border-left:4px solid #00843D;'>
-                        <strong>{row['request_number']}</strong><br>
-                        Reference: {ref_number}<br>
-                        Amount: KES {row['amount']:,.2f}<br>
-                        Status: {status_badge}<br>
-                        Submitted: {row['submission_date']}
-                    </div>
-                    """, unsafe_allow_html=True)
+                        status_badge = f'<span class="status-pending">⏳ {row["status"]} ({pending_days} days)</span>'
+                    
+                    # Get reference number based on request type
+                    ref_number = ""
+                    if row.get('batch_no'):
+                        ref_number = f"Batch: {row['batch_no']}"
+                    elif row.get('imprest_no'):
+                        ref_number = f"Imprest: {row['imprest_no']}"
+                    elif row.get('invoice_no'):
+                        ref_number = f"Invoice: {row['invoice_no']}"
+                    elif row.get('surrender_number'):
+                        ref_number = f"Surrender: {row['surrender_number']}"
+                    elif row.get('payment_reference'):
+                        ref_number = f"Ref: {row['payment_reference']}"
+                    
+                    with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Amount:** KES {row['amount']:,.2f}")
+                            st.markdown(f"**Submitted:** {row['submission_date']}")
+                            if ref_number:
+                                st.markdown(f"**Reference:** {ref_number}")
+                        with col2:
+                            st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
+                            if row.get('payment_date'):
+                                st.markdown(f"**Payment Date:** {row['payment_date']}")
+                            if row.get('return_reason'):
+                                st.markdown(f"**Return Reason:** :red[{row['return_reason']}]")
+                        
+                        st.markdown("---")
+                        st.markdown("**Transaction History:**")
+                        display_transaction_logs(row['id'])
             else:
-                st.error("No records found")
+                st.warning("No records found matching your search criteria.")
+        else:
+            st.info("Please enter a search term.")
+    
+    # Quick filters section
+    st.markdown("---")
+    st.markdown("### 📊 Quick Filters")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("📦 Recent Batches", use_container_width=True):
+            batches = get_all_batch_numbers()
+            if batches:
+                st.session_state.quick_search_term = batches[0] if batches else ""
+                st.rerun()
+            else:
+                st.info("No batches found")
+    with col2:
+        if st.button("⏳ Pending Only", use_container_width=True):
+            st.session_state.quick_status = "PENDING"
+            st.rerun()
+    with col3:
+        if st.button("✅ Completed", use_container_width=True):
+            st.session_state.quick_status = "COMPLETED"
+            st.rerun()
+    with col4:
+        if st.button("↩️ Returned", use_container_width=True):
+            st.session_state.quick_status = "RETURNED"
+            st.rerun()
 
 
 # ================================================================
@@ -1311,11 +1387,15 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE - WITH SEPARATE PAYMENT AND SURRENDER (NO OVERLAP)
+# APPROVAL QUEUE - WITH SEPARATE PAYMENT AND SURRENDER
 # ================================================================
 elif choice == "✅ Approval Queue":
-    if st.session_state.user_role in ["FINANCE", "ADMIN"] or st.session_state.is_finance:
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN" or st.session_state.is_finance:
         st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>✅ Approval Queue</h2>", unsafe_allow_html=True)
+        
+        # Get user permissions
+        user_perms = get_user_permissions(st.session_state.username)
         
         pending_confirmation = get_pending_confirmation_count()
         if pending_confirmation > 0:
@@ -1566,21 +1646,113 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     
     with tab1:
         st.subheader("👥 User Management")
+        
+        # Display existing users
         users_df = get_all_users()
         st.dataframe(users_df, use_container_width=True, hide_index=True)
+        
+        # Delete user option
+        with st.expander("🗑️ Delete User"):
+            users_list = users_df['username'].tolist() if not users_df.empty else []
+            if users_list:
+                user_to_delete = st.selectbox("Select user to delete", users_list)
+                if st.button("Delete User", type="secondary"):
+                    if user_to_delete == st.session_state.username:
+                        st.error("❌ Cannot delete your own account!")
+                    elif user_to_delete == "admin":
+                        st.error("❌ Cannot delete the main admin account!")
+                    else:
+                        if delete_user(user_to_delete):
+                            st.success(f"✅ User '{user_to_delete}' deleted!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to delete user")
+            else:
+                st.info("No users available")
+        
+        # Add new user form with permissions
         with st.expander("➕ Add New User"):
             with st.form("add_user_form"):
-                new_username = st.text_input("Username")
-                new_password = st.text_input("Password", value="password123")
-                new_full_name = st.text_input("Full Name")
-                new_role = st.selectbox("Role", ["DEPARTMENT", "FINANCE", "MANAGEMENT", "ADMIN"])
+                st.markdown("**Basic Information**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_username = st.text_input("Username *")
+                    new_password = st.text_input("Password", value="password123", type="default")
+                with col2:
+                    new_full_name = st.text_input("Full Name *")
+                    new_role = st.selectbox("Role *", ["DEPARTMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN", "MANAGEMENT", "ADMIN"])
+                
                 depts = get_departments()
                 dept_options = {row['name']: row['id'] for _, row in depts.iterrows()}
                 new_department = st.selectbox("Department", ["None"] + list(dept_options.keys()))
+                
+                st.markdown("---")
+                st.markdown("**Finance Permissions (applies to FINANCE_* roles only)**")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    can_receive = st.checkbox("📋 Can Receive Requests", help="Can confirm/accept requests from departments")
+                with col2:
+                    can_process = st.checkbox("⚙️ Can Process Stages", help="Can prepare, verify, approve, authorize payments")
+                with col3:
+                    can_release = st.checkbox("💰 Can Release Payments", help="Can mark as PAID/CLEARED")
+                
+                st.info("💡 Note: FINANCE_ADMIN automatically gets all permissions regardless of checkboxes")
+                
                 if st.form_submit_button("Create User"):
-                    dept_id = dept_options.get(new_department) if new_department != "None" else None
-                    create_user(new_username, new_password, new_role, dept_id, new_full_name)
-                    st.rerun()
+                    if not new_username or not new_full_name:
+                        st.error("Please fill all required fields (*)")
+                    else:
+                        dept_id = dept_options.get(new_department) if new_department != "None" else None
+                        
+                        # For FINANCE_ADMIN, force all permissions to True
+                        if new_role == "FINANCE_ADMIN":
+                            can_receive = True
+                            can_process = True
+                            can_release = True
+                        
+                        success = create_user(new_username, new_password, new_role, dept_id, new_full_name,
+                                            1 if can_receive else 0, 1 if can_process else 0, 1 if can_release else 0)
+                        if success:
+                            st.success(f"✅ User {new_username} created successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Username already exists!")
+        
+        # Edit user permissions
+        with st.expander("✏️ Edit User Permissions"):
+            users_list = users_df['username'].tolist() if not users_df.empty else []
+            if users_list:
+                selected_user = st.selectbox("Select user to edit permissions", users_list, key="edit_user_select")
+                if selected_user:
+                    user_data = get_user_by_username(selected_user)
+                    if user_data:
+                        current_role = user_data[1]
+                        current_can_receive = user_data[5] == 1 if len(user_data) > 5 else False
+                        current_can_process = user_data[6] == 1 if len(user_data) > 6 else False
+                        current_can_release = user_data[7] == 1 if len(user_data) > 7 else False
+                        
+                        st.markdown(f"**Editing: {selected_user}** (Role: {current_role})")
+                        
+                        if current_role in ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                new_can_receive = st.checkbox("Can Receive Requests", value=current_can_receive, key="edit_receive")
+                            with col2:
+                                new_can_process = st.checkbox("Can Process Stages", value=current_can_process, key="edit_process")
+                            with col3:
+                                new_can_release = st.checkbox("Can Release Payments", value=current_can_release, key="edit_release")
+                            
+                            if st.button("Update Permissions"):
+                                if update_user_permissions(selected_user, new_can_receive, new_can_process, new_can_release):
+                                    st.success(f"✅ Permissions updated for {selected_user}")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update permissions")
+                        else:
+                            st.info(f"User with role '{current_role}' does not have finance permissions to edit.")
+            else:
+                st.info("No users available")
     
     with tab2:
         st.subheader("🏢 Department Management")
