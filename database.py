@@ -553,7 +553,27 @@ def create_user(username, password, role, department_id, full_name,
         )
         conn.commit()
         return True
-    except:
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def update_user_permissions(username, can_receive, can_process, can_release):
+    """Update finance user permissions"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE users 
+            SET can_receive_requests = ?, can_process_stages = ?, can_release_payments = ?
+            WHERE username = ?
+        ''', (can_receive, can_process, can_release, username))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating permissions: {e}")
         return False
     finally:
         conn.close()
@@ -576,6 +596,62 @@ def get_user_permissions(username):
             'role': result[3]
         }
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
+
+
+def delete_user(username):
+    """Delete a user by username"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM users WHERE username = ?", (username,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error deleting user: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# ================================================================
+# DEPARTMENT FUNCTIONS
+# ================================================================
+def create_department(name, permissions):
+    """Create a new department with permissions"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance = permissions
+        cursor.execute('''
+            INSERT INTO departments (
+                name, can_submit_imprest, can_submit_petty_cash, 
+                can_submit_supplier, can_submit_student_payment, 
+                can_submit_surrender, can_submit_refund, 
+                requires_product_type, requires_funder, is_finance_dept
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (name, can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error creating department: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def delete_department(dept_id):
+    """Delete a department by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM departments WHERE id = ?", (dept_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error deleting department: {e}")
+        return False
+    finally:
+        conn.close()
 
 
 # ================================================================
@@ -610,10 +686,13 @@ def search_payment_records(search_term, search_type="all"):
                OR surrender_number LIKE ?
                OR customer_name LIKE ?
                OR supplier_name LIKE ?
+               OR staff_name LIKE ?
+               OR payment_reference LIKE ?
             ORDER BY submission_date DESC
         '''
         params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
-                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
     
     df = pd.read_sql_query(query, conn, params=params)
     conn.close()
@@ -629,7 +708,7 @@ def get_departments():
 
 def get_products():
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
+    df = pd.read_sql_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
     conn.close()
     return df
 
@@ -665,7 +744,7 @@ def delete_product(product_id):
 
 def get_financial_years():
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
+    df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
     conn.close()
     return df['name'].tolist() if not df.empty else []
 
@@ -698,7 +777,7 @@ def delete_financial_year(year_id):
 
 def get_semesters():
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT name FROM semesters ORDER BY name", conn)
+    df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
     conn.close()
     return df['name'].tolist() if not df.empty else []
 
@@ -1147,7 +1226,8 @@ def get_all_batch_numbers():
 
 
 def get_allowed_main_categories(user_role, user_dept):
-    if user_role in ["MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if user_role in ["MANAGEMENT"] + finance_roles:
         return []
     return ["Submit Payment Request", "Submit Surrender"]
 
@@ -1161,7 +1241,8 @@ def get_allowed_request_types(user_role, user_dept, main_category):
         else:
             return ["Surrender"]
     
-    if user_role in ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if user_role in finance_roles:
         return []
     
     if user_role == "MANAGEMENT":
@@ -1189,7 +1270,55 @@ def get_reports_data(user_role, user_dept):
     df = get_requests()
     if df.empty:
         return df
-    if user_role in ["ADMIN", "MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if user_role in ["ADMIN", "MANAGEMENT"] + finance_roles:
         return df
     else:
         return df[df['department_name'] == user_dept]
+
+
+# ================================================================
+# WORKFLOW MANAGEMENT FUNCTIONS
+# ================================================================
+def get_workflow_stages(request_type):
+    """Get workflow stages for a request type"""
+    if request_type == "Surrender":
+        return [
+            {'stage': 'RECEIVED_BY_FINANCE', 'name': 'Received', 'order': 1},
+            {'stage': 'SURRENDER_FIRST_VERIFICATION', 'name': 'First Verification', 'order': 2},
+            {'stage': 'SURRENDER_SECOND_VERIFICATION', 'name': 'Second Verification', 'order': 3},
+            {'stage': 'SURRENDER_APPROVAL', 'name': 'Approval', 'order': 4},
+            {'stage': 'SURRENDER_POSTING', 'name': 'Posting', 'order': 5},
+            {'stage': 'CLEARED', 'name': 'Cleared', 'order': 6}
+        ]
+    else:
+        return [
+            {'stage': 'RECEIVED_BY_FINANCE', 'name': 'Received', 'order': 1},
+            {'stage': 'PAYMENT_PREPARED', 'name': 'Prepared', 'order': 2},
+            {'stage': 'PAYMENT_VERIFIED', 'name': 'Verified', 'order': 3},
+            {'stage': 'PAYMENT_APPROVED', 'name': 'Approved', 'order': 4},
+            {'stage': 'PAYMENT_AUTHORIZED', 'name': 'Authorized', 'order': 5},
+            {'stage': 'PAID', 'name': 'Paid', 'order': 6}
+        ]
+
+
+def can_user_perform_action(user_role, user_permissions, current_status, target_status):
+    """Check if user can perform a workflow action"""
+    # Admin can do anything
+    if user_role == "ADMIN":
+        return True
+    
+    # Finance Admin can do everything
+    if user_role == "FINANCE_ADMIN":
+        return True
+    
+    # Permission-based checks
+    if target_status == 'RECEIVED_BY_FINANCE':
+        return user_permissions.get('can_receive', False)
+    elif target_status in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED',
+                           'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING']:
+        return user_permissions.get('can_process', False)
+    elif target_status in ['PAID', 'CLEARED']:
+        return user_permissions.get('can_release', False)
+    
+    return False
