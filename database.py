@@ -569,7 +569,7 @@ def update_user_permissions(username, can_receive, can_process, can_release):
             UPDATE users 
             SET can_receive_requests = ?, can_process_stages = ?, can_release_payments = ?
             WHERE username = ?
-        ''', (can_receive, can_process, can_release, username))
+        ''', (1 if can_receive else 0, 1 if can_process else 0, 1 if can_release else 0, username))
         conn.commit()
         return True
     except Exception as e:
@@ -580,6 +580,7 @@ def update_user_permissions(username, can_receive, can_process, can_release):
 
 
 def get_user_permissions(username):
+    """Get permissions for a specific user"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -629,7 +630,16 @@ def create_department(name, permissions):
                 can_submit_surrender, can_submit_refund, 
                 requires_product_type, requires_funder, is_finance_dept
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (name, can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance))
+        ''', (name, 
+              1 if can_imprest else 0, 
+              1 if can_petty else 0, 
+              1 if can_supplier else 0, 
+              1 if can_student else 0, 
+              1 if can_surrender else 0, 
+              1 if can_refund else 0, 
+              1 if requires_product else 0, 
+              1 if requires_funder else 0, 
+              1 if is_finance else 0))
         conn.commit()
         return True
     except Exception as e:
@@ -644,6 +654,10 @@ def delete_department(dept_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE department_id = ?", (dept_id,))
+        user_count = cursor.fetchone()[0]
+        if user_count > 0:
+            return False
         cursor.execute("DELETE FROM departments WHERE id = ?", (dept_id,))
         conn.commit()
         return cursor.rowcount > 0
@@ -661,28 +675,40 @@ def search_payment_records(search_term, search_type="all"):
     """Search payment records by various criteria"""
     conn = sqlite3.connect(DB_PATH)
     
-    if search_type == "batch_no":
-        query = "SELECT * FROM requests WHERE batch_no LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "request_number":
+    if search_type == "request_number":
         query = "SELECT * FROM requests WHERE request_number LIKE ? ORDER BY submission_date DESC"
         params = (f"%{search_term}%",)
-    elif search_type == "invoice_no":
-        query = "SELECT * FROM requests WHERE invoice_no LIKE ? ORDER BY submission_date DESC"
+    elif search_type == "batch_no":
+        query = "SELECT * FROM requests WHERE batch_no LIKE ? ORDER BY submission_date DESC"
         params = (f"%{search_term}%",)
     elif search_type == "imprest_no":
         query = "SELECT * FROM requests WHERE imprest_no LIKE ? ORDER BY submission_date DESC"
         params = (f"%{search_term}%",)
+    elif search_type == "invoice_no":
+        query = "SELECT * FROM requests WHERE invoice_no LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
     elif search_type == "surrender_number":
         query = "SELECT * FROM requests WHERE surrender_number LIKE ? ORDER BY submission_date DESC"
         params = (f"%{search_term}%",)
-    else:
+    elif search_type == "payment_reference":
+        query = "SELECT * FROM requests WHERE payment_reference LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "all_names":
+        query = '''
+            SELECT * FROM requests 
+            WHERE customer_name LIKE ? 
+               OR supplier_name LIKE ? 
+               OR staff_name LIKE ?
+            ORDER BY submission_date DESC
+        '''
+        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+    else:  # "all"
         query = '''
             SELECT * FROM requests 
             WHERE request_number LIKE ? 
                OR batch_no LIKE ? 
-               OR invoice_no LIKE ? 
                OR imprest_no LIKE ? 
+               OR invoice_no LIKE ? 
                OR surrender_number LIKE ?
                OR customer_name LIKE ?
                OR supplier_name LIKE ?
@@ -1275,50 +1301,3 @@ def get_reports_data(user_role, user_dept):
         return df
     else:
         return df[df['department_name'] == user_dept]
-
-
-# ================================================================
-# WORKFLOW MANAGEMENT FUNCTIONS
-# ================================================================
-def get_workflow_stages(request_type):
-    """Get workflow stages for a request type"""
-    if request_type == "Surrender":
-        return [
-            {'stage': 'RECEIVED_BY_FINANCE', 'name': 'Received', 'order': 1},
-            {'stage': 'SURRENDER_FIRST_VERIFICATION', 'name': 'First Verification', 'order': 2},
-            {'stage': 'SURRENDER_SECOND_VERIFICATION', 'name': 'Second Verification', 'order': 3},
-            {'stage': 'SURRENDER_APPROVAL', 'name': 'Approval', 'order': 4},
-            {'stage': 'SURRENDER_POSTING', 'name': 'Posting', 'order': 5},
-            {'stage': 'CLEARED', 'name': 'Cleared', 'order': 6}
-        ]
-    else:
-        return [
-            {'stage': 'RECEIVED_BY_FINANCE', 'name': 'Received', 'order': 1},
-            {'stage': 'PAYMENT_PREPARED', 'name': 'Prepared', 'order': 2},
-            {'stage': 'PAYMENT_VERIFIED', 'name': 'Verified', 'order': 3},
-            {'stage': 'PAYMENT_APPROVED', 'name': 'Approved', 'order': 4},
-            {'stage': 'PAYMENT_AUTHORIZED', 'name': 'Authorized', 'order': 5},
-            {'stage': 'PAID', 'name': 'Paid', 'order': 6}
-        ]
-
-
-def can_user_perform_action(user_role, user_permissions, current_status, target_status):
-    """Check if user can perform a workflow action"""
-    # Admin can do anything
-    if user_role == "ADMIN":
-        return True
-    
-    # Finance Admin can do everything
-    if user_role == "FINANCE_ADMIN":
-        return True
-    
-    # Permission-based checks
-    if target_status == 'RECEIVED_BY_FINANCE':
-        return user_permissions.get('can_receive', False)
-    elif target_status in ['PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED',
-                           'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING']:
-        return user_permissions.get('can_process', False)
-    elif target_status in ['PAID', 'CLEARED']:
-        return user_permissions.get('can_release', False)
-    
-    return False
