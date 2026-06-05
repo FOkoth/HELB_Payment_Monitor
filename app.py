@@ -23,7 +23,8 @@ from database import (
     get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat,
     delete_funder, delete_product, delete_financial_year, delete_semester,
     search_payment_records, update_user_permissions, delete_user,
-    get_user_permissions, get_fastest_request_types, identify_bottlenecks
+    get_user_permissions, get_fastest_request_types, identify_bottlenecks,
+    get_returned_request_by_id
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -36,7 +37,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Executive Edition
+# Custom CSS - Executive Edition with Green Background Cards
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -75,102 +76,103 @@ st.markdown("""
     /* Dashboard Header */
     .dashboard-header {
         background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
-        padding: 0.75rem 1.5rem;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
+        padding: 0.6rem 1.2rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
         display: flex;
         align-items: center;
-        gap: 1rem;
+        gap: 0.8rem;
     }
     .dashboard-header h1 {
         color: white;
         margin: 0;
-        font-size: 1.2rem;
+        font-size: 1rem;
         font-weight: 600;
     }
     .dashboard-header p {
         color: rgba(255,255,255,0.85);
         margin: 0;
-        font-size: 0.7rem;
+        font-size: 0.6rem;
     }
     
-    /* KPI Cards - Compact Professional */
+    /* KPI Cards - Solid Green Background */
     .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.6rem;
         margin-bottom: 1rem;
     }
     .kpi-card {
-        background: white;
-        border-radius: 10px;
-        padding: 0.75rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        border: 1px solid #E5E7EB;
+        background: #00843D;
+        border-radius: 8px;
+        padding: 0.6rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         transition: all 0.2s;
     }
     .kpi-card:hover {
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border-color: #00843D;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }
     .kpi-label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         text-transform: uppercase;
-        color: #6B7280;
+        color: #FFB81C;
         font-weight: 600;
-        letter-spacing: 0.3px;
+        letter-spacing: 0.5px;
     }
     .kpi-value {
-        font-size: 1.5rem;
+        font-size: 1.3rem;
         font-weight: 700;
-        margin: 0.25rem 0;
-        color: #1F2937;
+        margin: 0.2rem 0;
+        color: white;
         line-height: 1.2;
     }
     .kpi-trend {
-        font-size: 0.6rem;
+        font-size: 0.55rem;
+        color: rgba(255,255,255,0.7);
     }
-    .trend-up { color: #00843D; }
-    .trend-down { color: #DC3545; }
+    .trend-up { color: #90EE90; }
+    .trend-down { color: #FFB6C1; }
     
     /* Progress Bar */
     .progress-bar {
-        height: 4px;
-        background: #E5E7EB;
+        height: 3px;
+        background: rgba(255,255,255,0.3);
         border-radius: 2px;
         overflow: hidden;
-        margin-top: 0.5rem;
+        margin-top: 0.3rem;
     }
     .progress-fill {
         height: 100%;
-        background: linear-gradient(90deg, #00843D, #00B347);
+        background: #FFB81C;
         border-radius: 2px;
     }
     
     /* Custom Tabs - Executive Style */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 0.25rem;
+        gap: 0.2rem;
         background: #F3F4F6;
-        padding: 0.25rem;
-        border-radius: 12px;
-        margin-bottom: 1.25rem;
+        padding: 0.3rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
     }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 0.4rem 1rem;
+        border-radius: 7px;
+        padding: 0.3rem 0.8rem;
         font-weight: 500;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: #4B5563;
         white-space: nowrap;
         transition: all 0.2s;
+        background-color: #F3F4F6;
     }
     .stTabs [aria-selected="true"] {
-        background: white !important;
-        color: #00843D !important;
+        background-color: #00843D !important;
+        color: white !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     .stTabs [data-baseweb="tab"]:hover {
-        background: rgba(0,132,61,0.1);
+        background-color: rgba(0,132,61,0.1);
         color: #00843D;
     }
     
@@ -183,17 +185,17 @@ st.markdown("""
     [data-testid="stSidebar"] .user-info {
         background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
         padding: 0.5rem;
-        border-radius: 10px;
+        border-radius: 8px;
         margin: 0.5rem 0;
         color: white;
         text-align: center;
     }
     [data-testid="stSidebar"] .user-info strong {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         display: block;
     }
     [data-testid="stSidebar"] .user-info span {
-        font-size: 0.6rem;
+        font-size: 0.55rem;
         opacity: 0.85;
     }
     
@@ -201,27 +203,27 @@ st.markdown("""
     .status-paid, .status-cleared {
         background: #E8F5E9;
         color: #00843D;
-        padding: 0.2rem 0.5rem;
-        border-radius: 20px;
-        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 15px;
+        font-size: 0.6rem;
         font-weight: 600;
         display: inline-block;
     }
     .status-pending {
         background: #FFF3E0;
         color: #ED6C02;
-        padding: 0.2rem 0.5rem;
-        border-radius: 20px;
-        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 15px;
+        font-size: 0.6rem;
         font-weight: 600;
         display: inline-block;
     }
     .status-returned {
         background: #FFEBEE;
         color: #DC2626;
-        padding: 0.2rem 0.5rem;
-        border-radius: 20px;
-        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 15px;
+        font-size: 0.6rem;
         font-weight: 600;
         display: inline-block;
     }
@@ -230,64 +232,64 @@ st.markdown("""
     .insight-card {
         background: #F0FDF4;
         border-left: 3px solid #00843D;
-        padding: 0.5rem 0.75rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-        font-size: 0.7rem;
+        padding: 0.4rem 0.6rem;
+        border-radius: 6px;
+        margin: 0.4rem 0;
+        font-size: 0.65rem;
     }
     .warning-card {
         background: #FEF2F2;
         border-left: 3px solid #DC2626;
-        padding: 0.5rem 0.75rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-        font-size: 0.7rem;
+        padding: 0.4rem 0.6rem;
+        border-radius: 6px;
+        margin: 0.4rem 0;
+        font-size: 0.65rem;
     }
     .info-card {
         background: #EFF6FF;
         border-left: 3px solid #3B82F6;
-        padding: 0.5rem 0.75rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-        font-size: 0.7rem;
+        padding: 0.4rem 0.6rem;
+        border-radius: 6px;
+        margin: 0.4rem 0;
+        font-size: 0.65rem;
     }
     
     /* Log Entries */
-    .log-submitted { background: #E3F2FD; border-left: 3px solid #2196F3; padding: 0.25rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.65rem; }
-    .log-received { background: #E8F5E9; border-left: 3px solid #4CAF50; padding: 0.25rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.65rem; }
-    .log-returned { background: #FFEBEE; border-left: 3px solid #F44336; padding: 0.25rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.65rem; }
-    .log-paid { background: #E8F5E9; border-left: 3px solid #00843D; padding: 0.25rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.65rem; }
-    .log-stage { background: #F3E5F5; border-left: 3px solid #9C27B0; padding: 0.25rem; margin: 0.2rem 0; border-radius: 5px; font-size: 0.65rem; }
+    .log-submitted { background: #E3F2FD; border-left: 3px solid #2196F3; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
+    .log-received { background: #E8F5E9; border-left: 3px solid #4CAF50; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
+    .log-returned { background: #FFEBEE; border-left: 3px solid #F44336; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
+    .log-paid { background: #E8F5E9; border-left: 3px solid #00843D; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
+    .log-stage { background: #F3E5F5; border-left: 3px solid #9C27B0; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
     
     /* Footer */
     .main-footer {
         background: #1F2937;
         color: #9CA3AF;
-        padding: 0.5rem 1rem;
-        margin-top: 1.5rem;
-        border-radius: 10px;
+        padding: 0.4rem 0.8rem;
+        margin-top: 1rem;
+        border-radius: 8px;
         text-align: center;
-        font-size: 0.6rem;
+        font-size: 0.55rem;
     }
     
     /* Data Table */
     .dataframe {
-        font-size: 0.7rem;
+        font-size: 0.65rem;
     }
     .dataframe thead tr th {
         background: #F3F4F6;
         color: #1F2937;
         font-weight: 600;
-        padding: 0.4rem;
-        font-size: 0.7rem;
+        padding: 0.3rem;
+        font-size: 0.65rem;
     }
     
     /* Expander */
     .streamlit-expanderHeader {
         background: #F9FAFB;
-        border-radius: 8px;
+        border-radius: 6px;
         font-weight: 500;
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         border: 1px solid #E5E7EB;
     }
     
@@ -296,45 +298,69 @@ st.markdown("""
         background: #00843D;
         color: white;
         text-align: center;
-        padding: 0.2rem;
-        border-radius: 6px;
-        font-size: 0.6rem;
+        padding: 0.15rem;
+        border-radius: 5px;
+        font-size: 0.55rem;
         font-weight: 500;
     }
     .stage-pending {
         background: #FFF8E1;
         color: #FFB81C;
         text-align: center;
-        padding: 0.2rem;
-        border-radius: 6px;
-        font-size: 0.6rem;
+        padding: 0.15rem;
+        border-radius: 5px;
+        font-size: 0.55rem;
         border: 1px solid #FFB81C;
     }
     .stage-current {
         background: #00843D;
         color: white;
         text-align: center;
-        padding: 0.2rem;
-        border-radius: 6px;
-        font-size: 0.6rem;
+        padding: 0.15rem;
+        border-radius: 5px;
+        font-size: 0.55rem;
         font-weight: bold;
     }
     
     /* Section Headers */
     .section-header {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         font-weight: 600;
         color: #1F2937;
-        margin: 0.75rem 0 0.5rem 0;
-        padding-bottom: 0.25rem;
+        margin: 0.5rem 0 0.3rem 0;
+        padding-bottom: 0.2rem;
         border-bottom: 2px solid #00843D;
         display: inline-block;
     }
     
+    /* Compact Filter Bar */
+    .compact-filter {
+        background: #F9FAFB;
+        padding: 0.4rem 0.8rem;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
+        border: 1px solid #E5E7EB;
+    }
+    .filter-label {
+        font-size: 0.55rem;
+        font-weight: 600;
+        color: #6B7280;
+        margin-bottom: 0.15rem;
+    }
+    
+    /* Resubmit Form */
+    .resubmit-container {
+        background: #FFFBEB;
+        border: 1px solid #FFB81C;
+        border-radius: 8px;
+        padding: 0.8rem;
+        margin-top: 0.5rem;
+    }
+    
     @media (max-width: 768px) {
         .kpi-value { font-size: 1rem; }
-        .kpi-card { padding: 0.5rem; }
-        .kpi-grid { gap: 0.5rem; }
+        .kpi-card { padding: 0.4rem; }
+        .kpi-grid { gap: 0.4rem; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -365,8 +391,10 @@ if 'selected_quarter' not in st.session_state:
     st.session_state.selected_quarter = "All"
 if 'selected_month' not in st.session_state:
     st.session_state.selected_month = "All"
+if 'selected_year' not in st.session_state:
+    st.session_state.selected_year = "All"
 
-def filter_by_filters(df, financial_year, quarter, month):
+def filter_by_filters(df, financial_year, quarter, month, year):
     if df.empty or 'submission_date' not in df.columns:
         return df
     
@@ -379,6 +407,9 @@ def filter_by_filters(df, financial_year, quarter, month):
         start_date = date(year_start, 7, 1)
         end_date = date(year_end, 6, 30)
         df = df[(df['submission_date_dt'].dt.date >= start_date) & (df['submission_date_dt'].dt.date <= end_date)]
+    
+    if year and year != "All":
+        df = df[df['submission_date_dt'].dt.year == int(year)]
     
     if quarter and quarter != "All":
         if quarter == "Q1 (Jul-Sep)":
@@ -547,7 +578,7 @@ if st.session_state.show_password_change:
 # Header
 st.markdown("""
 <div class='dashboard-header'>
-    <div style='font-size: 1.5rem;'>🏦</div>
+    <div style='font-size: 1.3rem;'>🏦</div>
     <div>
         <h1>HELB Payment & Surrender Monitoring System</h1>
         <p>Real-time analytics | Performance insights | SLA tracking</p>
@@ -555,22 +586,25 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Filter Bar
-st.markdown("<div style='background:#F9FAFB; padding:0.5rem 1rem; border-radius:10px; margin-bottom:1rem;'>", unsafe_allow_html=True)
-st.markdown("<p style='font-size:0.7rem; font-weight:600; color:#6B7280; margin-bottom:0.5rem;'>📊 FILTERS</p>", unsafe_allow_html=True)
-col1, col2, col3, col4 = st.columns(4)
+# Compact Filter Bar
+st.markdown("<div class='compact-filter'>", unsafe_allow_html=True)
+st.markdown("<p class='filter-label'>📊 FILTERS</p>", unsafe_allow_html=True)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     financial_years_list = ["All"] + get_financial_years()
     if not financial_years_list:
         financial_years_list = ["All", "2024/2025", "2025/2026", "2026/2027"]
     st.session_state.selected_financial_year = st.selectbox("Financial Year", financial_years_list, key="fy_filter")
 with col2:
+    years_list = ["All"] + list(range(2023, datetime.now().year + 2))
+    st.session_state.selected_year = st.selectbox("Year", years_list, key="year_filter")
+with col3:
     quarters = ["All", "Q1 (Jul-Sep)", "Q2 (Oct-Dec)", "Q3 (Jan-Mar)", "Q4 (Apr-Jun)"]
     st.session_state.selected_quarter = st.selectbox("Quarter", quarters, key="quarter_filter")
-with col3:
+with col4:
     months = ["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
     st.session_state.selected_month = st.selectbox("Month", months, key="month_filter")
-with col4:
+with col5:
     data_scope = st.selectbox("Data Scope", ["All Data", "Last 30 Days", "Last 90 Days", "This Year"])
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -578,8 +612,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 with st.sidebar:
     st.markdown("""
     <div style='text-align: center; padding: 0.5rem 0;'>
-        <div style='font-size: 2rem;'>🏦</div>
-        <p style='color: #00843D; font-weight: 700; margin: 0;'>HELB</p>
+        <div style='font-size: 1.8rem;'>🏦</div>
+        <p style='color: #00843D; font-weight: 700; margin: 0; font-size: 0.8rem;'>HELB</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -587,7 +621,7 @@ with st.sidebar:
         <div class='user-info'>
             <strong>{st.session_state.full_name}</strong>
             <span>{st.session_state.user_role}</span>
-            <span style='font-size: 0.6rem;'>{st.session_state.user_dept}</span>
+            <span style='font-size: 0.55rem;'>{st.session_state.user_dept}</span>
         </div>
     """, unsafe_allow_html=True)
     
@@ -615,8 +649,8 @@ with st.sidebar:
         default_index=0,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
-            "icon": {"color": "#00843D", "font-size": "14px"},
-            "nav-link": {"font-size": "12px", "text-align": "left", "margin": "0px", "padding": "6px 8px", "border-radius": "6px"},
+            "icon": {"color": "#00843D", "font-size": "13px"},
+            "nav-link": {"font-size": "11px", "text-align": "left", "margin": "0px", "padding": "5px 8px", "border-radius": "6px"},
             "nav-link-selected": {"background": "linear-gradient(135deg, #00843D 0%, #00529B 100%)", "color": "white"},
         }
     )
@@ -632,7 +666,7 @@ with st.sidebar:
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<div class='section-header'>📊 Department Performance Dashboard</div>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#6B7280; font-size:0.7rem; margin-bottom:1rem;'>{st.session_state.user_dept}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>{st.session_state.user_dept}</p>", unsafe_allow_html=True)
     
     df = get_department_requests(st.session_state.user_dept)
     
@@ -648,7 +682,8 @@ if choice == "📊 Department Dashboard":
         df = df[df['submission_date_dt'].dt.date >= cutoff]
     
     df = filter_by_filters(df, st.session_state.selected_financial_year, 
-                          st.session_state.selected_quarter, st.session_state.selected_month)
+                          st.session_state.selected_quarter, st.session_state.selected_month,
+                          st.session_state.selected_year)
     
     if df.empty:
         st.info("No data available for the selected filters.")
@@ -676,15 +711,15 @@ if choice == "📊 Department Dashboard":
         st.markdown("<div class='kpi-grid'>", unsafe_allow_html=True)
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total Requests</div><div class='kpi-value'>{total_requests}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL REQUESTS</div><div class='kpi-value'>{total_requests}</div></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ Pending</div><div class='kpi-value'>{pending}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{pending}</div></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Completion Rate</div><div class='kpi-value' style='color:#00843D;'>{completion_rate:.1f}%</div><div class='progress-bar'><div class='progress-fill' style='width:{completion_rate}%;'></div></div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETION RATE</div><div class='kpi-value'>{completion_rate:.1f}%</div><div class='progress-bar'><div class='progress-fill' style='width:{completion_rate}%;'></div></div></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ Avg TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ AVG TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
         with col5:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Total Value</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
         # Tabs for separate sections
@@ -700,15 +735,14 @@ if choice == "📊 Department Dashboard":
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total</div><div class='kpi-value'>{pay_total}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL</div><div class='kpi-value'>{pay_total}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ Pending</div><div class='kpi-value'>{pay_pending}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{pay_pending}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Completed</div><div class='kpi-value'>{pay_completed}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETED</div><div class='kpi-value'>{pay_completed}</div></div>", unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Value</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 VALUE</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
-                # Payment requests table
                 pay_df = payment_requests[['request_number', 'request_type', 'amount', 'status', 'submission_date']].head(10)
                 st.dataframe(pay_df, use_container_width=True, hide_index=True)
             else:
@@ -724,13 +758,13 @@ if choice == "📊 Department Dashboard":
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total</div><div class='kpi-value'>{sur_total}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL</div><div class='kpi-value'>{sur_total}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ Pending</div><div class='kpi-value'>{sur_pending}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{sur_pending}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Cleared</div><div class='kpi-value'>{sur_completed}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ CLEARED</div><div class='kpi-value'>{sur_completed}</div></div>", unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Value</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 VALUE</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 sur_df = surrender_requests[['request_number', 'amount', 'status', 'submission_date']].head(10)
                 st.dataframe(sur_df, use_container_width=True, hide_index=True)
@@ -754,7 +788,7 @@ if choice == "📊 Department Dashboard":
                     title="Turnaround Time by Request Type",
                     xaxis_title="",
                     yaxis_title="Days",
-                    height=350,
+                    height=300,
                     xaxis_tickangle=-45,
                     margin=dict(l=20, r=20, t=40, b=20)
                 )
@@ -783,7 +817,7 @@ if choice == "📊 Department Dashboard":
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
-    st.markdown("<p style='color:#6B7280; font-size:0.7rem; margin-bottom:1rem;'>Enterprise-wide analytics and performance insights</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>Enterprise-wide analytics and performance insights</p>", unsafe_allow_html=True)
     
     df = get_requests()
     
@@ -799,7 +833,8 @@ elif choice == "📈 Management Dashboard":
         df = df[df['submission_date_dt'].dt.date >= cutoff]
     
     df = filter_by_filters(df, st.session_state.selected_financial_year, 
-                          st.session_state.selected_quarter, st.session_state.selected_month)
+                          st.session_state.selected_quarter, st.session_state.selected_month,
+                          st.session_state.selected_year)
     
     if df.empty:
         st.info("No data available for the selected filters.")
@@ -835,18 +870,18 @@ elif choice == "📈 Management Dashboard":
         st.markdown("<div class='kpi-grid'>", unsafe_allow_html=True)
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total Requests</div><div class='kpi-value'>{total_requests:,}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL REQUESTS</div><div class='kpi-value'>{total_requests:,}</div></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Total Value</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
         with col3:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Completion Rate</div><div class='kpi-value' style='color:#00843D;'>{completion_rate:.1f}%</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETION RATE</div><div class='kpi-value'>{completion_rate:.1f}%</div></div>", unsafe_allow_html=True)
         with col4:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ Pending</div><div class='kpi-value'>{pending:,}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{pending:,}</div></div>", unsafe_allow_html=True)
         with col5:
-            sla_color = "#00843D" if sla_rate >= 80 else "#F59E0B" if sla_rate >= 60 else "#DC3545"
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>🎯 SLA Compliance</div><div class='kpi-value' style='color:{sla_color};'>{sla_rate:.1f}%</div></div>", unsafe_allow_html=True)
+            sla_color = "#FFB81C" if sla_rate >= 80 else "#FFB81C" if sla_rate >= 60 else "#FFB81C"
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>🎯 SLA COMPLIANCE</div><div class='kpi-value'>{sla_rate:.1f}%</div></div>", unsafe_allow_html=True)
         with col6:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ Avg TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ AVG TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
         # Alerts
@@ -903,16 +938,15 @@ elif choice == "📈 Management Dashboard":
                 fig = px.pie(type_counts, values='Count', names='Type', hole=0.4,
                             color_discrete_sequence=px.colors.sequential.Greens_r,
                             title="Request Type Distribution")
-                fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
+                fig.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
             
             with col2:
                 status_counts = df['status'].value_counts().reset_index()
                 status_counts.columns = ['Status', 'Count']
-                colors = ['#00843D' if s in ['PAID', 'CLEARED'] else '#FFB81C' for s in status_counts['Status']]
                 fig = px.bar(status_counts, x='Status', y='Count', color='Count',
                             color_continuous_scale='Greens', title="Status Distribution")
-                fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
+                fig.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
                 st.plotly_chart(fig, use_container_width=True)
         
         with tab2:
@@ -924,18 +958,18 @@ elif choice == "📈 Management Dashboard":
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total Payment Requests</div><div class='kpi-value'>{pay_total:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL PAYMENT REQUESTS</div><div class='kpi-value'>{pay_total:,}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Completed</div><div class='kpi-value'>{pay_completed:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETED</div><div class='kpi-value'>{pay_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Total Value</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 pay_by_type = payment_df.groupby('request_type').agg({'request_number': 'count', 'amount': 'sum'}).reset_index()
                 pay_by_type.columns = ['Type', 'Count', 'Amount']
                 fig = px.bar(pay_by_type, x='Type', y='Count', title="Payment Requests by Type",
                             color='Count', color_continuous_scale='Greens', text='Count')
                 fig.update_traces(textposition='outside')
-                fig.update_layout(height=350, xaxis_tickangle=-45)
+                fig.update_layout(height=300, xaxis_tickangle=-45)
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No payment requests found.")
@@ -949,17 +983,17 @@ elif choice == "📈 Management Dashboard":
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 Total Surrender Requests</div><div class='kpi-value'>{sur_total:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL SURRENDER REQUESTS</div><div class='kpi-value'>{sur_total:,}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ Cleared</div><div class='kpi-value'>{sur_completed:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ CLEARED</div><div class='kpi-value'>{sur_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Total Value</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 fig = px.bar(x=['Cleared', 'Pending'], y=[sur_completed, sur_total - sur_completed],
                             title="Surrender Clearance Status",
                             color=['Cleared', 'Pending'], color_discrete_sequence=['#00843D', '#FFB81C'],
                             text_auto=True)
-                fig.update_layout(height=350)
+                fig.update_layout(height=300)
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No surrender requests found.")
@@ -982,7 +1016,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1003,7 +1037,7 @@ elif choice == "📈 Management Dashboard":
                         color='Performance Score', color_continuous_scale='Greens',
                         text='Performance Score')
             fig.update_traces(textposition='outside')
-            fig.update_layout(height=350)
+            fig.update_layout(height=300)
             st.plotly_chart(fig, use_container_width=True)
         
         with tab5:
@@ -1015,7 +1049,7 @@ elif choice == "📈 Management Dashboard":
                             color_discrete_map={True: '#DC3545', False: '#00843D'},
                             text='Avg Days')
                 fig.update_traces(textposition='outside')
-                fig.update_layout(height=400, xaxis_tickangle=-45)
+                fig.update_layout(height=350, xaxis_tickangle=-45)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 bottlenecks_list = bottlenecks[bottlenecks['Is Bottleneck']]['Stage'].tolist()
@@ -1036,7 +1070,7 @@ elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Search Payment Records</div>", unsafe_allow_html=True)
     
     st.markdown("""
-    <div style='background:#F0F9FF; padding:0.5rem 0.75rem; border-radius:8px; margin-bottom:1rem; font-size:0.7rem;'>
+    <div style='background:#F0F9FF; padding:0.4rem 0.6rem; border-radius:6px; margin-bottom:0.8rem; font-size:0.65rem;'>
         🔎 Search by Request Number, Batch No., Imprest No., Invoice No., Surrender No., or Payment Reference
     </div>
     """, unsafe_allow_html=True)
@@ -1541,23 +1575,113 @@ elif choice == "📋 My Requests":
 
 
 # ================================================================
-# RETURNED REQUESTS
+# RETURNED REQUESTS - WITH RESUBMISSION CALL TO ACTION
 # ================================================================
 elif choice == "↩️ Returned Requests":
-    st.markdown("<div class='section-header'>↩️ Returned Requests</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>Review the return reasons below and resubmit your requests after making corrections.</p>", unsafe_allow_html=True)
+    
     df = get_returned_requests(st.session_state.user_dept)
+    
     if df.empty:
-        st.info("No returned requests found.")
+        st.info("No returned requests found. Great job! All your requests are on track.")
     else:
         for _, req in df.iterrows():
-            with st.expander(f"📄 {req['request_number']} - Returned on: {req['date_returned']}"):
-                st.markdown(f"**Return Reason:** :red[{req['return_reason']}]")
-                st.markdown(f"**Amount:** KES {req['amount']:,.2f}")
-                if st.button(f"Resubmit", key=f"resubmit_{req['id']}"):
-                    update_request_status(req['id'], 'SUBMITTED', performed_by=st.session_state.username)
-                    add_request_log(req['id'], req['request_number'], "RESUBMITTED", "RETURNED", "SUBMITTED", "Resubmitted", st.session_state.username, st.session_state.user_role, st.session_state.user_dept)
-                    st.success(f"Request resubmitted!")
-                    st.rerun()
+            with st.expander(f"📄 {req['request_number']} - Returned on: {req['date_returned']} - {req['request_type']}", expanded=True):
+                st.markdown(f"""
+                <div class='warning-card'>
+                    <strong>⚠️ Return Reason:</strong> {req['return_reason']}<br>
+                    <strong>💰 Amount:</strong> KES {req['amount']:,.2f}<br>
+                    <strong>📅 Submitted:</strong> {req['submission_date']}<br>
+                    <strong>🏢 Department:</strong> {req['department_name']}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Show original payment details
+                if req.get('payment_description'):
+                    st.markdown(f"**Original Description:** {req['payment_description']}")
+                
+                st.markdown("---")
+                st.markdown("### 📝 Make Corrections and Resubmit")
+                
+                # Resubmission form
+                with st.form(key=f"resubmit_form_{req['id']}"):
+                    st.markdown("**Please correct the following information:**")
+                    
+                    # Editable fields based on request type
+                    corrected_description = st.text_area(
+                        "Payment Description (if correction needed)", 
+                        value=req.get('payment_description', ''),
+                        help="Update the payment description if required"
+                    )
+                    
+                    # Additional fields based on request type
+                    if req['request_type'] == "Student Payment":
+                        corrected_batch = st.text_input("Batch No.", value=req.get('batch_no', ''))
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                    elif req['request_type'] in ["Imprest", "Petty Cash"]:
+                        corrected_imprest = st.text_input("Imprest/Petty Cash No.", value=req.get('imprest_no', ''))
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                    elif req['request_type'] == "Supplier Payment":
+                        corrected_invoice = st.text_input("Invoice No.", value=req.get('invoice_no', ''))
+                        corrected_supplier = st.text_input("Supplier Name", value=req.get('supplier_name', ''))
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                    elif req['request_type'] == "Surrender":
+                        corrected_surrender = st.text_input("Surrender No.", value=req.get('surrender_number', ''))
+                        corrected_staff = st.text_input("Staff Name", value=req.get('staff_name', ''))
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                    else:
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                    
+                    st.markdown("<div class='resubmit-container'>", unsafe_allow_html=True)
+                    st.info("💡 Please ensure all corrections are made before resubmitting. The request will go back to Finance for review.")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        resubmit = st.form_submit_button("✅ Confirm Corrections & Resubmit", type="primary")
+                    with col2:
+                        cancel = st.form_submit_button("❌ Cancel")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    
+                    if resubmit:
+                        # Prepare updated data
+                        updated_data = {
+                            'payment_description': corrected_description,
+                            'amount': corrected_amount,
+                            'status': 'SUBMITTED',
+                            'return_reason': None,
+                            'date_returned': None
+                        }
+                        
+                        # Add request-specific fields
+                        if req['request_type'] == "Student Payment":
+                            updated_data['batch_no'] = corrected_batch
+                        elif req['request_type'] in ["Imprest", "Petty Cash"]:
+                            updated_data['imprest_no'] = corrected_imprest
+                        elif req['request_type'] == "Supplier Payment":
+                            updated_data['invoice_no'] = corrected_invoice
+                            updated_data['supplier_name'] = corrected_supplier
+                        elif req['request_type'] == "Surrender":
+                            updated_data['surrender_number'] = corrected_surrender
+                            updated_data['staff_name'] = corrected_staff
+                        
+                        # Update the request
+                        resubmit_request(req['id'], updated_data)
+                        
+                        # Add to logs
+                        add_request_log(
+                            req['id'], req['request_number'], "RESUBMITTED", 
+                            "RETURNED", "SUBMITTED", 
+                            f"Resubmitted after correction. Original return reason: {req['return_reason']}",
+                            st.session_state.username, st.session_state.user_role, st.session_state.user_dept
+                        )
+                        
+                        st.success(f"✅ Request {req['request_number']} has been resubmitted successfully!")
+                        st.balloons()
+                        st.rerun()
+                    
+                    if cancel:
+                        st.info("Resubmission cancelled.")
 
 
 # ================================================================
@@ -1783,7 +1907,9 @@ elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
     
     df = get_reports_data(st.session_state.user_role, st.session_state.user_dept)
-    df = filter_by_filters(df, st.session_state.selected_financial_year, st.session_state.selected_quarter, st.session_state.selected_month)
+    df = filter_by_filters(df, st.session_state.selected_financial_year, 
+                          st.session_state.selected_quarter, st.session_state.selected_month,
+                          st.session_state.selected_year)
     
     if df.empty:
         st.info("No data available")
