@@ -4,9 +4,60 @@ from datetime import datetime, date
 import os
 import json
 import shutil
+import time
+from functools import wraps
 
 DB_PATH = "helb_data.db"
 BACKUP_DIR = "backups"
+
+# ================================================================
+# DATABASE OPTIMIZATIONS
+# ================================================================
+
+def retry_on_lock(max_retries=5, delay=0.1):
+    """Retry database operation if locked"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        time.sleep(delay * (attempt + 1))
+                        continue
+                    raise
+            return None
+        return wrapper
+    return decorator
+
+def enable_wal_mode():
+    """Enable WAL mode for better concurrent performance"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-20000")
+    conn.close()
+
+def add_performance_indexes():
+    """Add performance indexes for faster queries"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_date ON requests(submission_date)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_dept ON requests(department_name)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_type ON requests(request_type)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_number ON requests(request_number)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_batch ON requests(batch_no)",
+        "CREATE INDEX IF NOT EXISTS idx_requests_imprest ON requests(imprest_no)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_request ON request_logs(request_id)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON request_logs(timestamp)"
+    ]
+    for idx in indexes:
+        cursor.execute(idx)
+    conn.commit()
+    conn.close()
 
 # ================================================================
 # BACKUP FUNCTIONS
@@ -14,7 +65,6 @@ BACKUP_DIR = "backups"
 def ensure_backup_dir():
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
-
 
 def create_backup():
     ensure_backup_dir()
@@ -34,7 +84,6 @@ def create_backup():
             json.dump(metadata, f, indent=2)
         return backup_filename, backup_path
     return None, None
-
 
 def get_backup_list():
     ensure_backup_dir()
@@ -61,7 +110,6 @@ def get_backup_list():
     backups.sort(key=lambda x: x['date'], reverse=True)
     return backups
 
-
 def restore_backup(backup_filename):
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
     if os.path.exists(backup_path):
@@ -71,7 +119,6 @@ def restore_backup(backup_filename):
         shutil.copy2(backup_path, DB_PATH)
         return True
     return False
-
 
 def auto_backup_scheduler():
     ensure_backup_dir()
@@ -87,7 +134,6 @@ def auto_backup_scheduler():
         return True
     return False
 
-
 def export_data_to_csv():
     df_requests = get_requests()
     df_users = get_all_users()
@@ -99,7 +145,6 @@ def export_data_to_csv():
     df_users.to_csv(os.path.join(export_dir, "users.csv"), index=False)
     df_departments.to_csv(os.path.join(export_dir, "departments.csv"), index=False)
     return export_dir
-
 
 # ================================================================
 # LOGS TABLE
@@ -126,7 +171,6 @@ def create_logs_table():
     conn.commit()
     conn.close()
 
-
 def add_request_log(request_id, request_number, action, status_from, status_to, 
                     comment, performed_by, performed_by_role, performed_by_dept, details=None):
     try:
@@ -147,7 +191,6 @@ def add_request_log(request_id, request_number, action, status_from, status_to,
         conn.close()
     except Exception as e:
         print(f"Error adding log: {e}")
-
 
 def get_request_logs(request_id):
     try:
@@ -170,7 +213,6 @@ def get_request_logs(request_id):
         print(f"Error getting logs: {e}")
         return []
 
-
 # ================================================================
 # BASIC REQUEST FUNCTIONS
 # ================================================================
@@ -183,7 +225,6 @@ def get_returned_requests(department_name):
     conn.close()
     return df
 
-
 def resubmit_request(request_id, updated_data):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -194,7 +235,6 @@ def resubmit_request(request_id, updated_data):
                    values + [datetime.now().isoformat()])
     conn.commit()
     conn.close()
-
 
 def get_request_by_id(request_id):
     conn = sqlite3.connect(DB_PATH)
@@ -209,7 +249,6 @@ def get_request_by_id(request_id):
     conn.close()
     return None
 
-
 def get_column_names(table_name):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -217,7 +256,6 @@ def get_column_names(table_name):
     columns = [column[1] for column in cursor.fetchall()]
     conn.close()
     return columns
-
 
 def calculate_tat(submission_date, payment_date=None):
     from utils.holidays_ke import working_days_between
@@ -228,7 +266,6 @@ def calculate_tat(submission_date, payment_date=None):
     else:
         today = date.today()
         return working_days_between(sub_date, today)
-
 
 def init_database():
     """Create all tables if they don't exist"""
@@ -493,7 +530,10 @@ def init_database():
     
     conn.commit()
     conn.close()
-
+    
+    # Apply optimizations
+    enable_wal_mode()
+    add_performance_indexes()
 
 # ================================================================
 # FINANCE PASSWORD FUNCTIONS
@@ -506,7 +546,6 @@ def verify_finance_password(password):
     conn.close()
     return result and result[0] == password
 
-
 def update_finance_password(new_password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -515,7 +554,6 @@ def update_finance_password(new_password):
     conn.close()
     return True
 
-
 def get_finance_password():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -523,7 +561,6 @@ def get_finance_password():
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else 'finance123'
-
 
 # ================================================================
 # ENHANCED USER FUNCTIONS
@@ -540,7 +577,6 @@ def get_all_users():
     df = pd.read_sql_query(query, conn)
     conn.close()
     return df
-
 
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
@@ -559,9 +595,7 @@ def create_user(username, password, role, department_id, full_name,
     finally:
         conn.close()
 
-
 def update_user_permissions(username, can_receive, can_process, can_release):
-    """Update finance user permissions"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -578,9 +612,7 @@ def update_user_permissions(username, can_receive, can_process, can_release):
     finally:
         conn.close()
 
-
 def get_user_permissions(username):
-    """Get permissions for a specific user"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -598,9 +630,7 @@ def get_user_permissions(username):
         }
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
-
 def delete_user(username):
-    """Delete a user by username"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -613,12 +643,10 @@ def delete_user(username):
     finally:
         conn.close()
 
-
 # ================================================================
 # DEPARTMENT FUNCTIONS
 # ================================================================
 def create_department(name, permissions):
-    """Create a new department with permissions"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -648,9 +676,7 @@ def create_department(name, permissions):
     finally:
         conn.close()
 
-
 def delete_department(dept_id):
-    """Delete a department by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -667,12 +693,10 @@ def delete_department(dept_id):
     finally:
         conn.close()
 
-
 # ================================================================
 # SEARCH FUNCTIONS
 # ================================================================
 def search_payment_records(search_term, search_type="all"):
-    """Search payment records by various criteria"""
     conn = sqlite3.connect(DB_PATH)
     
     if search_type == "request_number":
@@ -702,7 +726,7 @@ def search_payment_records(search_term, search_type="all"):
             ORDER BY submission_date DESC
         '''
         params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    else:  # "all"
+    else:
         query = '''
             SELECT * FROM requests 
             WHERE request_number LIKE ? 
@@ -724,20 +748,17 @@ def search_payment_records(search_term, search_type="all"):
     conn.close()
     return df
 
-
 def get_departments():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
     conn.close()
     return df
 
-
 def get_products():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
     conn.close()
     return df
-
 
 def add_product(name, category, has_payment_type, has_semester):
     conn = sqlite3.connect(DB_PATH)
@@ -754,7 +775,6 @@ def add_product(name, category, has_payment_type, has_semester):
     finally:
         conn.close()
 
-
 def delete_product(product_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -767,13 +787,11 @@ def delete_product(product_id):
     finally:
         conn.close()
 
-
 def get_financial_years():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
     conn.close()
     return df['name'].tolist() if not df.empty else []
-
 
 def add_financial_year(year_name):
     conn = sqlite3.connect(DB_PATH)
@@ -787,7 +805,6 @@ def add_financial_year(year_name):
     finally:
         conn.close()
 
-
 def delete_financial_year(year_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -800,13 +817,11 @@ def delete_financial_year(year_id):
     finally:
         conn.close()
 
-
 def get_semesters():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
     conn.close()
     return df['name'].tolist() if not df.empty else []
-
 
 def add_semester(semester_name):
     conn = sqlite3.connect(DB_PATH)
@@ -820,7 +835,6 @@ def add_semester(semester_name):
     finally:
         conn.close()
 
-
 def delete_semester(semester_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -833,13 +847,11 @@ def delete_semester(semester_id):
     finally:
         conn.close()
 
-
 def get_funders():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM funders ORDER BY name", conn)
     conn.close()
     return df
-
 
 def add_funder(funder_name):
     conn = sqlite3.connect(DB_PATH)
@@ -853,7 +865,6 @@ def add_funder(funder_name):
     finally:
         conn.close()
 
-
 def delete_funder(funder_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -865,7 +876,6 @@ def delete_funder(funder_id):
         return False
     finally:
         conn.close()
-
 
 def get_user_department(username):
     conn = sqlite3.connect(DB_PATH)
@@ -879,13 +889,11 @@ def get_user_department(username):
     conn.close()
     return result
 
-
 def get_requests():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
     conn.close()
     return df
-
 
 def get_pending_confirmation_count():
     conn = sqlite3.connect(DB_PATH)
@@ -895,7 +903,6 @@ def get_pending_confirmation_count():
     conn.close()
     return count
 
-
 def get_pending_completion_count():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -904,7 +911,7 @@ def get_pending_completion_count():
     conn.close()
     return count
 
-
+@retry_on_lock()
 def save_request(data):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -927,7 +934,7 @@ def save_request(data):
         pass
     return request_number
 
-
+@retry_on_lock()
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
                           checklist_approvals=None, checklist_documents=None, checklist_comments=None):
@@ -985,7 +992,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             params.append(None)
         action = "RESUBMITTED"
     
-    # Payment statuses
     elif status == 'PAYMENT_PREPARED':
         action = "Payment Prepared"
     
@@ -998,7 +1004,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     elif status == 'PAYMENT_AUTHORIZED':
         action = "Payment Authorized"
     
-    # Surrender statuses
     elif status == 'SURRENDER_FIRST_VERIFICATION':
         action = "First Verification"
     
@@ -1045,7 +1050,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         except:
             pass
 
-
 def update_payment_details(request_id, payment_reference):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1055,7 +1059,6 @@ def update_payment_details(request_id, payment_reference):
     )
     conn.commit()
     conn.close()
-
 
 def authenticate_user(username, password):
     conn = sqlite3.connect(DB_PATH)
@@ -1076,7 +1079,6 @@ def authenticate_user(username, password):
         conn.close()
         return None
 
-
 def update_user_password(username, new_password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1084,7 +1086,6 @@ def update_user_password(username, new_password):
     conn.commit()
     conn.close()
     return True
-
 
 def get_user_by_username(username):
     conn = sqlite3.connect(DB_PATH)
@@ -1100,13 +1101,11 @@ def get_user_by_username(username):
     conn.close()
     return user
 
-
 def get_pending_duration(request_date):
     from utils.holidays_ke import working_days_between
     today = date.today()
     submitted_date = datetime.strptime(request_date, '%Y-%m-%d').date()
     return working_days_between(submitted_date, today)
-
 
 def get_time_lapsed_from_confirmation(request_id):
     from utils.holidays_ke import working_days_between
@@ -1130,7 +1129,6 @@ def get_time_lapsed_from_confirmation(request_id):
     except:
         return None
 
-
 def get_department_requests(department_name):
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query(
@@ -1139,7 +1137,6 @@ def get_department_requests(department_name):
     )
     conn.close()
     return df
-
 
 def get_management_dashboard_stats(financial_year=None, quarter=None):
     from utils.holidays_ke import working_days_between
@@ -1192,7 +1189,6 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
             'total_amount': total_amount, 'avg_completion_time': avg_completion_time,
             'total_breaches': breaches, 'breach_rate': breach_rate, 'completed_count': total_paid}
 
-
 def get_trend_data(financial_year=None):
     df = get_requests()
     if df.empty:
@@ -1204,7 +1200,6 @@ def get_trend_data(financial_year=None):
     monthly = df.groupby('month').agg({'amount': 'sum', 'request_number': 'count'}).reset_index()
     monthly.columns = ['month', 'total_amount', 'request_count']
     return monthly.sort_values('month')
-
 
 def get_all_departments_summary():
     conn = sqlite3.connect(DB_PATH)
@@ -1218,7 +1213,6 @@ def get_all_departments_summary():
     df = pd.read_sql_query(query, conn)
     conn.close()
     return df
-
 
 def search_by_batch_number(batch_no):
     conn = sqlite3.connect(DB_PATH)
@@ -1237,7 +1231,6 @@ def search_by_batch_number(batch_no):
                  'department': r[6], 'submission_date': r[7]} for r in results]
     return []
 
-
 def get_all_batch_numbers():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -1250,13 +1243,11 @@ def get_all_batch_numbers():
     conn.close()
     return [r[0] for r in results if r[0]]
 
-
 def get_allowed_main_categories(user_role, user_dept):
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     if user_role in ["MANAGEMENT"] + finance_roles:
         return []
     return ["Submit Payment Request", "Submit Surrender"]
-
 
 def get_allowed_request_types(user_role, user_dept, main_category):
     if user_role == "ADMIN":
@@ -1291,7 +1282,6 @@ def get_allowed_request_types(user_role, user_dept, main_category):
     else:
         return ["Surrender"]
 
-
 def get_reports_data(user_role, user_dept):
     df = get_requests()
     if df.empty:
@@ -1302,20 +1292,14 @@ def get_reports_data(user_role, user_dept):
     else:
         return df[df['department_name'] == user_dept]
 
-
 # ================================================================
 # PUBLIC PAYMENT TRACKING FUNCTIONS
 # ================================================================
 
 def get_public_payment_details(search_term, search_type="reference"):
-    """
-    Get payment details for public tracking portal
-    Returns simplified payment information without sensitive data
-    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Search across multiple reference fields
     cursor.execute('''
         SELECT 
             request_number, request_type, amount, payment_description,
@@ -1358,12 +1342,7 @@ def get_public_payment_details(search_term, search_type="reference"):
         }
     return None
 
-
 def calculate_estimated_completion_date(status, current_date):
-    """
-    Calculate estimated completion date based on current status
-    Returns: (estimated_date, message, days_remaining)
-    """
     from utils.holidays_ke import add_working_days
     
     status_map = {
@@ -1388,3 +1367,84 @@ def calculate_estimated_completion_date(status, current_date):
         elif status == 'RETURNED':
             return None, info['message'], None
     return None, "Status information unavailable.", None
+
+
+# ================================================================
+# DASHBOARD ANALYTICS FUNCTIONS
+# ================================================================
+
+def calculate_performance_score(row, sla_days=5):
+    """Calculate individual request performance score"""
+    base_score = 100
+    if row.get('tat_days', 0) > sla_days:
+        over_days = row['tat_days'] - sla_days
+        base_score -= min(30, over_days * 5)
+    elif row.get('tat_days', 0) < sla_days:
+        early_days = sla_days - row['tat_days']
+        base_score += min(10, early_days * 2)
+    return max(0, min(100, base_score))
+
+def identify_bottlenecks(df):
+    """Identify process bottlenecks using duration analysis"""
+    bottlenecks = []
+    
+    stage_durations = {
+        'Submission to Receipt': [],
+        'Receipt to Preparation': [],
+        'Preparation to Verification': [],
+        'Verification to Approval': [],
+        'Approval to Authorization': [],
+        'Authorization to Payment': []
+    }
+    
+    for _, row in df.iterrows():
+        if row.get('date_received') and row.get('submission_date'):
+            try:
+                sub_date = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                rec_date = datetime.strptime(row['date_received'], '%Y-%m-%d').date()
+                stage_durations['Submission to Receipt'].append(working_days_between(sub_date, rec_date))
+            except:
+                pass
+    
+    for stage, durations in stage_durations.items():
+        if durations:
+            avg_duration = np.mean(durations)
+            max_duration = np.max(durations)
+            p95_duration = np.percentile(durations, 95)
+            bottlenecks.append({
+                'Stage': stage,
+                'Avg Days': round(avg_duration, 1),
+                'Max Days': max_duration,
+                'P95 Days': round(p95_duration, 1),
+                'Is Bottleneck': avg_duration > 3
+            })
+    
+    return pd.DataFrame(bottlenecks)
+
+def get_fastest_request_types(df):
+    """Identify which request types have the shortest TAT"""
+    tat_analysis = []
+    for req_type in df['request_type'].unique():
+        type_df = df[(df['request_type'] == req_type) & (df['status'].isin(['PAID', 'CLEARED']))]
+        if not type_df.empty:
+            tat_values = type_df.apply(
+                lambda x: calculate_tat(x['submission_date'], x['payment_date']) if x['payment_date'] else 0, 
+                axis=1
+            )
+            avg_tat = tat_values.mean()
+            median_tat = tat_values.median()
+            min_tat = tat_values.min()
+            max_tat = tat_values.max()
+            count = len(type_df)
+            
+            tat_analysis.append({
+                'Request Type': req_type,
+                'Average TAT': round(avg_tat, 1) if not pd.isna(avg_tat) else 0,
+                'Median TAT': round(median_tat, 1) if not pd.isna(median_tat) else 0,
+                'Fastest (Days)': min_tat if not pd.isna(min_tat) else 0,
+                'Slowest (Days)': max_tat if not pd.isna(max_tat) else 0,
+                'Sample Size': count,
+                'Performance Score': round(calculate_performance_score({'tat_days': avg_tat}, 5), 1) if not pd.isna(avg_tat) else 0
+            })
+    
+    return pd.DataFrame(tat_analysis).sort_values('Average TAT')
