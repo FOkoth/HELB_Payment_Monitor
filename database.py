@@ -226,6 +226,20 @@ def get_returned_requests(department_name):
     conn.close()
     return df
 
+def get_returned_request_by_id(request_id):
+    """Get a specific returned request by ID for resubmission"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM requests WHERE id = ? AND status = 'RETURNED'", (request_id,))
+    row = cursor.fetchone()
+    if row:
+        columns = [description[0] for description in cursor.description]
+        result = dict(zip(columns, row))
+        conn.close()
+        return result
+    conn.close()
+    return None
+
 def resubmit_request(request_id, updated_data):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -597,6 +611,7 @@ def create_user(username, password, role, department_id, full_name,
         conn.close()
 
 def update_user_permissions(username, can_receive, can_process, can_release):
+    """Update finance user permissions"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -614,6 +629,7 @@ def update_user_permissions(username, can_receive, can_process, can_release):
         conn.close()
 
 def get_user_permissions(username):
+    """Get permissions for a specific user"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -632,6 +648,7 @@ def get_user_permissions(username):
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
 def delete_user(username):
+    """Delete a user by username"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -648,6 +665,7 @@ def delete_user(username):
 # DEPARTMENT FUNCTIONS
 # ================================================================
 def create_department(name, permissions):
+    """Create a new department with permissions"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -678,6 +696,7 @@ def create_department(name, permissions):
         conn.close()
 
 def delete_department(dept_id):
+    """Delete a department by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -698,6 +717,7 @@ def delete_department(dept_id):
 # SEARCH FUNCTIONS
 # ================================================================
 def search_payment_records(search_term, search_type="all"):
+    """Search payment records by various criteria"""
     conn = sqlite3.connect(DB_PATH)
     
     if search_type == "request_number":
@@ -727,7 +747,7 @@ def search_payment_records(search_term, search_type="all"):
             ORDER BY submission_date DESC
         '''
         params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    else:
+    else:  # "all"
         query = '''
             SELECT * FROM requests 
             WHERE request_number LIKE ? 
@@ -993,6 +1013,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             params.append(None)
         action = "RESUBMITTED"
     
+    # Payment statuses
     elif status == 'PAYMENT_PREPARED':
         action = "Payment Prepared"
     
@@ -1005,6 +1026,7 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     elif status == 'PAYMENT_AUTHORIZED':
         action = "Payment Authorized"
     
+    # Surrender statuses
     elif status == 'SURRENDER_FIRST_VERIFICATION':
         action = "First Verification"
     
@@ -1298,6 +1320,7 @@ def get_reports_data(user_role, user_dept):
 # ================================================================
 
 def get_public_payment_details(search_term, search_type="reference"):
+    """Get payment details for public tracking portal"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
@@ -1344,6 +1367,7 @@ def get_public_payment_details(search_term, search_type="reference"):
     return None
 
 def calculate_estimated_completion_date(status, current_date):
+    """Calculate estimated completion date based on current status"""
     from utils.holidays_ke import add_working_days
     
     status_map = {
@@ -1464,6 +1488,7 @@ def get_fastest_request_types(df):
                 max_tat = np.max(tat_values)
                 count = len(tat_values)
                 
+                # Calculate performance score (lower TAT = higher score)
                 if avg_tat <= 3:
                     perf_score = 100
                 elif avg_tat <= 5:
