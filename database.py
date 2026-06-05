@@ -6,6 +6,7 @@ import json
 import shutil
 import time
 from functools import wraps
+import numpy as np
 
 DB_PATH = "helb_data.db"
 BACKUP_DIR = "backups"
@@ -1368,7 +1369,6 @@ def calculate_estimated_completion_date(status, current_date):
             return None, info['message'], None
     return None, "Status information unavailable.", None
 
-
 # ================================================================
 # DASHBOARD ANALYTICS FUNCTIONS
 # ================================================================
@@ -1386,7 +1386,12 @@ def calculate_performance_score(row, sla_days=5):
 
 def identify_bottlenecks(df):
     """Identify process bottlenecks using duration analysis"""
+    from utils.holidays_ke import working_days_between
+    
     bottlenecks = []
+    
+    if df.empty:
+        return pd.DataFrame(columns=['Stage', 'Avg Days', 'Max Days', 'P95 Days', 'Is Bottleneck'])
     
     stage_durations = {
         'Submission to Receipt': [],
@@ -1402,7 +1407,10 @@ def identify_bottlenecks(df):
             try:
                 sub_date = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
                 rec_date = datetime.strptime(row['date_received'], '%Y-%m-%d').date()
-                stage_durations['Submission to Receipt'].append(working_days_between(sub_date, rec_date))
+                if sub_date and rec_date:
+                    days = working_days_between(sub_date, rec_date)
+                    if days >= 0:
+                        stage_durations['Submission to Receipt'].append(days)
             except:
                 pass
     
@@ -1418,33 +1426,70 @@ def identify_bottlenecks(df):
                 'P95 Days': round(p95_duration, 1),
                 'Is Bottleneck': avg_duration > 3
             })
+        else:
+            bottlenecks.append({
+                'Stage': stage,
+                'Avg Days': 0,
+                'Max Days': 0,
+                'P95 Days': 0,
+                'Is Bottleneck': False
+            })
     
     return pd.DataFrame(bottlenecks)
 
 def get_fastest_request_types(df):
     """Identify which request types have the shortest TAT"""
     tat_analysis = []
+    
+    if df.empty:
+        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
+    
     for req_type in df['request_type'].unique():
         type_df = df[(df['request_type'] == req_type) & (df['status'].isin(['PAID', 'CLEARED']))]
-        if not type_df.empty:
-            tat_values = type_df.apply(
-                lambda x: calculate_tat(x['submission_date'], x['payment_date']) if x['payment_date'] else 0, 
-                axis=1
-            )
-            avg_tat = tat_values.mean()
-            median_tat = tat_values.median()
-            min_tat = tat_values.min()
-            max_tat = tat_values.max()
-            count = len(type_df)
+        if not type_df.empty and type_df['payment_date'].notna().any():
+            tat_values = []
+            for _, row in type_df.iterrows():
+                if row.get('payment_date') and row.get('submission_date'):
+                    try:
+                        tat = calculate_tat(row['submission_date'], row['payment_date'])
+                        if tat is not None and tat > 0:
+                            tat_values.append(tat)
+                    except:
+                        pass
             
-            tat_analysis.append({
-                'Request Type': req_type,
-                'Average TAT': round(avg_tat, 1) if not pd.isna(avg_tat) else 0,
-                'Median TAT': round(median_tat, 1) if not pd.isna(median_tat) else 0,
-                'Fastest (Days)': min_tat if not pd.isna(min_tat) else 0,
-                'Slowest (Days)': max_tat if not pd.isna(max_tat) else 0,
-                'Sample Size': count,
-                'Performance Score': round(calculate_performance_score({'tat_days': avg_tat}, 5), 1) if not pd.isna(avg_tat) else 0
-            })
+            if tat_values:
+                avg_tat = np.mean(tat_values)
+                median_tat = np.median(tat_values)
+                min_tat = np.min(tat_values)
+                max_tat = np.max(tat_values)
+                count = len(tat_values)
+                
+                if avg_tat <= 3:
+                    perf_score = 100
+                elif avg_tat <= 5:
+                    perf_score = 80
+                elif avg_tat <= 7:
+                    perf_score = 60
+                elif avg_tat <= 10:
+                    perf_score = 40
+                else:
+                    perf_score = 20
+                
+                tat_analysis.append({
+                    'Request Type': req_type,
+                    'Average TAT': round(avg_tat, 1),
+                    'Median TAT': round(median_tat, 1),
+                    'Fastest (Days)': min_tat,
+                    'Slowest (Days)': max_tat,
+                    'Sample Size': count,
+                    'Performance Score': perf_score
+                })
     
-    return pd.DataFrame(tat_analysis).sort_values('Average TAT')
+    if tat_analysis:
+        result_df = pd.DataFrame(tat_analysis)
+        if 'Average TAT' in result_df.columns:
+            return result_df.sort_values('Average TAT')
+        else:
+            return result_df
+    else:
+        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
