@@ -23,8 +23,7 @@ from database import (
     get_finance_password, add_financial_year, add_semester, add_funder, calculate_tat,
     delete_funder, delete_product, delete_financial_year, delete_semester,
     search_payment_records, update_user_permissions, delete_user,
-    get_user_permissions, calculate_performance_score, identify_bottlenecks,
-    get_fastest_request_types
+    get_user_permissions, get_fastest_request_types, identify_bottlenecks
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -480,7 +479,6 @@ if choice == "📊 Department Dashboard":
     
     df = get_department_requests(st.session_state.user_dept)
     
-    # Apply date scope filter
     if data_scope != "All Data" and not df.empty:
         df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
         today = date.today()
@@ -498,11 +496,9 @@ if choice == "📊 Department Dashboard":
     if df.empty:
         st.info("No data available for the selected filters.")
     else:
-        # Separate Payment and Surrender Stats
         payment_requests = df[df['main_category'] == "Submit Payment Request"]
         surrender_requests = df[df['main_category'] == "Submit Surrender"]
         
-        # KPI Cards
         st.markdown("### 📈 Key Performance Indicators")
         col1, col2, col3, col4, col5 = st.columns(5)
         
@@ -536,7 +532,6 @@ if choice == "📊 Department Dashboard":
             total_amount = df['amount'].sum()
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 Total Value</div><div class='kpi-value'>KES {total_amount:,.0f}</div></div>", unsafe_allow_html=True)
         
-        # Payment vs Surrender Stats
         st.markdown("---")
         st.markdown("### 💳 Payment vs Surrender Analytics")
         col1, col2 = st.columns(2)
@@ -565,12 +560,12 @@ if choice == "📊 Department Dashboard":
                 sur_completion = (sur_completed / len(surrender_requests) * 100) if len(surrender_requests) > 0 else 0
                 st.metric("Clearance Rate", f"{sur_completion:.1f}%")
         
-        # Fastest Request Types
         st.markdown("---")
         st.markdown("### ⚡ Fastest Processing Request Types")
         
         tat_analysis = get_fastest_request_types(df)
-        if not tat_analysis.empty:
+        if tat_analysis is not None and not tat_analysis.empty and 'Average TAT' in tat_analysis.columns:
+            tat_analysis = tat_analysis.sort_values('Average TAT')
             fig = go.Figure()
             fig.add_trace(go.Bar(
                 x=tat_analysis['Request Type'],
@@ -589,12 +584,12 @@ if choice == "📊 Department Dashboard":
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            fastest = tat_analysis.iloc[0]
-            st.markdown(f"<div class='insight-card'><strong>🏆 Fastest Processing:</strong> {fastest['Request Type']} requests have the shortest turnaround time at <strong>{fastest['Average TAT']} days</strong> on average.</div>", unsafe_allow_html=True)
+            if len(tat_analysis) > 0:
+                fastest = tat_analysis.iloc[0]
+                st.markdown(f"<div class='insight-card'><strong>🏆 Fastest Processing:</strong> {fastest['Request Type']} requests have the shortest turnaround time at <strong>{fastest['Average TAT']} days</strong> on average.</div>", unsafe_allow_html=True)
         else:
-            st.info("Complete more requests to see TAT analysis.")
+            st.info("Complete more requests to see TAT analysis. Need at least one completed request with payment date.")
         
-        # Monthly Trend
         st.markdown("---")
         st.markdown("### 📅 Monthly Performance Trend")
         
@@ -617,7 +612,6 @@ if choice == "📊 Department Dashboard":
         fig.update_yaxis(title_text="Amount (KES Millions)", secondary_y=True)
         st.plotly_chart(fig, use_container_width=True)
         
-        # Recent Requests Table
         st.markdown("---")
         st.markdown("### 📋 Recent Requests")
         
@@ -659,7 +653,6 @@ elif choice == "📈 Management Dashboard":
     if df.empty:
         st.info("No data available for the selected filters.")
     else:
-        # Executive KPI Cards
         st.markdown("### 📊 Executive Summary")
         
         total_requests = len(df)
@@ -668,7 +661,6 @@ elif choice == "📈 Management Dashboard":
         completion_rate = (completed / total_requests * 100) if total_requests > 0 else 0
         pending = total_requests - completed
         
-        # SLA Compliance
         completed_df = df[df['status'].isin(['PAID', 'CLEARED']) & df['payment_date'].notna()]
         sla_compliant = 0
         sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
@@ -705,11 +697,9 @@ elif choice == "📈 Management Dashboard":
         with col6:
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ Avg TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
         
-        # Alerts Section
         st.markdown("---")
         st.markdown("### 🚨 Critical Alerts")
         
-        # Find SLA breaches
         breaches = []
         for _, row in completed_df.iterrows():
             try:
@@ -729,7 +719,6 @@ elif choice == "📈 Management Dashboard":
             except:
                 pass
         
-        # Find long-pending requests
         long_pending = []
         pending_df = df[~df['status'].isin(['PAID', 'CLEARED', 'RETURNED'])]
         for _, row in pending_df.iterrows():
@@ -760,7 +749,6 @@ elif choice == "📈 Management Dashboard":
             else:
                 st.markdown("<div class='insight-card'><strong>📊 Good Progress</strong><br>No requests pending beyond 10 days.</div>", unsafe_allow_html=True)
         
-        # Tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Analytics", "🏆 Department Performance", "⚡ Fastest Request Types", "🚦 Bottleneck Analysis", "📋 All Data"])
         
         with tab1:
@@ -802,8 +790,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                # Fix: Properly close the parentheses
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -831,7 +818,7 @@ elif choice == "📈 Management Dashboard":
             st.markdown("### ⚡ Fastest Processing Request Types")
             
             tat_analysis = get_fastest_request_types(df)
-            if not tat_analysis.empty:
+            if tat_analysis is not None and not tat_analysis.empty and 'Average TAT' in tat_analysis.columns:
                 tat_analysis = tat_analysis.sort_values('Average TAT')
                 
                 fig = go.Figure()
@@ -852,24 +839,27 @@ elif choice == "📈 Management Dashboard":
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                fastest = tat_analysis.iloc[0]
-                slowest = tat_analysis.iloc[-1]
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"<div class='insight-card'><strong>🏆 Fastest:</strong> {fastest['Request Type']} - {fastest['Average TAT']} days average</div>", unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"<div class='warning-card'><strong>🐌 Needs Improvement:</strong> {slowest['Request Type']} - {slowest['Average TAT']} days average</div>", unsafe_allow_html=True)
-                
-                st.dataframe(tat_analysis, use_container_width=True, hide_index=True)
+                if len(tat_analysis) > 0:
+                    fastest = tat_analysis.iloc[0]
+                    slowest = tat_analysis.iloc[-1]
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"<div class='insight-card'><strong>🏆 Fastest:</strong> {fastest['Request Type']} - {fastest['Average TAT']} days average</div>", unsafe_allow_html=True)
+                    with col2:
+                        st.markdown(f"<div class='warning-card'><strong>🐌 Needs Improvement:</strong> {slowest['Request Type']} - {slowest['Average TAT']} days average</div>", unsafe_allow_html=True)
+                    
+                    st.dataframe(tat_analysis, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Complete more requests to see TAT analysis.")
             else:
-                st.info("Complete more requests to see TAT analysis.")
+                st.info("Complete more requests to see TAT analysis. Need at least one completed request with payment date.")
         
         with tab4:
             st.markdown("### 🚦 Process Bottleneck Analysis")
             
             bottlenecks = identify_bottlenecks(df)
-            if not bottlenecks.empty:
+            if bottlenecks is not None and not bottlenecks.empty:
                 fig = px.bar(bottlenecks, x='Stage', y='Avg Days',
                             title="Average Time Spent per Stage",
                             color='Is Bottleneck',
@@ -885,7 +875,7 @@ elif choice == "📈 Management Dashboard":
                 
                 st.dataframe(bottlenecks, use_container_width=True, hide_index=True)
             else:
-                st.info("Insufficient data for bottleneck analysis.")
+                st.info("Insufficient data for bottleneck analysis. Need more completed requests with date stamps.")
         
         with tab5:
             st.markdown("### 📋 Complete Data Export")
