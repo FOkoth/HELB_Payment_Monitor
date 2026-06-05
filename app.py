@@ -817,7 +817,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# SEARCH PAYMENT RECORDS (Enhanced)
+# SEARCH PAYMENT RECORDS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>🔍 Search Payment Records</h2>", unsafe_allow_html=True)
@@ -863,9 +863,7 @@ elif choice == "🔍 Search Payment Records":
             if not results.empty:
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
-                # Display results in a nice format
                 for _, row in results.iterrows():
-                    # Calculate TAT
                     if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                         tat = calculate_tat(row['submission_date'], row['payment_date'])
                         status_badge = f'<span class="status-paid">✅ {row["status"]} (TAT: {tat} days)</span>'
@@ -875,25 +873,14 @@ elif choice == "🔍 Search Payment Records":
                         pending_days = calculate_tat(row['submission_date'])
                         status_badge = f'<span class="status-pending">⏳ {row["status"]} ({pending_days} days)</span>'
                     
-                    # Get reference number based on request type
-                    ref_number = ""
-                    if row.get('batch_no'):
-                        ref_number = f"Batch: {row['batch_no']}"
-                    elif row.get('imprest_no'):
-                        ref_number = f"Imprest: {row['imprest_no']}"
-                    elif row.get('invoice_no'):
-                        ref_number = f"Invoice: {row['invoice_no']}"
-                    elif row.get('surrender_number'):
-                        ref_number = f"Surrender: {row['surrender_number']}"
-                    elif row.get('payment_reference'):
-                        ref_number = f"Ref: {row['payment_reference']}"
+                    ref_number = get_reference_number(row)
                     
                     with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}"):
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown(f"**Amount:** KES {row['amount']:,.2f}")
                             st.markdown(f"**Submitted:** {row['submission_date']}")
-                            if ref_number:
+                            if ref_number and ref_number != '-':
                                 st.markdown(f"**Reference:** {ref_number}")
                         with col2:
                             st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
@@ -902,6 +889,9 @@ elif choice == "🔍 Search Payment Records":
                             if row.get('return_reason'):
                                 st.markdown(f"**Return Reason:** :red[{row['return_reason']}]")
                         
+                        if row.get('payment_description'):
+                            st.markdown(f"**Description:** {row['payment_description']}")
+                        
                         st.markdown("---")
                         st.markdown("**Transaction History:**")
                         display_transaction_logs(row['id'])
@@ -909,32 +899,6 @@ elif choice == "🔍 Search Payment Records":
                 st.warning("No records found matching your search criteria.")
         else:
             st.info("Please enter a search term.")
-    
-    # Quick filters section
-    st.markdown("---")
-    st.markdown("### 📊 Quick Filters")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if st.button("📦 Recent Batches", use_container_width=True):
-            batches = get_all_batch_numbers()
-            if batches:
-                st.session_state.quick_search_term = batches[0] if batches else ""
-                st.rerun()
-            else:
-                st.info("No batches found")
-    with col2:
-        if st.button("⏳ Pending Only", use_container_width=True):
-            st.session_state.quick_status = "PENDING"
-            st.rerun()
-    with col3:
-        if st.button("✅ Completed", use_container_width=True):
-            st.session_state.quick_status = "COMPLETED"
-            st.rerun()
-    with col4:
-        if st.button("↩️ Returned", use_container_width=True):
-            st.session_state.quick_status = "RETURNED"
-            st.rerun()
 
 
 # ================================================================
@@ -1387,15 +1351,12 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE - WITH SEPARATE PAYMENT AND SURRENDER
+# APPROVAL QUEUE
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN" or st.session_state.is_finance:
         st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>✅ Approval Queue</h2>", unsafe_allow_html=True)
-        
-        # Get user permissions
-        user_perms = get_user_permissions(st.session_state.username)
         
         pending_confirmation = get_pending_confirmation_count()
         if pending_confirmation > 0:
@@ -1637,7 +1598,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL - UPDATED WITH DELETE FUNCTIONALITY
+# ADMIN PANEL
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<h2 style='color: #00843D; margin-bottom: 1rem; font-size: 1.3rem;'>⚙️ Admin Panel</h2>", unsafe_allow_html=True)
@@ -1782,7 +1743,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     with tab3:
         st.subheader("📦 Product Management (Lending)")
         
-        # Display existing products with delete buttons
         products_df = get_products()
         if not products_df.empty:
             for idx, product in products_df.iterrows():
@@ -1822,7 +1782,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     with tab4:
         st.subheader("💰 Funder Management (ERM)")
         
-        # Display existing funders with delete buttons
         funders_df = get_funders()
         if not funders_df.empty:
             for _, funder in funders_df.iterrows():
@@ -1853,7 +1812,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     with tab5:
         st.subheader("📅 Financial Year Management")
         
-        # Display existing financial years with delete buttons
         conn = sqlite3.connect("helb_data.db")
         years_df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
         conn.close()
@@ -1887,7 +1845,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.markdown("---")
         st.subheader("📚 Semester Management")
         
-        # Display existing semesters with delete buttons
         conn = sqlite3.connect("helb_data.db")
         sems_df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
         conn.close()
