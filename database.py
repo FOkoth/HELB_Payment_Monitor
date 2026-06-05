@@ -1301,3 +1301,90 @@ def get_reports_data(user_role, user_dept):
         return df
     else:
         return df[df['department_name'] == user_dept]
+
+
+# ================================================================
+# PUBLIC PAYMENT TRACKING FUNCTIONS
+# ================================================================
+
+def get_public_payment_details(search_term, search_type="reference"):
+    """
+    Get payment details for public tracking portal
+    Returns simplified payment information without sensitive data
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Search across multiple reference fields
+    cursor.execute('''
+        SELECT 
+            request_number, request_type, amount, payment_description,
+            submission_date, date_received, date_confirmed_by_finance,
+            status, payment_date, payment_reference,
+            batch_no, imprest_no, invoice_no, surrender_number,
+            department_name, return_reason
+        FROM requests 
+        WHERE request_number = ? 
+           OR batch_no = ? 
+           OR imprest_no = ? 
+           OR invoice_no = ? 
+           OR surrender_number = ?
+           OR payment_reference = ?
+        ORDER BY submission_date DESC
+        LIMIT 1
+    ''', (search_term, search_term, search_term, search_term, search_term, search_term))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            'request_number': result[0],
+            'request_type': result[1],
+            'amount': result[2],
+            'payment_description': result[3],
+            'submission_date': result[4],
+            'date_received': result[5],
+            'date_confirmed_by_finance': result[6],
+            'status': result[7],
+            'payment_date': result[8],
+            'payment_reference': result[9],
+            'batch_no': result[10],
+            'imprest_no': result[11],
+            'invoice_no': result[12],
+            'surrender_number': result[13],
+            'department_name': result[14],
+            'return_reason': result[15]
+        }
+    return None
+
+
+def calculate_estimated_completion_date(status, current_date):
+    """
+    Calculate estimated completion date based on current status
+    Returns: (estimated_date, message, days_remaining)
+    """
+    from utils.holidays_ke import add_working_days
+    
+    status_map = {
+        'SUBMITTED': {'days': 5, 'message': 'This payment has not been received in Finance yet.'},
+        'RECEIVED_BY_FINANCE': {'days': 4, 'message': 'This payment will be completed at most 4 business days from today.'},
+        'PAYMENT_PREPARED': {'days': 3, 'message': 'The payment process has been initiated and will take at most 3 business days.'},
+        'PAYMENT_VERIFIED': {'days': 2, 'message': 'The payment has been verified and will take at most 2 business days.'},
+        'PAYMENT_APPROVED': {'days': 2, 'message': 'The payment process has been approved and will take at most 2 business days.'},
+        'PAYMENT_AUTHORIZED': {'days': 1, 'message': 'This payment is at the final stages and will be completed any time from now.'},
+        'PAID': {'days': 0, 'message': 'This payment has been completed.'},
+        'CLEARED': {'days': 0, 'message': 'This payment has been cleared.'},
+        'RETURNED': {'days': None, 'message': 'This payment has been returned for corrections.'}
+    }
+    
+    if status in status_map:
+        info = status_map[status]
+        if info['days'] is not None and info['days'] > 0:
+            estimated_date = add_working_days(current_date, info['days'])
+            return estimated_date, info['message'], info['days']
+        elif status in ['PAID', 'CLEARED']:
+            return None, info['message'], 0
+        elif status == 'RETURNED':
+            return None, info['message'], None
+    return None, "Status information unavailable.", None
