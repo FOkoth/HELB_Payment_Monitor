@@ -241,15 +241,34 @@ def get_returned_request_by_id(request_id):
     return None
 
 def resubmit_request(request_id, updated_data):
+    """Resubmit a returned request after corrections"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    set_clause = ', '.join([f"{k} = ?" for k in updated_data.keys()])
-    values = list(updated_data.values())
-    values.append(request_id)
-    cursor.execute(f"UPDATE requests SET {set_clause}, last_updated = ? WHERE id = ?", 
-                   values + [datetime.now().isoformat()])
-    conn.commit()
-    conn.close()
+    try:
+        # Build the SET clause dynamically
+        set_parts = []
+        values = []
+        for key, value in updated_data.items():
+            if key != 'id' and key != 'request_number':
+                set_parts.append(f"{key} = ?")
+                values.append(value)
+        
+        # Add last_updated
+        set_parts.append("last_updated = ?")
+        values.append(datetime.now().isoformat())
+        
+        # Add the WHERE clause
+        values.append(request_id)
+        
+        query = f"UPDATE requests SET {', '.join(set_parts)} WHERE id = ?"
+        cursor.execute(query, values)
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error resubmitting request: {e}")
+        return False
+    finally:
+        conn.close()
 
 def get_request_by_id(request_id):
     conn = sqlite3.connect(DB_PATH)
