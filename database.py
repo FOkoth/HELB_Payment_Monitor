@@ -1,8 +1,105 @@
 import sqlite3
 import pandas as pd
 from datetime import datetime, date
+import os
+import json
+import shutil
 
 DB_PATH = "helb_data.db"
+BACKUP_DIR = "backups"
+
+# ================================================================
+# BACKUP FUNCTIONS
+# ================================================================
+def ensure_backup_dir():
+    if not os.path.exists(BACKUP_DIR):
+        os.makedirs(BACKUP_DIR)
+
+
+def create_backup():
+    ensure_backup_dir()
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_filename = f"helb_backup_{timestamp}.db"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    
+    if os.path.exists(DB_PATH):
+        shutil.copy2(DB_PATH, backup_path)
+        metadata = {
+            'backup_date': datetime.now().isoformat(),
+            'original_db': DB_PATH,
+            'file_size': os.path.getsize(DB_PATH)
+        }
+        meta_path = os.path.join(BACKUP_DIR, f"helb_backup_{timestamp}.json")
+        with open(meta_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        return backup_filename, backup_path
+    return None, None
+
+
+def get_backup_list():
+    ensure_backup_dir()
+    backups = []
+    for file in os.listdir(BACKUP_DIR):
+        if file.endswith('.db'):
+            backup_path = os.path.join(BACKUP_DIR, file)
+            meta_path = backup_path.replace('.db', '.json')
+            metadata = {}
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r') as f:
+                    metadata = json.load(f)
+            else:
+                metadata = {
+                    'backup_date': datetime.fromtimestamp(os.path.getmtime(backup_path)).isoformat(),
+                    'file_size': os.path.getsize(backup_path)
+                }
+            backups.append({
+                'filename': file,
+                'path': backup_path,
+                'date': metadata.get('backup_date', 'Unknown'),
+                'size': metadata.get('file_size', 0)
+            })
+    backups.sort(key=lambda x: x['date'], reverse=True)
+    return backups
+
+
+def restore_backup(backup_filename):
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    if os.path.exists(backup_path):
+        if os.path.exists(DB_PATH):
+            emergency_backup = f"helb_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            shutil.copy2(DB_PATH, os.path.join(BACKUP_DIR, emergency_backup))
+        shutil.copy2(backup_path, DB_PATH)
+        return True
+    return False
+
+
+def auto_backup_scheduler():
+    ensure_backup_dir()
+    backups = get_backup_list()
+    if backups:
+        last_backup_date = datetime.fromisoformat(backups[0]['date']).date()
+        today = date.today()
+        if last_backup_date != today:
+            create_backup()
+            return True
+    else:
+        create_backup()
+        return True
+    return False
+
+
+def export_data_to_csv():
+    df_requests = get_requests()
+    df_users = get_all_users()
+    df_departments = get_departments()
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    export_dir = os.path.join(BACKUP_DIR, f"csv_export_{timestamp}")
+    os.makedirs(export_dir, exist_ok=True)
+    df_requests.to_csv(os.path.join(export_dir, "requests.csv"), index=False)
+    df_users.to_csv(os.path.join(export_dir, "users.csv"), index=False)
+    df_departments.to_csv(os.path.join(export_dir, "departments.csv"), index=False)
+    return export_dir
+
 
 # ================================================================
 # LOGS TABLE
@@ -123,11 +220,8 @@ def get_column_names(table_name):
 
 
 def calculate_tat(submission_date, payment_date=None):
-    """Calculate Turnaround Time in working days (excluding weekends and public holidays)"""
     from utils.holidays_ke import working_days_between
-    
     sub_date = datetime.strptime(submission_date, '%Y-%m-%d').date()
-    
     if payment_date:
         pay_date = datetime.strptime(payment_date, '%Y-%m-%d').date()
         return working_days_between(sub_date, pay_date)
@@ -195,7 +289,7 @@ def init_database():
         )
     ''')
     
-    # Users table
+    # Users table with finance permissions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,11 +298,14 @@ def init_database():
             role TEXT NOT NULL,
             department_id INTEGER,
             full_name TEXT,
+            can_receive_requests INTEGER DEFAULT 0,
+            can_process_stages INTEGER DEFAULT 0,
+            can_release_payments INTEGER DEFAULT 0,
             FOREIGN KEY (department_id) REFERENCES departments(id)
         )
     ''')
     
-    # Requests table with all columns
+    # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -346,7 +443,6 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Create logs table
     create_logs_table()
     
     # Insert default users
@@ -358,24 +454,27 @@ def init_database():
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
         default_users = [
-            ('admin', 'admin123', 'ADMIN', None, 'System Administrator'),
-            ('finance_user', 'fin123', 'FINANCE', dept_map.get('Finance'), 'Finance Officer'),
-            ('management_user', 'management123', 'MANAGEMENT', None, 'Management User'),
-            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer'),
-            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer'),
-            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer'),
-            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer'),
-            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer'),
-            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office'),
-            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer'),
-            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer'),
-            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer'),
-            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer'),
-            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer'),
-            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer'),
+            ('admin', 'admin123', 'ADMIN', None, 'System Administrator', 0, 0, 0),
+            ('finance_receiver', 'receiver123', 'FINANCE_RECEIVER', dept_map.get('Finance'), 'Finance Receiver', 1, 0, 0),
+            ('finance_processor', 'processor123', 'FINANCE_PROCESSOR', dept_map.get('Finance'), 'Finance Processor', 0, 1, 0),
+            ('finance_releaser', 'releaser123', 'FINANCE_RELEASER', dept_map.get('Finance'), 'Finance Releaser', 0, 0, 1),
+            ('finance_admin', 'finadmin123', 'FINANCE_ADMIN', dept_map.get('Finance'), 'Finance Admin', 1, 1, 1),
+            ('management_user', 'management123', 'MANAGEMENT', None, 'Management User', 0, 0, 0),
+            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer', 0, 0, 0),
+            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer', 0, 0, 0),
+            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer', 0, 0, 0),
+            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer', 0, 0, 0),
+            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer', 0, 0, 0),
+            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office', 0, 0, 0),
+            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer', 0, 0, 0),
+            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer', 0, 0, 0),
+            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer', 0, 0, 0),
+            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer', 0, 0, 0),
+            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer', 0, 0, 0),
+            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer', 0, 0, 0),
         ]
         cursor.executemany(
-            "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             default_users
         )
     
@@ -427,8 +526,100 @@ def get_finance_password():
 
 
 # ================================================================
-# GET FUNCTIONS
+# ENHANCED USER FUNCTIONS
 # ================================================================
+def get_all_users():
+    conn = sqlite3.connect(DB_PATH)
+    query = '''
+        SELECT u.username, u.role, d.name as department, u.full_name,
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        ORDER BY u.username
+    '''
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+
+def create_user(username, password, role, department_id, full_name, 
+                can_receive_requests=0, can_process_stages=0, can_release_payments=0):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments)
+        )
+        conn.commit()
+        return True
+    except:
+        return False
+    finally:
+        conn.close()
+
+
+def get_user_permissions(username):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT can_receive_requests, can_process_stages, can_release_payments, role
+        FROM users WHERE username = ?
+    ''', (username,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return {
+            'can_receive': result[0] == 1,
+            'can_process': result[1] == 1,
+            'can_release': result[2] == 1,
+            'role': result[3]
+        }
+    return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
+
+
+# ================================================================
+# SEARCH FUNCTIONS
+# ================================================================
+def search_payment_records(search_term, search_type="all"):
+    """Search payment records by various criteria"""
+    conn = sqlite3.connect(DB_PATH)
+    
+    if search_type == "batch_no":
+        query = "SELECT * FROM requests WHERE batch_no LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "request_number":
+        query = "SELECT * FROM requests WHERE request_number LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "invoice_no":
+        query = "SELECT * FROM requests WHERE invoice_no LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "imprest_no":
+        query = "SELECT * FROM requests WHERE imprest_no LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "surrender_number":
+        query = "SELECT * FROM requests WHERE surrender_number LIKE ? ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    else:
+        query = '''
+            SELECT * FROM requests 
+            WHERE request_number LIKE ? 
+               OR batch_no LIKE ? 
+               OR invoice_no LIKE ? 
+               OR imprest_no LIKE ? 
+               OR surrender_number LIKE ?
+               OR customer_name LIKE ?
+               OR supplier_name LIKE ?
+            ORDER BY submission_date DESC
+        '''
+        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+    
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    return df
+
+
 def get_departments():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
@@ -460,7 +651,6 @@ def add_product(name, category, has_payment_type, has_semester):
 
 
 def delete_product(product_id):
-    """Delete a product by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -494,7 +684,6 @@ def add_financial_year(year_name):
 
 
 def delete_financial_year(year_id):
-    """Delete a financial year by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -528,7 +717,6 @@ def add_semester(semester_name):
 
 
 def delete_semester(semester_id):
-    """Delete a semester by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -562,7 +750,6 @@ def add_funder(funder_name):
 
 
 def delete_funder(funder_id):
-    """Delete a funder by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -586,55 +773,6 @@ def get_user_department(username):
     result = cursor.fetchone()
     conn.close()
     return result
-
-
-def get_all_users():
-    conn = sqlite3.connect(DB_PATH)
-    query = '''
-        SELECT u.username, u.role, d.name as department, u.full_name 
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        ORDER BY u.username
-    '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-
-def create_user(username, password, role, department_id, full_name):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO users (username, password, role, department_id, full_name) VALUES (?, ?, ?, ?, ?)",
-            (username, password, role, department_id, full_name)
-        )
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
-
-
-def create_department(name, permissions):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-            INSERT INTO departments (
-                name, can_submit_imprest, can_submit_petty_cash, 
-                can_submit_supplier, can_submit_student_payment, 
-                can_submit_surrender, can_submit_refund, 
-                requires_product_type, requires_funder, is_finance_dept
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (name, *permissions))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
 
 
 def get_requests():
@@ -819,7 +957,9 @@ def authenticate_user(username, password):
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, COALESCE(d.is_finance_dept, 0) as is_finance_dept
+            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
+                   COALESCE(d.is_finance_dept, 0) as is_finance_dept,
+                   u.can_receive_requests, u.can_process_stages, u.can_release_payments
             FROM users u
             LEFT JOIN departments d ON u.department_id = d.id
             WHERE u.username = ? AND u.password = ?
@@ -845,7 +985,8 @@ def get_user_by_username(username):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id
+        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
         WHERE u.username = ?
@@ -1006,7 +1147,7 @@ def get_all_batch_numbers():
 
 
 def get_allowed_main_categories(user_role, user_dept):
-    if user_role == "MANAGEMENT":
+    if user_role in ["MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
         return []
     return ["Submit Payment Request", "Submit Surrender"]
 
@@ -1020,11 +1161,8 @@ def get_allowed_request_types(user_role, user_dept, main_category):
         else:
             return ["Surrender"]
     
-    if user_role == "FINANCE":
-        if main_category == "Submit Payment Request":
-            return ["Imprest", "Petty Cash", "Direct Payment"]
-        else:
-            return ["Surrender"]
+    if user_role in ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
+        return []
     
     if user_role == "MANAGEMENT":
         return []
@@ -1051,7 +1189,7 @@ def get_reports_data(user_role, user_dept):
     df = get_requests()
     if df.empty:
         return df
-    if user_role in ["ADMIN", "MANAGEMENT", "FINANCE"]:
+    if user_role in ["ADMIN", "MANAGEMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
         return df
     else:
         return df[df['department_name'] == user_dept]
