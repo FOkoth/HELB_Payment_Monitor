@@ -50,6 +50,20 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* Refresh button style */
+    .refresh-btn {
+        background: #00843D;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.3rem 0.8rem;
+        font-size: 0.7rem;
+        cursor: pointer;
+    }
+    .refresh-btn:hover {
+        background: #00529B;
+    }
+    
     /* Login Page Styling */
     .login-container {
         background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
@@ -79,6 +93,11 @@ st.markdown("""
         padding: 0.6rem 1.2rem;
         border-radius: 10px;
         margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .header-left {
         display: flex;
         align-items: center;
         gap: 0.8rem;
@@ -538,6 +557,10 @@ def display_approval_stages(request_id, main_category):
             else:
                 st.markdown(f"<div class='stage-pending'>⏸ {stage}</div>", unsafe_allow_html=True)
 
+def refresh_page():
+    """Helper function to refresh the page"""
+    st.rerun()
+
 # Login Screen
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -596,16 +619,23 @@ if st.session_state.show_password_change:
                 st.rerun()
     st.stop()
 
-# Header
-st.markdown("""
-<div class='dashboard-header'>
-    <div style='font-size: 1.3rem;'>🏦</div>
-    <div>
-        <h1>HELB Payment & Surrender Monitoring System</h1>
-        <p>Real-time analytics | Performance insights | SLA tracking</p>
+# Header with Refresh Button
+col_header, col_refresh = st.columns([6, 1])
+with col_header:
+    st.markdown("""
+    <div class='dashboard-header'>
+        <div class='header-left'>
+            <div style='font-size: 1.3rem;'>🏦</div>
+            <div>
+                <h1>HELB Payment & Surrender Monitoring System</h1>
+                <p>Real-time analytics | Performance insights | SLA tracking</p>
+            </div>
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+with col_refresh:
+    if st.button("🔄 Refresh", key="global_refresh", help="Refresh page data"):
+        refresh_page()
 
 # Compact Filter Bar
 st.markdown("<div class='compact-filter'>", unsafe_allow_html=True)
@@ -832,6 +862,10 @@ if choice == "📊 Department Dashboard":
             
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export Data", csv, f"dept_report_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+        
+        # Page-specific refresh button
+        if st.button("🔄 Refresh This Page", key="dept_refresh"):
+            refresh_page()
 
 
 # ================================================================
@@ -1037,7 +1071,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1082,6 +1116,10 @@ elif choice == "📈 Management Dashboard":
         # Export
         csv_full = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export Full Data", csv_full, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+        
+        # Page-specific refresh button
+        if st.button("🔄 Refresh This Page", key="mgmt_refresh"):
+            refresh_page()
 
 
 # ================================================================
@@ -1164,6 +1202,10 @@ elif choice == "🔍 Search Payment Records":
                 st.warning("No records found matching your search criteria.")
         else:
             st.info("Please enter a search term.")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="search_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -1557,6 +1599,10 @@ elif choice == "📝 New Request":
                             request_number = save_request(request_data)
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="new_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -1593,10 +1639,14 @@ elif choice == "📋 My Requests":
                     display_approval_stages(row['id'], row['main_category'])
                     st.markdown("---")
                     display_transaction_logs(row['id'])
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="my_refresh"):
+        refresh_page()
 
 
 # ================================================================
-# RETURNED REQUESTS - WITH CALL TO ACTION
+# RETURNED REQUESTS - WITH CALL TO ACTION (FIXED)
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -1693,23 +1743,30 @@ elif choice == "↩️ Returned Requests":
                             **correction_data
                         }
                         
-                        # Update the request
-                        resubmit_request(req['id'], updated_data)
+                        # Update the request using resubmit_request
+                        success = resubmit_request(req['id'], updated_data)
                         
-                        # Add to logs
-                        add_request_log(
-                            req['id'], req['request_number'], "RESUBMITTED", 
-                            "RETURNED", "SUBMITTED", 
-                            f"Resubmitted after correction. Original return reason: {req['return_reason']}",
-                            st.session_state.username, st.session_state.user_role, st.session_state.user_dept
-                        )
-                        
-                        st.success(f"✅ Request {req['request_number']} has been resubmitted successfully!")
-                        st.balloons()
-                        st.rerun()
+                        if success:
+                            # Add to logs
+                            add_request_log(
+                                req['id'], req['request_number'], "RESUBMITTED", 
+                                "RETURNED", "SUBMITTED", 
+                                f"Resubmitted after correction. Original return reason: {req['return_reason']}",
+                                st.session_state.username, st.session_state.user_role, st.session_state.user_dept
+                            )
+                            
+                            st.success(f"✅ Request {req['request_number']} has been resubmitted successfully!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to resubmit request. Please try again.")
                     
                     if cancel:
                         st.info("Resubmission cancelled.")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="returned_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -1926,6 +1983,10 @@ elif choice == "✅ Approval Queue":
                                     st.error("Enter reference number!")
     else:
         st.error("Access denied. Finance only.")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="approval_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -1956,6 +2017,10 @@ elif choice == "📑 Reports":
         
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export to CSV", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="reports_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -2245,6 +2310,10 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     st.rerun()
                 else:
                     st.error("❌ Invalid password!")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="admin_refresh"):
+        refresh_page()
 
 
 # ================================================================
@@ -2266,6 +2335,10 @@ elif choice == "🔐 Change Password":
                     st.error("Current password incorrect")
             else:
                 st.error("Passwords do not match or too short")
+    
+    # Page-specific refresh button
+    if st.button("🔄 Refresh This Page", key="pwd_refresh"):
+        refresh_page()
 
 
 # Footer
