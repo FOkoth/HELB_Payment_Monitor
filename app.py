@@ -37,7 +37,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Executive Edition with Green Background Cards
+# Custom CSS - Executive Edition with Balanced Colors
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -95,7 +95,7 @@ st.markdown("""
         font-size: 0.6rem;
     }
     
-    /* KPI Cards - Solid Green Background */
+    /* Main KPI Cards - Solid Green Background */
     .kpi-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -134,6 +134,26 @@ st.markdown("""
     .trend-up { color: #90EE90; }
     .trend-down { color: #FFB6C1; }
     
+    /* Secondary Cards - Light Grey Background */
+    .secondary-card {
+        background: #F3F4F6;
+        border-radius: 8px;
+        padding: 0.5rem;
+        text-align: center;
+        border: 1px solid #E5E7EB;
+    }
+    .secondary-label {
+        font-size: 0.55rem;
+        text-transform: uppercase;
+        color: #6B7280;
+        font-weight: 600;
+    }
+    .secondary-value {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #1F2937;
+    }
+    
     /* Progress Bar */
     .progress-bar {
         height: 3px;
@@ -148,7 +168,7 @@ st.markdown("""
         border-radius: 2px;
     }
     
-    /* Custom Tabs - Executive Style */
+    /* Custom Tabs - Gold Selected, Grey Unselected */
     .stTabs [data-baseweb="tab-list"] {
         gap: 0.2rem;
         background: #F3F4F6;
@@ -167,13 +187,14 @@ st.markdown("""
         background-color: #F3F4F6;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #00843D !important;
-        color: white !important;
+        background-color: #FFB81C !important;
+        color: #1F2937 !important;
+        font-weight: 600;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     .stTabs [data-baseweb="tab"]:hover {
-        background-color: rgba(0,132,61,0.1);
-        color: #00843D;
+        background-color: rgba(255,184,28,0.2);
+        color: #FFB81C;
     }
     
     /* Sidebar Styling */
@@ -597,7 +618,7 @@ with col1:
     st.session_state.selected_financial_year = st.selectbox("Financial Year", financial_years_list, key="fy_filter")
 with col2:
     years_list = ["All"] + list(range(2023, datetime.now().year + 2))
-    st.session_state.selected_year = st.selectbox("Year", years_list, key="year_filter")
+    st.session_state.selected_year = st.selectbox("Calendar Year", years_list, key="year_filter")
 with col3:
     quarters = ["All", "Q1 (Jul-Sep)", "Q2 (Oct-Dec)", "Q3 (Jan-Mar)", "Q4 (Apr-Jun)"]
     st.session_state.selected_quarter = st.selectbox("Quarter", quarters, key="quarter_filter")
@@ -688,7 +709,7 @@ if choice == "📊 Department Dashboard":
     if df.empty:
         st.info("No data available for the selected filters.")
     else:
-        # KPI Cards
+        # Main KPI Cards
         total_requests = len(df)
         pending = len(df[df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 
                                            'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED',
@@ -722,7 +743,7 @@ if choice == "📊 Department Dashboard":
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # Tabs for separate sections
+        # Tabs for separate sections - Gold background when selected
         tab1, tab2, tab3, tab4 = st.tabs(["💰 Payment Requests", "📤 Surrender Requests", "⚡ Performance Analytics", "📋 Recent Activity"])
         
         with tab1:
@@ -733,15 +754,16 @@ if choice == "📊 Department Dashboard":
                 pay_pending = pay_total - pay_completed
                 pay_amount = payment_requests['amount'].sum()
                 
+                # Light grey secondary cards
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL</div><div class='kpi-value'>{pay_total}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL</div><div class='secondary-value'>{pay_total}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{pay_pending}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>⏳ PENDING</div><div class='secondary-value'>{pay_pending}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETED</div><div class='kpi-value'>{pay_completed}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ COMPLETED</div><div class='secondary-value'>{pay_completed}</div></div>", unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 VALUE</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 pay_df = payment_requests[['request_number', 'request_type', 'amount', 'status', 'submission_date']].head(10)
                 st.dataframe(pay_df, use_container_width=True, hide_index=True)
@@ -758,13 +780,13 @@ if choice == "📊 Department Dashboard":
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL</div><div class='kpi-value'>{sur_total}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL</div><div class='secondary-value'>{sur_total}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{sur_pending}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>⏳ PENDING</div><div class='secondary-value'>{sur_pending}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ CLEARED</div><div class='kpi-value'>{sur_completed}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ CLEARED</div><div class='secondary-value'>{sur_completed}</div></div>", unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 VALUE</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 sur_df = surrender_requests[['request_number', 'amount', 'status', 'submission_date']].head(10)
                 st.dataframe(sur_df, use_container_width=True, hide_index=True)
@@ -878,7 +900,6 @@ elif choice == "📈 Management Dashboard":
         with col4:
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏳ PENDING</div><div class='kpi-value'>{pending:,}</div></div>", unsafe_allow_html=True)
         with col5:
-            sla_color = "#FFB81C" if sla_rate >= 80 else "#FFB81C" if sla_rate >= 60 else "#FFB81C"
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>🎯 SLA COMPLIANCE</div><div class='kpi-value'>{sla_rate:.1f}%</div></div>", unsafe_allow_html=True)
         with col6:
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>⏱️ AVG TAT</div><div class='kpi-value'>{avg_tat:.1f}d</div></div>", unsafe_allow_html=True)
@@ -927,7 +948,7 @@ elif choice == "📈 Management Dashboard":
                 if long_pending:
                     st.markdown(f"<div class='warning-card'><strong>⏰ Long Pending ({len(long_pending)})</strong></div>", unsafe_allow_html=True)
         
-        # Main Tabs
+        # Main Tabs - Gold background when selected
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Executive Summary", "💰 Payment Analytics", "📤 Surrender Analytics", "🏆 Department Performance", "🚦 Bottlenecks"])
         
         with tab1:
@@ -958,11 +979,11 @@ elif choice == "📈 Management Dashboard":
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL PAYMENT REQUESTS</div><div class='kpi-value'>{pay_total:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL PAYMENT REQUESTS</div><div class='secondary-value'>{pay_total:,}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETED</div><div class='kpi-value'>{pay_completed:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ COMPLETED</div><div class='secondary-value'>{pay_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 pay_by_type = payment_df.groupby('request_type').agg({'request_number': 'count', 'amount': 'sum'}).reset_index()
                 pay_by_type.columns = ['Type', 'Count', 'Amount']
@@ -983,11 +1004,11 @@ elif choice == "📈 Management Dashboard":
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL SURRENDER REQUESTS</div><div class='kpi-value'>{sur_total:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL SURRENDER REQUESTS</div><div class='secondary-value'>{sur_total:,}</div></div>", unsafe_allow_html=True)
                 with col2:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ CLEARED</div><div class='kpi-value'>{sur_completed:,}</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ CLEARED</div><div class='secondary-value'>{sur_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 fig = px.bar(x=['Cleared', 'Pending'], y=[sur_completed, sur_total - sur_completed],
                             title="Surrender Clearance Status",
@@ -1016,7 +1037,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1575,7 +1596,7 @@ elif choice == "📋 My Requests":
 
 
 # ================================================================
-# RETURNED REQUESTS - WITH RESUBMISSION CALL TO ACTION
+# RETURNED REQUESTS - WITH CALL TO ACTION
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -1619,19 +1640,38 @@ elif choice == "↩️ Returned Requests":
                     if req['request_type'] == "Student Payment":
                         corrected_batch = st.text_input("Batch No.", value=req.get('batch_no', ''))
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                        correction_data = {
+                            'batch_no': corrected_batch,
+                            'amount': corrected_amount
+                        }
                     elif req['request_type'] in ["Imprest", "Petty Cash"]:
                         corrected_imprest = st.text_input("Imprest/Petty Cash No.", value=req.get('imprest_no', ''))
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                        correction_data = {
+                            'imprest_no': corrected_imprest,
+                            'amount': corrected_amount
+                        }
                     elif req['request_type'] == "Supplier Payment":
                         corrected_invoice = st.text_input("Invoice No.", value=req.get('invoice_no', ''))
                         corrected_supplier = st.text_input("Supplier Name", value=req.get('supplier_name', ''))
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                        correction_data = {
+                            'invoice_no': corrected_invoice,
+                            'supplier_name': corrected_supplier,
+                            'amount': corrected_amount
+                        }
                     elif req['request_type'] == "Surrender":
                         corrected_surrender = st.text_input("Surrender No.", value=req.get('surrender_number', ''))
                         corrected_staff = st.text_input("Staff Name", value=req.get('staff_name', ''))
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                        correction_data = {
+                            'surrender_number': corrected_surrender,
+                            'staff_name': corrected_staff,
+                            'amount': corrected_amount
+                        }
                     else:
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
+                        correction_data = {'amount': corrected_amount}
                     
                     st.markdown("<div class='resubmit-container'>", unsafe_allow_html=True)
                     st.info("💡 Please ensure all corrections are made before resubmitting. The request will go back to Finance for review.")
@@ -1647,23 +1687,11 @@ elif choice == "↩️ Returned Requests":
                         # Prepare updated data
                         updated_data = {
                             'payment_description': corrected_description,
-                            'amount': corrected_amount,
                             'status': 'SUBMITTED',
                             'return_reason': None,
-                            'date_returned': None
+                            'date_returned': None,
+                            **correction_data
                         }
-                        
-                        # Add request-specific fields
-                        if req['request_type'] == "Student Payment":
-                            updated_data['batch_no'] = corrected_batch
-                        elif req['request_type'] in ["Imprest", "Petty Cash"]:
-                            updated_data['imprest_no'] = corrected_imprest
-                        elif req['request_type'] == "Supplier Payment":
-                            updated_data['invoice_no'] = corrected_invoice
-                            updated_data['supplier_name'] = corrected_supplier
-                        elif req['request_type'] == "Surrender":
-                            updated_data['surrender_number'] = corrected_surrender
-                            updated_data['staff_name'] = corrected_staff
                         
                         # Update the request
                         resubmit_request(req['id'], updated_data)
