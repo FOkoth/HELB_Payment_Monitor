@@ -867,7 +867,7 @@ elif choice == "📈 Management Dashboard":
                     avg_tat = 0
                 
                 # Performance score
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat if not pd.isna(avg_tat) else 15)) * 6.67)) * 0.4
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat if not pd.isna(avg_tat) else 15)) * 6.67)) * 0.4)
                 
                 dept_performance.append({
                     'Department': dept,
