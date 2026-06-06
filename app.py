@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -294,6 +295,29 @@ st.markdown("""
         border-radius: 6px;
         margin: 0.4rem 0;
         font-size: 0.65rem;
+    }
+    
+    /* Section Headers for Approval Queue */
+    .approval-section {
+        background: #F3F4F6;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        margin: 1rem 0 0.5rem 0;
+        border-left: 4px solid #00843D;
+    }
+    .approval-section h4 {
+        margin: 0;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #1F2937;
+    }
+    .approval-count {
+        background: #00843D;
+        color: white;
+        padding: 0.1rem 0.4rem;
+        border-radius: 12px;
+        font-size: 0.6rem;
+        margin-left: 0.5rem;
     }
     
     /* Log Entries */
@@ -1078,7 +1102,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1213,7 +1237,7 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST (PRESERVED - FULL CODE INCLUDED IN ORIGINAL)
+# NEW REQUEST (PRESERVED)
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
@@ -1648,7 +1672,7 @@ elif choice == "📋 My Requests":
 
 
 # ================================================================
-# RETURNED REQUESTS WITH RESUBMISSION (PRESERVED)
+# RETURNED REQUESTS (PRESERVED)
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -1764,37 +1788,95 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE (PRESERVED)
+# APPROVAL QUEUE - CATEGORIZED BY APPROVAL LEVEL (UPDATED)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN" or st.session_state.is_finance:
         st.markdown("<div class='section-header'>✅ Approval Queue</div>", unsafe_allow_html=True)
         
-        pending_confirmation = get_pending_confirmation_count()
-        if pending_confirmation > 0:
-            st.info(f"📋 {pending_confirmation} request(s) pending confirmation")
-        
+        # Summary cards for quick overview
         df = get_requests()
         
-        payment_pending = df[df['main_category'] == "Submit Payment Request"]
-        payment_pending = payment_pending[payment_pending['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
+        # Payment Requests Summary by Status
+        payment_df = df[df['main_category'] == "Submit Payment Request"]
+        surrender_df = df[df['main_category'] == "Submit Surrender"]
         
-        surrender_pending = df[df['main_category'] == "Submit Surrender"]
-        surrender_pending = surrender_pending[surrender_pending['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
+        # Payment status counts
+        payment_submitted = len(payment_df[payment_df['status'] == 'SUBMITTED'])
+        payment_received = len(payment_df[payment_df['status'] == 'RECEIVED_BY_FINANCE'])
+        payment_prepared = len(payment_df[payment_df['status'] == 'PAYMENT_PREPARED'])
+        payment_verified = len(payment_df[payment_df['status'] == 'PAYMENT_VERIFIED'])
+        payment_approved = len(payment_df[payment_df['status'] == 'PAYMENT_APPROVED'])
+        payment_authorized = len(payment_df[payment_df['status'] == 'PAYMENT_AUTHORIZED'])
+        
+        # Surrender status counts
+        surrender_submitted = len(surrender_df[surrender_df['status'] == 'SUBMITTED'])
+        surrender_received = len(surrender_df[surrender_df['status'] == 'RECEIVED_BY_FINANCE'])
+        surrender_first = len(surrender_df[surrender_df['status'] == 'SURRENDER_FIRST_VERIFICATION'])
+        surrender_second = len(surrender_df[surrender_df['status'] == 'SURRENDER_SECOND_VERIFICATION'])
+        surrender_approval = len(surrender_df[surrender_df['status'] == 'SURRENDER_APPROVAL'])
+        surrender_posting = len(surrender_df[surrender_df['status'] == 'SURRENDER_POSTING'])
+        
+        # Display summary metrics
+        st.markdown("### 📊 Queue Summary")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**💰 Payment Requests**")
+            pay_cols = st.columns(6)
+            with pay_cols[0]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{payment_submitted}</div></div>", unsafe_allow_html=True)
+            with pay_cols[1]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📥 RECEIVED</div><div class='secondary-value'>{payment_received}</div></div>", unsafe_allow_html=True)
+            with pay_cols[2]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>⚙️ PREPARED</div><div class='secondary-value'>{payment_prepared}</div></div>", unsafe_allow_html=True)
+            with pay_cols[3]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ VERIFIED</div><div class='secondary-value'>{payment_verified}</div></div>", unsafe_allow_html=True)
+            with pay_cols[4]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✓ APPROVED</div><div class='secondary-value'>{payment_approved}</div></div>", unsafe_allow_html=True)
+            with pay_cols[5]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>🔐 AUTHORIZED</div><div class='secondary-value'>{payment_authorized}</div></div>", unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("**📤 Surrender Requests**")
+            sur_cols = st.columns(6)
+            with sur_cols[0]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{surrender_submitted}</div></div>", unsafe_allow_html=True)
+            with sur_cols[1]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📥 RECEIVED</div><div class='secondary-value'>{surrender_received}</div></div>", unsafe_allow_html=True)
+            with sur_cols[2]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>🔍 FIRST VERIFY</div><div class='secondary-value'>{surrender_first}</div></div>", unsafe_allow_html=True)
+            with sur_cols[3]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>🔍 SECOND VERIFY</div><div class='secondary-value'>{surrender_second}</div></div>", unsafe_allow_html=True)
+            with sur_cols[4]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✓ APPROVAL</div><div class='secondary-value'>{surrender_approval}</div></div>", unsafe_allow_html=True)
+            with sur_cols[5]:
+                st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 POSTING</div><div class='secondary-value'>{surrender_posting}</div></div>", unsafe_allow_html=True)
+        
+        # Get pending requests
+        payment_pending = payment_df[payment_df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
+        surrender_pending = surrender_df[surrender_df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
         
         if payment_pending.empty and surrender_pending.empty:
             st.info("No pending requests.")
         else:
+            # ============================================================
+            # PAYMENT REQUESTS - CATEGORIZED BY APPROVAL LEVEL
+            # ============================================================
             if not payment_pending.empty:
-                st.markdown("### 💰 Payment Requests")
-                for _, req in payment_pending.iterrows():
-                    rid = req['id']
-                    with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']}"):
-                        st.write(f"**Amount:** KES {req['amount']:,.2f}")
-                        st.write(f"**Submitted:** {req['submission_date']}")
-                        
-                        if req['status'] == 'SUBMITTED':
+                st.markdown("---")
+                st.markdown("## 💰 PAYMENT REQUESTS")
+                
+                # Level 1: Pending Confirmation (SUBMITTED)
+                level1 = payment_pending[payment_pending['status'] == 'SUBMITTED']
+                if not level1.empty:
+                    with st.expander(f"📋 LEVEL 1: PENDING CONFIRMATION ({len(level1)}) - Action: Review and Receive", expanded=True):
+                        for _, req in level1.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            st.caption(f"Submitted: {req['submission_date']}")
+                            
                             col1, col2 = st.columns(2)
                             with col1:
                                 checklist_approvals = st.checkbox("✓ Approvals", key=f"pay_chk_app_{rid}")
@@ -1823,8 +1905,17 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Please provide a return reason")
-                        
-                        elif req['status'] == 'RECEIVED_BY_FINANCE':
+                            st.markdown("---")
+                
+                # Level 2: Received (RECEIVED_BY_FINANCE)
+                level2 = payment_pending[payment_pending['status'] == 'RECEIVED_BY_FINANCE']
+                if not level2.empty:
+                    with st.expander(f"📥 LEVEL 2: RECEIVED ({len(level2)}) - Action: Prepare Payment", expanded=True):
+                        for _, req in level2.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            st.caption(f"Received: {req['date_received']}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_prep_{rid}")
                             if st.button(f"📋 Prepare Payment", key=f"pay_btn_prepare_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1833,8 +1924,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'PAYMENT_PREPARED':
+                            st.markdown("---")
+                
+                # Level 3: Prepared (PAYMENT_PREPARED)
+                level3 = payment_pending[payment_pending['status'] == 'PAYMENT_PREPARED']
+                if not level3.empty:
+                    with st.expander(f"⚙️ LEVEL 3: PREPARED ({len(level3)}) - Action: Verify Payment", expanded=True):
+                        for _, req in level3.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_ver_{rid}")
                             if st.button(f"✅ Verify Payment", key=f"pay_btn_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1843,8 +1942,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'PAYMENT_VERIFIED':
+                            st.markdown("---")
+                
+                # Level 4: Verified (PAYMENT_VERIFIED)
+                level4 = payment_pending[payment_pending['status'] == 'PAYMENT_VERIFIED']
+                if not level4.empty:
+                    with st.expander(f"✅ LEVEL 4: VERIFIED ({len(level4)}) - Action: Approve Payment", expanded=True):
+                        for _, req in level4.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_app_{rid}")
                             if st.button(f"✅ Approve Payment", key=f"pay_btn_approve_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1853,8 +1960,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'PAYMENT_APPROVED':
+                            st.markdown("---")
+                
+                # Level 5: Approved (PAYMENT_APPROVED)
+                level5 = payment_pending[payment_pending['status'] == 'PAYMENT_APPROVED']
+                if not level5.empty:
+                    with st.expander(f"✓ LEVEL 5: APPROVED ({len(level5)}) - Action: Authorize Payment", expanded=True):
+                        for _, req in level5.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_auth_{rid}")
                             if st.button(f"✅ Authorize Payment", key=f"pay_btn_authorize_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1863,8 +1978,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'PAYMENT_AUTHORIZED':
+                            st.markdown("---")
+                
+                # Level 6: Authorized (PAYMENT_AUTHORIZED)
+                level6 = payment_pending[payment_pending['status'] == 'PAYMENT_AUTHORIZED']
+                if not level6.empty:
+                    with st.expander(f"🔐 LEVEL 6: AUTHORIZED ({len(level6)}) - Action: Mark as Paid", expanded=True):
+                        for _, req in level6.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{rid}")
                             if st.button(f"💰 Mark as Paid", key=f"pay_btn_paid_{rid}"):
@@ -1880,16 +2003,24 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Enter reference!")
+                            st.markdown("---")
             
+            # ============================================================
+            # SURRENDER REQUESTS - CATEGORIZED BY APPROVAL LEVEL
+            # ============================================================
             if not surrender_pending.empty:
-                st.markdown("### 📤 Surrender Requests")
-                for _, req in surrender_pending.iterrows():
-                    rid = req['id']
-                    with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']}"):
-                        st.write(f"**Amount:** KES {req['amount']:,.2f}")
-                        st.write(f"**Submitted:** {req['submission_date']}")
-                        
-                        if req['status'] == 'SUBMITTED':
+                st.markdown("---")
+                st.markdown("## 📤 SURRENDER REQUESTS")
+                
+                # Level S1: Pending Confirmation (SUBMITTED)
+                s_level1 = surrender_pending[surrender_pending['status'] == 'SUBMITTED']
+                if not s_level1.empty:
+                    with st.expander(f"📋 LEVEL 1: PENDING CONFIRMATION ({len(s_level1)}) - Action: Review and Receive", expanded=True):
+                        for _, req in s_level1.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            st.caption(f"Submitted: {req['submission_date']}")
+                            
                             col1, col2 = st.columns(2)
                             with col1:
                                 checklist_approvals = st.checkbox("✓ Approvals", key=f"surr_chk_app_{rid}")
@@ -1918,8 +2049,17 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Please provide a return reason")
-                        
-                        elif req['status'] == 'RECEIVED_BY_FINANCE':
+                            st.markdown("---")
+                
+                # Level S2: Received (RECEIVED_BY_FINANCE)
+                s_level2 = surrender_pending[surrender_pending['status'] == 'RECEIVED_BY_FINANCE']
+                if not s_level2.empty:
+                    with st.expander(f"📥 LEVEL 2: RECEIVED ({len(s_level2)}) - Action: First Verification", expanded=True):
+                        for _, req in s_level2.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            st.caption(f"Received: {req['date_received']}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_first_{rid}")
                             if st.button(f"🔍 First Verification", key=f"surr_btn_first_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1928,8 +2068,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'SURRENDER_FIRST_VERIFICATION':
+                            st.markdown("---")
+                
+                # Level S3: First Verification (SURRENDER_FIRST_VERIFICATION)
+                s_level3 = surrender_pending[surrender_pending['status'] == 'SURRENDER_FIRST_VERIFICATION']
+                if not s_level3.empty:
+                    with st.expander(f"🔍 LEVEL 3: FIRST VERIFICATION ({len(s_level3)}) - Action: Second Verification", expanded=True):
+                        for _, req in s_level3.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_second_{rid}")
                             if st.button(f"🔍 Second Verification", key=f"surr_btn_second_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1938,8 +2086,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'SURRENDER_SECOND_VERIFICATION':
+                            st.markdown("---")
+                
+                # Level S4: Second Verification (SURRENDER_SECOND_VERIFICATION)
+                s_level4 = surrender_pending[surrender_pending['status'] == 'SURRENDER_SECOND_VERIFICATION']
+                if not s_level4.empty:
+                    with st.expander(f"🔍 LEVEL 4: SECOND VERIFICATION ({len(s_level4)}) - Action: Approve Surrender", expanded=True):
+                        for _, req in s_level4.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_approve_{rid}")
                             if st.button(f"✅ Approve Surrender", key=f"surr_btn_approve_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1948,8 +2104,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'SURRENDER_APPROVAL':
+                            st.markdown("---")
+                
+                # Level S5: Approval (SURRENDER_APPROVAL)
+                s_level5 = surrender_pending[surrender_pending['status'] == 'SURRENDER_APPROVAL']
+                if not s_level5.empty:
+                    with st.expander(f"✓ LEVEL 5: APPROVAL ({len(s_level5)}) - Action: Post Surrender", expanded=True):
+                        for _, req in s_level5.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_post_{rid}")
                             if st.button(f"📋 Post Surrender", key=f"surr_btn_post_{rid}"):
                                 if pwd and verify_finance_password(pwd):
@@ -1958,8 +2122,16 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
-                        
-                        elif req['status'] == 'SURRENDER_POSTING':
+                            st.markdown("---")
+                
+                # Level S6: Posting (SURRENDER_POSTING)
+                s_level6 = surrender_pending[surrender_pending['status'] == 'SURRENDER_POSTING']
+                if not s_level6.empty:
+                    with st.expander(f"📋 LEVEL 6: POSTING ({len(s_level6)}) - Action: Mark as Cleared", expanded=True):
+                        for _, req in s_level6.iterrows():
+                            rid = req['id']
+                            st.markdown(f"**📄 {req['request_number']}** - Surrender - {req['department_name']} - KES {req['amount']:,.2f}")
+                            
                             reference = st.text_input("Reference Number", key=f"surr_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"surr_pwd_clear_{rid}")
                             if st.button(f"✅ Mark as Cleared", key=f"surr_btn_cleared_{rid}"):
@@ -1975,6 +2147,7 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Enter reference number!")
+                            st.markdown("---")
     else:
         st.error("Access denied. Finance only.")
     
@@ -1983,7 +2156,7 @@ elif choice == "✅ Approval Queue":
 
 
 # ================================================================
-# BULK OPERATIONS (NEW)
+# BULK OPERATIONS (PRESERVED)
 # ================================================================
 elif choice == "⚡ Bulk Operations":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -2035,7 +2208,6 @@ elif choice == "⚡ Bulk Operations":
         if 'bulk_requests' in st.session_state and st.session_state.bulk_requests:
             st.markdown("### Step 2: Select Requests to Process")
             
-            # Display requests in a selectable table
             df_bulk = pd.DataFrame(st.session_state.bulk_requests)
             df_bulk['Select'] = False
             
@@ -2062,7 +2234,6 @@ elif choice == "⚡ Bulk Operations":
             if selected_ids:
                 st.markdown(f"<div class='bulk-summary'>📋 {len(selected_ids)} request(s) selected for processing</div>", unsafe_allow_html=True)
                 
-                # Step 3: Choose bulk action
                 st.markdown("### Step 3: Choose Action")
                 
                 col1, col2 = st.columns(2)
@@ -2080,12 +2251,10 @@ elif choice == "⚡ Bulk Operations":
                     elif bulk_action == "Return Requests":
                         bulk_return_reason = st.text_area("Return Reason (will apply to all selected)")
                 
-                # Password for bulk operations
                 pwd = st.text_input("Finance Password", type="password", key="bulk_pwd")
                 
                 if st.button(f"▶️ Execute Bulk Action: {bulk_action}", type="primary"):
                     if pwd and verify_finance_password(pwd):
-                        # Map action to status
                         action_map = {
                             "Receive Requests": "RECEIVED_BY_FINANCE",
                             "Prepare Payment": "PAYMENT_PREPARED",
@@ -2115,7 +2284,6 @@ elif choice == "⚡ Bulk Operations":
                                 if failed_ids:
                                     st.warning(f"⚠️ Failed to process {len(failed_ids)} requests. Check logs.")
                                 st.balloons()
-                                # Clear session to refresh
                                 del st.session_state.bulk_requests
                                 st.rerun()
                             else:
@@ -2132,13 +2300,11 @@ elif choice == "⚡ Bulk Operations":
                     else:
                         st.error("❌ Incorrect finance password")
                 
-                # Warning for large operations
                 if len(selected_ids) > 20:
                     st.warning(f"⚠️ You are about to process {len(selected_ids)} requests. This may take a moment.")
             else:
                 st.info("Please select at least one request to process")
         
-        # Help section
         with st.expander("ℹ️ Bulk Operations Guide"):
             st.markdown("""
             **How to use Bulk Operations:**
@@ -2199,7 +2365,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL WITH DATABASE HEALTH (UPDATED)
+# ADMIN PANEL (PRESERVED - Full version from previous message)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
@@ -2501,7 +2667,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         with col4:
             st.metric("Active Users", f"{health['total_users']}")
         
-        # Status indicator
         status_color = "#00843D" if health['status'] == "Healthy" else "#F59E0B" if "Warning" in health['status'] else "#DC3545"
         st.markdown(f"""
         <div class='info-card' style='border-left-color: {status_color};'>
@@ -2510,7 +2675,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         </div>
         """, unsafe_allow_html=True)
         
-        # Capacity gauge
         capacity_percent = min(100, (health['db_size_mb'] / 500) * 100)
         gauge_color = "#00843D" if capacity_percent < 50 else "#F59E0B" if capacity_percent < 80 else "#DC3545"
         st.markdown(f"""
@@ -2524,7 +2688,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         </p>
         """, unsafe_allow_html=True)
         
-        # Migration guide
         if capacity_percent > 70:
             with st.expander("📖 PostgreSQL Migration Guide", expanded=True):
                 st.markdown("""
@@ -2543,7 +2706,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 **Need Help?** Contact your system administrator for assistance with migration.
                 """)
         
-        # Archive recommendation
         if health['total_requests'] > 100000:
             st.warning("📦 Consider archiving records older than 3 years to improve performance.")
     
@@ -2579,6 +2741,6 @@ elif choice == "🔐 Change Password":
 st.markdown("""
 <div class='main-footer'>
     <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v4.0</p>
-    <p>Bulk Operations | Database Health Monitoring | Real-time Analytics</p>
+    <p>Bulk Operations | Categorized Approval Queue | Database Health Monitoring | Real-time Analytics</p>
 </div>
 """, unsafe_allow_html=True)
