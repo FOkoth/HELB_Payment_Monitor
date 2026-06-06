@@ -747,7 +747,7 @@ with st.sidebar:
 
 
 # ================================================================
-# DEPARTMENT DASHBOARD (PRESERVED - Reduced for length)
+# DEPARTMENT DASHBOARD (PRESERVED)
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<div class='section-header'>📊 Department Performance Dashboard</div>", unsafe_allow_html=True)
@@ -899,7 +899,7 @@ if choice == "📊 Department Dashboard":
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD (PRESERVED - Reduced for length)
+# MANAGEMENT DASHBOARD (PRESERVED)
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -1099,7 +1099,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1149,27 +1149,34 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# SEARCH PAYMENT RECORDS (PRESERVED)
+# ENHANCED SEARCH PAYMENT RECORDS WITH ROLE-BASED VISIBILITY
 # ================================================================
 elif choice == "🔍 Search Payment Records":
-    st.markdown("<div class='section-header'>🔍 Search Payment Records</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
     
     st.markdown("""
     <div style='background:#F0F9FF; padding:0.4rem 0.6rem; border-radius:6px; margin-bottom:0.8rem; font-size:0.65rem;'>
-        🔎 Search by Request Number, Batch No., Imprest No., Invoice No., Surrender No., or Payment Reference
+        🔎 Search by Request Number, Batch No., Imprest No., Invoice No., Surrender No., Payment Reference, 
+        Staff Name, Supplier Name, or Customer Name.
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        search_term = st.text_input("Enter search term", placeholder="e.g., HELB-202503-0001, BATCH001, INV-12345...")
+        search_term = st.text_input("Enter search term", placeholder="e.g., HELB-202503-0001, BATCH001, INV-12345, John Doe...")
     with col2:
         search_type = st.selectbox("Search by", ["All Fields", "Request Number", "Batch No.", "Imprest No.", 
-                                                  "Invoice No.", "Surrender No.", "Payment Reference"])
+                                                  "Invoice No.", "Surrender No.", "Staff Name", "Supplier Name", 
+                                                  "Customer Name", "Payment Reference"])
     with col3:
         status_filter = st.selectbox("Status", ["All", "SUBMITTED", "RECEIVED_BY_FINANCE", "PAYMENT_PREPARED", 
                                                 "PAYMENT_VERIFIED", "PAYMENT_APPROVED", "PAYMENT_AUTHORIZED", 
                                                 "PAID", "CLEARED", "RETURNED"])
+    
+    # Define roles that can see sensitive information
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    sensitive_roles = ["ADMIN", "MANAGEMENT"] + finance_roles
+    can_see_sensitive = st.session_state.user_role in sensitive_roles or st.session_state.is_finance
     
     if st.button("🔍 Search", type="primary"):
         if search_term:
@@ -1179,6 +1186,9 @@ elif choice == "🔍 Search Payment Records":
                 "Imprest No.": "imprest_no",
                 "Invoice No.": "invoice_no",
                 "Surrender No.": "surrender_number",
+                "Staff Name": "all_names",
+                "Supplier Name": "all_names",
+                "Customer Name": "all_names",
                 "Payment Reference": "payment_reference",
                 "All Fields": "all"
             }
@@ -1193,37 +1203,297 @@ elif choice == "🔍 Search Payment Records":
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
                 for _, row in results.iterrows():
+                    # Determine entity name (staff, supplier, customer) - visible to everyone
+                    entity_name = ""
+                    entity_type = ""
+                    
+                    if row.get('staff_name') and row['staff_name'] != '-' and row['staff_name']:
+                        entity_name = row['staff_name']
+                        entity_type = "Staff"
+                    elif row.get('supplier_name') and row['supplier_name'] != '-' and row['supplier_name']:
+                        entity_name = row['supplier_name']
+                        entity_type = "Supplier"
+                    elif row.get('customer_name') and row['customer_name'] != '-' and row['customer_name']:
+                        entity_name = row['customer_name']
+                        entity_type = "Customer"
+                    
+                    # Calculate current TAT and SLA status
                     if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                         tat = calculate_tat(row['submission_date'], row['payment_date'])
-                        status_badge = f'<span class="status-paid">✅ {row["status"]} ({tat} days)</span>'
-                    elif row['status'] == 'RETURNED':
-                        status_badge = f'<span class="status-returned">↩️ RETURNED</span>'
+                        status_badge = f'<span class="status-paid">✅ {row["status"]} (TAT: {tat} days)</span>'
+                        is_completed = True
                     else:
-                        pending_days = calculate_tat(row['submission_date'])
-                        status_badge = f'<span class="status-pending">⏳ {row["status"]} ({pending_days} days)</span>'
+                        tat = calculate_tat(row['submission_date'])
+                        status_badge = f'<span class="status-pending">⏳ {row["status"]} (Pending: {tat} days)</span>'
+                        is_completed = False
                     
+                    # SLA Days for this request type
+                    sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+                               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                               'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                               'Professional Body': 5, 'Direct Payment': 3}
+                    sla_days = sla_map.get(row['request_type'], 5)
+                    
+                    # Risk assessment - ONLY for Finance, Management, Admin
+                    if can_see_sensitive:
+                        if not is_completed:
+                            if tat > sla_days:
+                                risk_level = "Critical - Overdue"
+                                risk_color = "#DC2626"
+                            elif tat > sla_days * 0.8:
+                                risk_level = "High - At Risk"
+                                risk_color = "#F59E0B"
+                            elif tat > sla_days * 0.5:
+                                risk_level = "Medium - On Track"
+                                risk_color = "#FFB81C"
+                            else:
+                                risk_level = "Low - Good Progress"
+                                risk_color = "#00843D"
+                        else:
+                            if tat > sla_days:
+                                risk_level = "Completed (Delayed)"
+                                risk_color = "#F59E0B"
+                            else:
+                                risk_level = "Completed (On Time)"
+                                risk_color = "#00843D"
+                    else:
+                        risk_level = None
+                        risk_color = None
+                    
+                    # Get reference number
                     ref_number = get_reference_number(row)
                     
-                    with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}"):
-                        col1, col2 = st.columns(2)
+                    # Predict completion date for pending requests - ONLY for Finance, Management, Admin
+                    predicted_date = None
+                    confidence = None
+                    if can_see_sensitive and not is_completed:
+                        # Calculate average TAT for similar completed requests
+                        df_all = get_requests()
+                        similar_completed = df_all[
+                            (df_all['request_type'] == row['request_type']) & 
+                            (df_all['status'].isin(['PAID', 'CLEARED'])) &
+                            (df_all['payment_date'].notna())
+                        ]
+                        if not similar_completed.empty:
+                            avg_tat_similar = similar_completed.apply(
+                                lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
+                            ).mean()
+                            remaining_days = max(1, avg_tat_similar - tat)
+                            predicted_date = date.today() + timedelta(days=remaining_days)
+                            confidence = "High" if len(similar_completed) > 20 else "Medium" if len(similar_completed) > 5 else "Low"
+                        else:
+                            # Use SLA-based prediction
+                            remaining_days = max(1, sla_days - tat)
+                            predicted_date = date.today() + timedelta(days=remaining_days)
+                            confidence = "Medium (based on SLA)"
+                    
+                    # Create expandable result card
+                    with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}", expanded=False):
+                        # Header with status and risk (risk only for authorized roles)
+                        col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
-                            st.markdown(f"**Amount:** KES {row['amount']:,.2f}")
-                            st.markdown(f"**Submitted:** {row['submission_date']}")
-                            if ref_number and ref_number != '-':
-                                st.markdown(f"**Reference:** {ref_number}")
-                        with col2:
                             st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
-                            if row.get('payment_date'):
-                                st.markdown(f"**Payment Date:** {row['payment_date']}")
-                            if row.get('return_reason'):
-                                st.markdown(f"**Return Reason:** :red[{row['return_reason']}]")
-                        
-                        if row.get('payment_description'):
-                            st.markdown(f"**Description:** {row['payment_description']}")
+                        with col2:
+                            if can_see_sensitive and risk_level:
+                                st.markdown(f"**Risk Level:** <span style='color:{risk_color}; font-weight:bold;'>{risk_level}</span>", unsafe_allow_html=True)
+                            else:
+                                st.markdown("**Risk Level:** <span style='color:#6B7280;'>Restricted Access</span>", unsafe_allow_html=True)
+                        with col3:
+                            if can_see_sensitive and not is_completed and predicted_date:
+                                st.markdown(f"**📅 Predicted Completion:** {predicted_date.strftime('%d %b %Y')} <span style='font-size:0.6rem;'>({confidence} confidence)</span>", unsafe_allow_html=True)
+                            elif is_completed and row.get('payment_date'):
+                                st.markdown(f"**✅ Completed:** {row['payment_date']}")
+                            elif not can_see_sensitive and not is_completed:
+                                st.markdown("**📅 ETA:** Contact Finance")
                         
                         st.markdown("---")
-                        st.markdown("**Transaction History:**")
-                        display_transaction_logs(row['id'])
+                        
+                        # Two-column layout for details
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**💰 Amount:** KES {row['amount']:,.2f}")
+                            st.markdown(f"**📅 Submitted:** {row['submission_date']}")
+                            if can_see_sensitive and row.get('date_received'):
+                                st.markdown(f"**📥 Received by Finance:** {row['date_received']}")
+                            elif not can_see_sensitive and row.get('date_received'):
+                                st.markdown(f"**📥 Received by Finance:** Yes")
+                            if ref_number and ref_number != '-':
+                                st.markdown(f"**🔢 Reference:** {ref_number}")
+                            if entity_name:
+                                st.markdown(f"**👤 {entity_type} Name:** {entity_name}")
+                        
+                        with col2:
+                            if row.get('payment_description'):
+                                st.markdown(f"**📝 Description:** {row['payment_description'][:100]}{'...' if len(row['payment_description']) > 100 else ''}")
+                            if can_see_sensitive and row.get('payment_reference'):
+                                st.markdown(f"**🏦 Payment Ref:** {row['payment_reference']}")
+                            if row.get('return_reason'):
+                                st.markdown(f"**↩️ Return Reason:** :red[{row['return_reason']}]")
+                            if can_see_sensitive and not is_completed:
+                                st.markdown(f"**⏱️ Current TAT:** {tat} / {sla_days} days")
+                                # Progress bar
+                                progress_pct = min(100, (tat / sla_days) * 100)
+                                bar_color = "#DC3545" if progress_pct > 100 else "#F59E0B" if progress_pct > 80 else "#00843D"
+                                st.markdown(f"""
+                                <div class='progress-bar' style='height:6px; background:#E5E7EB;'>
+                                    <div class='progress-fill' style='width:{min(100, progress_pct)}%; background:{bar_color};'></div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            elif not can_see_sensitive and not is_completed:
+                                st.markdown(f"**⏱️ Processing Time:** {tat} days")
+                        
+                        # Additional details for specific request types
+                        st.markdown("---")
+                        st.markdown("**📋 Additional Details:**")
+                        details_cols = st.columns(4)
+                        detail_items = []
+                        
+                        if row.get('batch_no'):
+                            detail_items.append(("Batch No.", row['batch_no']))
+                        if row.get('imprest_no'):
+                            detail_items.append(("Imprest/Petty No.", row['imprest_no']))
+                        if row.get('invoice_no'):
+                            detail_items.append(("Invoice No.", row['invoice_no']))
+                        if row.get('supplier_name'):
+                            detail_items.append(("Supplier", row['supplier_name']))
+                        if row.get('staff_name'):
+                            detail_items.append(("Staff", row['staff_name']))
+                        if row.get('customer_name'):
+                            detail_items.append(("Customer", row['customer_name']))
+                        if row.get('product_type'):
+                            detail_items.append(("Product", row['product_type']))
+                        if row.get('semester'):
+                            detail_items.append(("Semester", row['semester']))
+                        if row.get('funder_name'):
+                            detail_items.append(("Funder", row['funder_name']))
+                        if row.get('salary_month') and row.get('salary_year'):
+                            detail_items.append(("Salary Period", f"{row['salary_month']} {row['salary_year']}"))
+                        if row.get('professional_body'):
+                            detail_items.append(("Professional Body", row['professional_body']))
+                        
+                        for i, (label, value) in enumerate(detail_items[:8]):
+                            with details_cols[i % 4]:
+                                st.markdown(f"**{label}:** {value}")
+                        
+                        # Similar requests performance - ONLY for authorized roles
+                        if can_see_sensitive:
+                            st.markdown("---")
+                            st.markdown("**📊 Similar Requests Performance**")
+                            
+                            # Get similar completed requests
+                            df_all = get_requests()
+                            similar_completed = df_all[
+                                (df_all['request_type'] == row['request_type']) & 
+                                (df_all['status'].isin(['PAID', 'CLEARED'])) &
+                                (df_all['payment_date'].notna())
+                            ].head(5)
+                            
+                            if not similar_completed.empty:
+                                similar_data = []
+                                for _, sim in similar_completed.iterrows():
+                                    sim_tat = calculate_tat(sim['submission_date'], sim['payment_date'])
+                                    similar_data.append({
+                                        'Request': sim['request_number'],
+                                        'TAT (days)': sim_tat,
+                                        'Status': 'On Time' if sim_tat <= sla_map.get(sim['request_type'], 5) else 'Delayed'
+                                    })
+                                sim_df = pd.DataFrame(similar_data)
+                                st.dataframe(sim_df, use_container_width=True, hide_index=True)
+                                
+                                # Show average
+                                avg_sim_tat = similar_completed.apply(
+                                    lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
+                                ).mean()
+                                st.caption(f"📈 Average TAT for similar requests: {avg_sim_tat:.1f} days (SLA: {sla_days} days)")
+                            else:
+                                st.caption("No completed similar requests found for comparison.")
+                        
+                        # Timeline/Progress Section
+                        st.markdown("---")
+                        st.markdown("**📅 Progress Timeline**")
+                        
+                        # Define stages based on request type
+                        if row['request_type'] == "Surrender":
+                            stages = [
+                                {'name': 'Submitted', 'status_key': 'SUBMITTED', 'date': row['submission_date']},
+                                {'name': 'Received', 'status_key': 'RECEIVED_BY_FINANCE', 'date': row['date_received']},
+                                {'name': 'First Verification', 'status_key': 'SURRENDER_FIRST_VERIFICATION', 'date': None},
+                                {'name': 'Second Verification', 'status_key': 'SURRENDER_SECOND_VERIFICATION', 'date': None},
+                                {'name': 'Approval', 'status_key': 'SURRENDER_APPROVAL', 'date': None},
+                                {'name': 'Posting', 'status_key': 'SURRENDER_POSTING', 'date': None},
+                                {'name': 'Cleared', 'status_key': 'CLEARED', 'date': row['payment_date']}
+                            ]
+                        else:
+                            stages = [
+                                {'name': 'Submitted', 'status_key': 'SUBMITTED', 'date': row['submission_date']},
+                                {'name': 'Received', 'status_key': 'RECEIVED_BY_FINANCE', 'date': row['date_received']},
+                                {'name': 'Prepared', 'status_key': 'PAYMENT_PREPARED', 'date': None},
+                                {'name': 'Verified', 'status_key': 'PAYMENT_VERIFIED', 'date': None},
+                                {'name': 'Approved', 'status_key': 'PAYMENT_APPROVED', 'date': None},
+                                {'name': 'Authorized', 'status_key': 'PAYMENT_AUTHORIZED', 'date': None},
+                                {'name': 'Paid', 'status_key': 'PAID', 'date': row['payment_date']}
+                            ]
+                        
+                        # Determine current stage index
+                        current_index = 0
+                        status_order = [s['status_key'] for s in stages]
+                        if row['status'] in status_order:
+                            current_index = status_order.index(row['status'])
+                        
+                        # Display timeline
+                        for i, stage in enumerate(stages):
+                            is_completed_stage = i < current_index
+                            is_current = i == current_index
+                            
+                            if is_completed_stage:
+                                icon = "✅"
+                                color = "#00843D"
+                            elif is_current:
+                                icon = "📍"
+                                color = "#FFB81C"
+                            else:
+                                icon = "○"
+                                color = "#D1D5DB"
+                            
+                            date_str = ""
+                            if stage['date']:
+                                date_str = f"<span style='font-size:0.6rem; color:#6B7280;'>{stage['date']}</span>"
+                            elif is_current and stage['date'] is None:
+                                date_str = "<span style='font-size:0.6rem; color:#F59E0B;'>In progress</span>"
+                            
+                            st.markdown(f"""
+                            <div style='display: flex; align-items: center; margin: 0.3rem 0;'>
+                                <div style='width: 20px; text-align: center;'>{icon}</div>
+                                <div style='flex: 1; margin-left: 0.5rem;'>
+                                    <strong style='font-size:0.7rem;'>{stage['name']}</strong>
+                                    {date_str}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Warning for overdue - ONLY for authorized roles
+                        if can_see_sensitive and not is_completed:
+                            if tat > sla_days:
+                                st.markdown(f"""
+                                <div class='warning-card' style='margin-top:0.5rem;'>
+                                    <strong>⚠️ URGENT: SLA BREACH</strong><br>
+                                    This request is {tat - sla_days} days overdue. Please follow up immediately.
+                                </div>
+                                """, unsafe_allow_html=True)
+                            elif tat > sla_days * 0.8:
+                                st.markdown(f"""
+                                <div class='warning-card' style='margin-top:0.5rem;'>
+                                    <strong>⚠️ At Risk of SLA Breach</strong><br>
+                                    This request is approaching its SLA deadline. {sla_days - tat} days remaining.
+                                </div>
+                                """, unsafe_allow_html=True)
+                        
+                        # Transaction History - ONLY for authorized roles (Finance, Management, Admin)
+                        if can_see_sensitive:
+                            with st.expander("📜 View Full Transaction History"):
+                                display_transaction_logs(row['id'])
+                        else:
+                            st.caption("📜 Transaction history is available to Finance and Management only.")
             else:
                 st.warning("No records found matching your search criteria.")
         else:
@@ -1330,91 +1600,300 @@ elif choice == "📝 New Request" or choice == "📝 New Request (Department)":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
             
-            # For all other request types - simplified display
-            else:
-                with st.form(key=f"{selected_type}_form"):
-                    st.write(f"Creating {selected_type} request for {st.session_state.user_dept}")
+            # Imprest
+            elif main_category == "Submit Payment Request" and selected_type == "Imprest":
+                with st.form(key="imprest_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    imprest_no = st.text_input("Imprest No.")
                     amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
-                    payment_description = st.text_area("Payment Description")
                     financial_years = get_financial_years()
                     financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Payment Detail")
+                    if st.form_submit_button("Submit"):
+                        if not imprest_no or amount <= 0 or not payment_description:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'imprest_no': imprest_no, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Petty Cash
+            elif main_category == "Submit Payment Request" and selected_type == "Petty Cash":
+                with st.form(key="petty_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    petty_cash_no = st.text_input("Petty Cash No.")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Payment Detail")
+                    if st.form_submit_button("Submit"):
+                        if not petty_cash_no or amount <= 0 or not payment_description:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'imprest_no': petty_cash_no, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Direct Payment
+            elif main_category == "Submit Payment Request" and selected_type == "Direct Payment":
+                with st.form(key="direct_form"):
+                    st.subheader("💸 Direct Payment Details")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
-                    # Type-specific fields
-                    if selected_type == "Imprest":
-                        imprest_no = st.text_input("Imprest No.")
-                        if st.form_submit_button("Submit"):
-                            if imprest_no and amount > 0:
-                                request_data = {
-                                    'main_category': main_category, 'request_type': selected_type,
-                                    'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                    'submitted_by': st.session_state.username, 'amount': amount,
-                                    'payment_description': payment_description, 'financial_year': financial_year,
-                                    'imprest_no': imprest_no, 'status': 'SUBMITTED'
-                                }
-                                request_number = save_request(request_data)
-                                st.success(f"✅ Request {request_number} submitted!")
-                                st.balloons()
+                    invoice_no = st.text_input("Invoice No. *")
+                    direct_payment_details = st.text_area("Payment Details (Payee, Purpose)")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Additional Notes")
                     
-                    elif selected_type == "Petty Cash":
-                        petty_no = st.text_input("Petty Cash No.")
-                        if st.form_submit_button("Submit"):
-                            if petty_no and amount > 0:
-                                request_data = {
-                                    'main_category': main_category, 'request_type': selected_type,
-                                    'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                    'submitted_by': st.session_state.username, 'amount': amount,
-                                    'payment_description': payment_description, 'financial_year': financial_year,
-                                    'imprest_no': petty_no, 'status': 'SUBMITTED'
-                                }
-                                request_number = save_request(request_data)
-                                st.success(f"✅ Request {request_number} submitted!")
-                                st.balloons()
+                    if st.form_submit_button("Submit"):
+                        if not invoice_no or not direct_payment_details or amount <= 0:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'direct_payment_details': direct_payment_details, 'invoice_no': invoice_no,
+                                'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Supplier Payment
+            elif main_category == "Submit Payment Request" and selected_type == "Supplier Payment":
+                with st.form(key="supplier_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    invoice_no = st.text_input("Invoice No.")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    supplier_name = st.text_input("Supplier Name")
+                    payment_description = st.text_area("Payment Detail")
+                    if st.form_submit_button("Submit"):
+                        if not invoice_no or amount <= 0 or not supplier_name or not payment_description:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'invoice_no': invoice_no, 'supplier_name': supplier_name, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Salary Payment
+            elif main_category == "Submit Payment Request" and selected_type == "Salary Payment":
+                with st.form(key="salary_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                    salary_month = st.selectbox("Salary Month", months)
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    salary_year = st.number_input("Year", min_value=2020, max_value=2030, value=datetime.now().year)
+                    if st.form_submit_button("Submit"):
+                        if not salary_month or amount <= 0 or not financial_year:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'financial_year': financial_year, 'salary_month': salary_month,
+                                'salary_year': salary_year, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Refund Payment
+            elif main_category == "Submit Payment Request" and selected_type == "Refund Payment":
+                with st.form(key="refund_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    refund_id = st.text_input("Refund ID")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    customer_name = st.text_input("Customer Name")
+                    customer_id = st.text_input("Customer ID Number")
+                    if st.form_submit_button("Submit"):
+                        if not refund_id or amount <= 0 or not customer_name:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'financial_year': financial_year, 'imprest_no': refund_id,
+                                'customer_name': customer_name, 'customer_id': customer_id, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Mileage Claim
+            elif main_category == "Submit Payment Request" and selected_type == "Mileage Claim":
+                with st.form(key="mileage_form"):
+                    st.subheader("⛽ Mileage Claim Details")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
-                    elif selected_type == "Supplier Payment":
-                        invoice_no = st.text_input("Invoice No.")
-                        supplier_name = st.text_input("Supplier Name")
-                        if st.form_submit_button("Submit"):
-                            if invoice_no and supplier_name and amount > 0:
-                                request_data = {
-                                    'main_category': main_category, 'request_type': selected_type,
-                                    'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                    'submitted_by': st.session_state.username, 'amount': amount,
-                                    'payment_description': payment_description, 'financial_year': financial_year,
-                                    'invoice_no': invoice_no, 'supplier_name': supplier_name, 'status': 'SUBMITTED'
-                                }
-                                request_number = save_request(request_data)
-                                st.success(f"✅ Request {request_number} submitted!")
-                                st.balloons()
+                    staff_name = st.text_input("Staff Name *")
+                    mileage_claim_details = st.text_area("Trip Details (From, To, Distance, Vehicle Reg No.)")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=100.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Additional Notes")
                     
-                    elif selected_type == "Surrender":
-                        surrender_no = st.text_input("Surrender No.")
-                        staff_name = st.text_input("Staff Name")
-                        if st.form_submit_button("Submit"):
-                            if surrender_no and staff_name and amount > 0:
-                                request_data = {
-                                    'main_category': main_category, 'request_type': selected_type,
-                                    'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                    'submitted_by': st.session_state.username, 'amount': amount,
-                                    'payment_description': payment_description, 'financial_year': financial_year,
-                                    'surrender_number': surrender_no, 'staff_name': staff_name, 'status': 'SUBMITTED'
-                                }
-                                request_number = save_request(request_data)
-                                st.success(f"✅ Request {request_number} submitted!")
-                                st.balloons()
-                    
-                    else:
-                        if st.form_submit_button("Submit"):
-                            if amount > 0:
-                                request_data = {
-                                    'main_category': main_category, 'request_type': selected_type,
-                                    'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                    'submitted_by': st.session_state.username, 'amount': amount,
-                                    'payment_description': payment_description, 'financial_year': financial_year,
-                                    'status': 'SUBMITTED'
-                                }
-                                request_number = save_request(request_data)
-                                st.success(f"✅ Request {request_number} submitted!")
-                                st.balloons()
+                    if st.form_submit_button("Submit"):
+                        if not staff_name or not mileage_claim_details or amount <= 0:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'mileage_claim_details': mileage_claim_details, 'staff_name': staff_name,
+                                'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Staff Training
+            elif main_category == "Submit Payment Request" and selected_type == "Staff Training":
+                with st.form(key="training_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    training_details = st.text_area("Training Details (Course, Institution, Duration)")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Additional Notes")
+                    if st.form_submit_button("Submit"):
+                        if not training_details or amount <= 0:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'training_details': training_details, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Professional Body
+            elif main_category == "Submit Payment Request" and selected_type == "Professional Body":
+                with st.form(key="professional_form"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    professional_body = st.text_input("Professional Body Name")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Additional Notes")
+                    if st.form_submit_button("Submit"):
+                        if not professional_body or amount <= 0:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'professional_body': professional_body, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
+            
+            # Surrender
+            elif main_category == "Submit Surrender":
+                with st.form(key="surrender_form"):
+                    st.subheader("📤 Surrender Details")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    surrender_no = st.text_input("Surrender No.")
+                    amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    staff_name = st.text_input("Staff Name")
+                    payment_description = st.text_area("Payment Detail")
+                    if st.form_submit_button("Submit"):
+                        if not surrender_no or amount <= 0 or not staff_name or not payment_description:
+                            st.error("Please fill all required fields")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': "Surrender",
+                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
+                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'payment_description': payment_description, 'financial_year': financial_year,
+                                'surrender_number': surrender_no, 'staff_name': staff_name, 'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Request {request_number} submitted!")
+                            st.balloons()
     
     if st.button("🔄 Refresh This Page", key="new_refresh"):
         refresh_page()
@@ -1429,14 +1908,12 @@ elif choice == "📝 Submit on Behalf":
         st.markdown("<div class='section-header'>📝 Submit Request on Behalf of Department</div>", unsafe_allow_html=True)
         st.markdown("<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>Finance users can submit requests for any department</p>", unsafe_allow_html=True)
         
-        # Get all departments
         depts = get_departments()
         dept_list = depts['name'].tolist() if not depts.empty else []
         
         col1, col2 = st.columns(2)
         with col1:
             selected_department = st.selectbox("Select Department", dept_list)
-            # Get department ID
             dept_id = depts[depts['name'] == selected_department]['id'].values[0] if not depts.empty else None
         with col2:
             main_category = st.radio("Request Type", ["Submit Payment Request", "Submit Surrender"], horizontal=True)
@@ -1463,7 +1940,6 @@ elif choice == "📝 Submit on Behalf":
             financial_years = get_financial_years()
             financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
             
-            # Type-specific fields
             if request_type == "Student Payment":
                 batch_no = st.text_input("Batch No.")
                 if st.form_submit_button("Submit Request"):
@@ -1615,7 +2091,7 @@ elif choice == "↩️ Returned Requests":
                 st.markdown(f"""
                 <div class='warning-card'>
                     <strong>⚠️ Return Reason:</strong> {req['return_reason']}<br>
-                    <strong> Amount:</strong> KES {req['amount']:,.2f}<br>
+                    <strong>💰 Amount:</strong> KES {req['amount']:,.2f}<br>
                     <strong>📅 Submitted:</strong> {req['submission_date']}<br>
                     <strong>🏢 Department:</strong> {req['department_name']}
                 </div>
@@ -1752,7 +2228,7 @@ elif choice == "✅ Approval Queue":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("** Payment Requests**")
+            st.markdown("**💰 Payment Requests**")
             pay_cols = st.columns(6)
             with pay_cols[0]:
                 st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{payment_counts['submitted']}</div></div>", unsafe_allow_html=True)
@@ -1786,7 +2262,7 @@ elif choice == "✅ Approval Queue":
         st.markdown("---")
         
         # Create tabs for Payment and Surrender
-        tab_payment, tab_surrender = st.tabs([" Payment Requests", "📤 Surrender Requests"])
+        tab_payment, tab_surrender = st.tabs(["💰 Payment Requests", "📤 Surrender Requests"])
         
         # ======================================================
         # PAYMENT REQUESTS TAB
@@ -1952,7 +2428,7 @@ elif choice == "✅ Approval Queue":
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{rid}")
-                            if st.button(f" Mark as Paid", key=f"pay_btn_paid_{rid}"):
+                            if st.button(f"💰 Mark as Paid", key=f"pay_btn_paid_{rid}"):
                                 if payment_ref:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'PAID', performed_by=st.session_state.username)
@@ -2342,7 +2818,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL (PRESERVED - Reduced for length)
+# ADMIN PANEL (PRESERVED)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
@@ -2396,7 +2872,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 with col2:
                     can_process = st.checkbox("⚙️ Can Process Stages")
                 with col3:
-                    can_release = st.checkbox(" Can Release Payments")
+                    can_release = st.checkbox("💰 Can Release Payments")
                 
                 st.info("💡 Note: FINANCE_ADMIN automatically gets all permissions regardless of checkboxes")
                 
@@ -2516,7 +2992,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                         st.error("❌ Product name already exists!")
     
     with tab4:
-        st.subheader(" Funder Management (ERM)")
+        st.subheader("💰 Funder Management (ERM)")
         funders_df = get_funders()
         if not funders_df.empty:
             for _, funder in funders_df.iterrows():
@@ -2612,7 +3088,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     
     with tab6:
         st.subheader("🔐 Finance Password Settings")
-        st.info("This password is required for all finance actions.")
+        st.info("This password is required for all finance actions (Confirm, Prepare, Verify, Approve, Authorize, Pay/Clear).")
         st.text_input("Current Password", value="••••••••", disabled=True)
         with st.form("update_finance_pwd_form"):
             new_password = st.text_input("New Finance Password", type="password")
@@ -2667,6 +3143,15 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 - Database size exceeds 500MB
                 - More than 200,000 requests in the system
                 - Experiencing frequent "database is locked" errors
+                
+                **Migration Steps:**
+                1. Install PostgreSQL: `sudo apt install postgresql`
+                2. Create database: `createdb helb_db`
+                3. Export current data: Use the backup feature
+                4. Import to PostgreSQL: Use pgloader or manual import
+                5. Update connection string in database.py
+                
+                **Need Help?** Contact your system administrator for assistance with migration.
                 """)
         
         if health['total_requests'] > 100000:
@@ -2704,6 +3189,6 @@ elif choice == "🔐 Change Password":
 st.markdown("""
 <div class='main-footer'>
     <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
-    <p>Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Database Health Monitoring</p>
+    <p>Intelligent Search | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Database Health Monitoring</p>
 </div>
 """, unsafe_allow_html=True)
