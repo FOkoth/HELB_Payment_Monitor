@@ -2077,7 +2077,7 @@ elif choice == "↩️ Returned Requests":
                 st.markdown(f"""
                 <div class='warning-card'>
                     <strong>⚠️ Return Reason:</strong> {req['return_reason']}<br>
-                    <strong> Amount:</strong> KES {req['amount']:,.2f}<br>
+                    <strong>💰 Amount:</strong> KES {req['amount']:,.2f}<br>
                     <strong>📅 Submitted:</strong> {req['submission_date']}<br>
                     <strong>🏢 Department:</strong> {req['department_name']}
                 </div>
@@ -2214,7 +2214,7 @@ elif choice == "✅ Approval Queue":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("** Payment Requests**")
+            st.markdown("**💰 Payment Requests**")
             pay_cols = st.columns(6)
             with pay_cols[0]:
                 st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{payment_counts['submitted']}</div></div>", unsafe_allow_html=True)
@@ -2248,7 +2248,7 @@ elif choice == "✅ Approval Queue":
         st.markdown("---")
         
         # Create tabs for Payment and Surrender
-        tab_payment, tab_surrender = st.tabs([" Payment Requests", "📤 Surrender Requests"])
+        tab_payment, tab_surrender = st.tabs(["💰 Payment Requests", "📤 Surrender Requests"])
         
         # ======================================================
         # PAYMENT REQUESTS TAB
