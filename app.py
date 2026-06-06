@@ -1099,7 +1099,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1615,7 +1615,7 @@ elif choice == "↩️ Returned Requests":
                 st.markdown(f"""
                 <div class='warning-card'>
                     <strong>⚠️ Return Reason:</strong> {req['return_reason']}<br>
-                    <strong>💰 Amount:</strong> KES {req['amount']:,.2f}<br>
+                    <strong> Amount:</strong> KES {req['amount']:,.2f}<br>
                     <strong>📅 Submitted:</strong> {req['submission_date']}<br>
                     <strong>🏢 Department:</strong> {req['department_name']}
                 </div>
@@ -1752,7 +1752,7 @@ elif choice == "✅ Approval Queue":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**💰 Payment Requests**")
+            st.markdown("** Payment Requests**")
             pay_cols = st.columns(6)
             with pay_cols[0]:
                 st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{payment_counts['submitted']}</div></div>", unsafe_allow_html=True)
@@ -1786,7 +1786,7 @@ elif choice == "✅ Approval Queue":
         st.markdown("---")
         
         # Create tabs for Payment and Surrender
-        tab_payment, tab_surrender = st.tabs(["💰 Payment Requests", "📤 Surrender Requests"])
+        tab_payment, tab_surrender = st.tabs([" Payment Requests", "📤 Surrender Requests"])
         
         # ======================================================
         # PAYMENT REQUESTS TAB
@@ -1952,7 +1952,7 @@ elif choice == "✅ Approval Queue":
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{rid}")
-                            if st.button(f"💰 Mark as Paid", key=f"pay_btn_paid_{rid}"):
+                            if st.button(f" Mark as Paid", key=f"pay_btn_paid_{rid}"):
                                 if payment_ref:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'PAID', performed_by=st.session_state.username)
@@ -2396,7 +2396,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 with col2:
                     can_process = st.checkbox("⚙️ Can Process Stages")
                 with col3:
-                    can_release = st.checkbox("💰 Can Release Payments")
+                    can_release = st.checkbox(" Can Release Payments")
                 
                 st.info("💡 Note: FINANCE_ADMIN automatically gets all permissions regardless of checkboxes")
                 
@@ -2516,7 +2516,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                         st.error("❌ Product name already exists!")
     
     with tab4:
-        st.subheader("💰 Funder Management (ERM)")
+        st.subheader(" Funder Management (ERM)")
         funders_df = get_funders()
         if not funders_df.empty:
             for _, funder in funders_df.iterrows():
