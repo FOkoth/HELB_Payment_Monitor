@@ -3158,7 +3158,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 with col2:
                     if st.button(f"🗑️ Delete", key=f"del_year_{year['id']}"):
                         delete_financial_year(year['id'])
-                        st.success(f"Financial Year '{year['name']}' deleted!)
+                        st.success(f"Financial Year '{year['name']}' deleted!")
                         st.rerun()
         else:
             st.info("No financial years added yet.")
