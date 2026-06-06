@@ -913,7 +913,7 @@ if choice == "📊 Department Dashboard":
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS
+# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS (FIXED)
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -1030,7 +1030,7 @@ elif choice == "📈 Management Dashboard":
         with tab1:
             col1, col2 = st.columns(2)
             with col1:
-                # ENHANCED: 2-D Horizontal Bar Chart for Status Distribution
+                # 2-D Horizontal Bar Chart for Status Distribution (FIXED)
                 status_counts = df['status'].value_counts().reset_index()
                 status_counts.columns = ['Status', 'Count']
                 
@@ -1066,8 +1066,7 @@ elif choice == "📈 Management Dashboard":
                     ),
                     text=status_counts['Count'],
                     textposition='outside',
-                    textfont=dict(size=10, color='#1F2937'),
-                    hovertemplate='<b>%{y}</b><br>Count: %{x}<extra></extra>'
+                    textfont=dict(size=10, color='#1F2937')
                 ))
                 
                 fig.update_layout(
@@ -1093,21 +1092,8 @@ elif choice == "📈 Management Dashboard":
                     plot_bgcolor='white',
                     paper_bgcolor='white',
                     margin=dict(l=120, r=40, t=50, b=40),
-                    showlegend=False,
-                    hoverlabel=dict(bgcolor='white', font_size=11)
+                    showlegend=False
                 )
-                
-                # Add value labels inside bars for smaller values
-                for i, (status, count) in enumerate(zip(status_counts['Status'], status_counts['Count'])):
-                    if count > 0:
-                        fig.add_annotation(
-                            x=count,
-                            y=status,
-                            text=str(count),
-                            showarrow=False,
-                            xshift=10,
-                            font=dict(size=9, color='#1F2937', weight='bold')
-                        )
                 
                 st.plotly_chart(fig, use_container_width=True)
             
@@ -1126,8 +1112,7 @@ elif choice == "📈 Management Dashboard":
                     marker=dict(colors=colors_pie, line=dict(color='white', width=2)),
                     textinfo='label+percent',
                     textposition='auto',
-                    textfont=dict(size=10, color='white'),
-                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                    textfont=dict(size=10, color='white')
                 )])
                 
                 fig2.update_layout(
@@ -1154,7 +1139,7 @@ elif choice == "📈 Management Dashboard":
                 st.plotly_chart(fig2, use_container_width=True)
         
         with tab2:
-            # ENHANCED: Beautiful Line Chart with Gradient Fill and Markers for Payment Requests by Type
+            # Beautiful Line Chart with Markers for Payment Requests by Type
             payment_df = df[df['main_category'] == "Submit Payment Request"]
             if not payment_df.empty:
                 pay_total = len(payment_df)
@@ -1180,7 +1165,7 @@ elif choice == "📈 Management Dashboard":
                 # Create color palette
                 color_palette = px.colors.qualitative.Set2 + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
                 
-                # Create line chart with markers and gradient fill
+                # Create line chart with markers
                 fig = go.Figure()
                 
                 for i, req_type in enumerate(request_types):
@@ -1190,16 +1175,13 @@ elif choice == "📈 Management Dashboard":
                     fig.add_trace(go.Scatter(
                         x=type_data['submission_month'],
                         y=type_data['count'],
-                        mode='lines+markers+text',
+                        mode='lines+markers',
                         name=req_type,
                         line=dict(width=3, color=color, shape='spline'),
                         marker=dict(size=8, color=color, symbol='circle', line=dict(width=1, color='white')),
                         text=type_data['count'],
                         textposition='top center',
-                        textfont=dict(size=9, color=color),
-                        hovertemplate='<b>%{fullData.name}</b><br>Month: %{x}<br>Count: %{y}<extra></extra>',
-                        fill='tonexty' if i == 0 else None,
-                        fillcolor=f'rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.1)'
+                        textfont=dict(size=9, color=color)
                     ))
                 
                 fig.update_layout(
@@ -1300,7 +1282,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1321,7 +1303,7 @@ elif choice == "📈 Management Dashboard":
                         color='Performance Score', color_continuous_scale='Greens',
                         text='Performance Score')
             fig.update_traces(textposition='outside')
-            fig.update_layout(height=300)
+            fig.update_layout(height=300, plot_bgcolor='white', paper_bgcolor='white')
             st.plotly_chart(fig, use_container_width=True)
         
         with tab5:
@@ -1333,7 +1315,7 @@ elif choice == "📈 Management Dashboard":
                             color_discrete_map={True: '#DC3545', False: '#00843D'},
                             text='Avg Days')
                 fig.update_traces(textposition='outside')
-                fig.update_layout(height=350, xaxis_tickangle=-45)
+                fig.update_layout(height=350, xaxis_tickangle=-45, plot_bgcolor='white', paper_bgcolor='white')
                 st.plotly_chart(fig, use_container_width=True)
                 
                 bottlenecks_list = bottlenecks[bottlenecks['Is Bottleneck']]['Stage'].tolist()
@@ -1668,11 +1650,8 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST (PRESERVED - Full implementation from previous)
+# NEW REQUEST (PRESERVED - Full implementation)
 # ================================================================
-# Note: The New Request section is preserved exactly as in the previous working version
-# Due to length, I'm indicating it's preserved - the full working code remains
-
 elif choice == "📝 New Request" or choice == "📝 New Request (Department)":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
     
@@ -2358,7 +2337,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE (PRESERVED - Full implementation from previous)
+# APPROVAL QUEUE (PRESERVED)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -3179,7 +3158,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 with col2:
                     if st.button(f"🗑️ Delete", key=f"del_year_{year['id']}"):
                         delete_financial_year(year['id'])
-                        st.success(f"Financial Year '{year['name']}' deleted!")
+                        st.success(f"Financial Year '{year['name']}' deleted!)
                         st.rerun()
         else:
             st.info("No financial years added yet.")
