@@ -52,6 +52,20 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* Hide Streamlit Cloud management button */
+    .stAppDeployButton,
+    button[aria-label="Manage app"],
+    button:has(svg[data-icon="cloud-upload"]),
+    .stStatusWidget,
+    [data-testid="stStatusWidget"],
+    footer .stDecoration,
+    .element-container:has(button[aria-label="Manage app"]) {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+    
     /* Login Page Styling */
     .login-container {
         background: linear-gradient(135deg, #00843D 0%, #00529B 100%);
@@ -899,7 +913,7 @@ if choice == "📊 Department Dashboard":
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD (PRESERVED)
+# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -1016,23 +1030,131 @@ elif choice == "📈 Management Dashboard":
         with tab1:
             col1, col2 = st.columns(2)
             with col1:
-                type_counts = df['request_type'].value_counts().reset_index()
-                type_counts.columns = ['Type', 'Count']
-                fig = px.pie(type_counts, values='Count', names='Type', hole=0.4,
-                            color_discrete_sequence=px.colors.sequential.Greens_r,
-                            title="Request Type Distribution")
-                fig.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
+                # ENHANCED: 2-D Horizontal Bar Chart for Status Distribution
+                status_counts = df['status'].value_counts().reset_index()
+                status_counts.columns = ['Status', 'Count']
+                
+                # Define colors for each status
+                status_colors = {
+                    'SUBMITTED': '#FFB81C',
+                    'RECEIVED_BY_FINANCE': '#FFA500',
+                    'PAYMENT_PREPARED': '#FF8C00',
+                    'PAYMENT_VERIFIED': '#00843D',
+                    'PAYMENT_APPROVED': '#006030',
+                    'PAYMENT_AUTHORIZED': '#00529B',
+                    'PAID': '#00B347',
+                    'CLEARED': '#00B347',
+                    'RETURNED': '#DC3545',
+                    'SURRENDER_FIRST_VERIFICATION': '#9C27B0',
+                    'SURRENDER_SECOND_VERIFICATION': '#7B1FA2',
+                    'SURRENDER_APPROVAL': '#6A1B9A',
+                    'SURRENDER_POSTING': '#4A148C'
+                }
+                
+                colors = [status_colors.get(status, '#00843D') for status in status_counts['Status']]
+                
+                # Create horizontal bar chart
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    y=status_counts['Status'],
+                    x=status_counts['Count'],
+                    orientation='h',
+                    marker=dict(
+                        color=colors,
+                        line=dict(color='white', width=1),
+                        cornerradius=5
+                    ),
+                    text=status_counts['Count'],
+                    textposition='outside',
+                    textfont=dict(size=10, color='#1F2937'),
+                    hovertemplate='<b>%{y}</b><br>Count: %{x}<extra></extra>'
+                ))
+                
+                fig.update_layout(
+                    title=dict(
+                        text="<b>Status Distribution</b>",
+                        font=dict(size=14, color='#1F2937'),
+                        x=0.5
+                    ),
+                    height=450,
+                    xaxis=dict(
+                        title="<b>Number of Requests</b>",
+                        titlefont=dict(size=10, color='#6B7280'),
+                        gridcolor='#E5E7EB',
+                        showgrid=True,
+                        zeroline=False
+                    ),
+                    yaxis=dict(
+                        title="<b>Status</b>",
+                        titlefont=dict(size=10, color='#6B7280'),
+                        categoryorder='total ascending',
+                        gridcolor='#E5E7EB'
+                    ),
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    margin=dict(l=120, r=40, t=50, b=40),
+                    showlegend=False,
+                    hoverlabel=dict(bgcolor='white', font_size=11)
+                )
+                
+                # Add value labels inside bars for smaller values
+                for i, (status, count) in enumerate(zip(status_counts['Status'], status_counts['Count'])):
+                    if count > 0:
+                        fig.add_annotation(
+                            x=count,
+                            y=status,
+                            text=str(count),
+                            showarrow=False,
+                            xshift=10,
+                            font=dict(size=9, color='#1F2937', weight='bold')
+                        )
+                
                 st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                status_counts = df['status'].value_counts().reset_index()
-                status_counts.columns = ['Status', 'Count']
-                fig = px.bar(status_counts, x='Status', y='Count', color='Count',
-                            color_continuous_scale='Greens', title="Status Distribution")
-                fig.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
-                st.plotly_chart(fig, use_container_width=True)
+                # Request Type Distribution - Enhanced Pie Chart
+                type_counts = df['request_type'].value_counts().reset_index()
+                type_counts.columns = ['Type', 'Count']
+                
+                # Create a beautiful pie chart with hole
+                colors_pie = px.colors.sequential.Greens_r
+                
+                fig2 = go.Figure(data=[go.Pie(
+                    labels=type_counts['Type'],
+                    values=type_counts['Count'],
+                    hole=0.4,
+                    marker=dict(colors=colors_pie, line=dict(color='white', width=2)),
+                    textinfo='label+percent',
+                    textposition='auto',
+                    textfont=dict(size=10, color='white'),
+                    hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )])
+                
+                fig2.update_layout(
+                    title=dict(
+                        text="<b>Request Type Distribution</b>",
+                        font=dict(size=14, color='#1F2937'),
+                        x=0.5
+                    ),
+                    height=450,
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    showlegend=True,
+                    legend=dict(
+                        orientation='v',
+                        yanchor='top',
+                        y=0.5,
+                        xanchor='left',
+                        x=1.02,
+                        font=dict(size=9)
+                    )
+                )
+                
+                st.plotly_chart(fig2, use_container_width=True)
         
         with tab2:
+            # ENHANCED: Beautiful Line Chart with Gradient Fill and Markers for Payment Requests by Type
             payment_df = df[df['main_category'] == "Submit Payment Request"]
             if not payment_df.empty:
                 pay_total = len(payment_df)
@@ -1047,13 +1169,89 @@ elif choice == "📈 Management Dashboard":
                 with col3:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
-                pay_by_type = payment_df.groupby('request_type').agg({'request_number': 'count', 'amount': 'sum'}).reset_index()
-                pay_by_type.columns = ['Type', 'Count', 'Amount']
-                fig = px.bar(pay_by_type, x='Type', y='Count', title="Payment Requests by Type",
-                            color='Count', color_continuous_scale='Greens', text='Count')
-                fig.update_traces(textposition='outside')
-                fig.update_layout(height=300, xaxis_tickangle=-45)
+                # Prepare time series data for line chart
+                payment_df['submission_month'] = pd.to_datetime(payment_df['submission_date']).dt.to_period('M').astype(str)
+                monthly_payments = payment_df.groupby(['submission_month', 'request_type']).size().reset_index(name='count')
+                monthly_payments = monthly_payments.sort_values('submission_month')
+                
+                # Get unique request types
+                request_types = monthly_payments['request_type'].unique()
+                
+                # Create color palette
+                color_palette = px.colors.qualitative.Set2 + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
+                
+                # Create line chart with markers and gradient fill
+                fig = go.Figure()
+                
+                for i, req_type in enumerate(request_types):
+                    type_data = monthly_payments[monthly_payments['request_type'] == req_type]
+                    color = color_palette[i % len(color_palette)]
+                    
+                    fig.add_trace(go.Scatter(
+                        x=type_data['submission_month'],
+                        y=type_data['count'],
+                        mode='lines+markers+text',
+                        name=req_type,
+                        line=dict(width=3, color=color, shape='spline'),
+                        marker=dict(size=8, color=color, symbol='circle', line=dict(width=1, color='white')),
+                        text=type_data['count'],
+                        textposition='top center',
+                        textfont=dict(size=9, color=color),
+                        hovertemplate='<b>%{fullData.name}</b><br>Month: %{x}<br>Count: %{y}<extra></extra>',
+                        fill='tonexty' if i == 0 else None,
+                        fillcolor=f'rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.1)'
+                    ))
+                
+                fig.update_layout(
+                    title=dict(
+                        text="<b>Payment Requests Trend by Type</b>",
+                        font=dict(size=14, color='#1F2937'),
+                        x=0.5
+                    ),
+                    xaxis=dict(
+                        title="<b>Month</b>",
+                        titlefont=dict(size=10, color='#6B7280'),
+                        tickangle=-45,
+                        gridcolor='#E5E7EB',
+                        showgrid=True
+                    ),
+                    yaxis=dict(
+                        title="<b>Number of Requests</b>",
+                        titlefont=dict(size=10, color='#6B7280'),
+                        gridcolor='#E5E7EB',
+                        showgrid=True,
+                        zeroline=False
+                    ),
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    height=450,
+                    margin=dict(l=60, r=40, t=50, b=80),
+                    hovermode='closest',
+                    legend=dict(
+                        orientation='h',
+                        yanchor='bottom',
+                        y=1.02,
+                        xanchor='center',
+                        x=0.5,
+                        font=dict(size=9),
+                        bgcolor='rgba(255,255,255,0.9)',
+                        bordercolor='#E5E7EB',
+                        borderwidth=1
+                    )
+                )
+                
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # Add an insight message
+                if not monthly_payments.empty:
+                    latest_month = monthly_payments['submission_month'].max()
+                    latest_data = monthly_payments[monthly_payments['submission_month'] == latest_month]
+                    top_type = latest_data.loc[latest_data['count'].idxmax(), 'request_type']
+                    st.markdown(f"""
+                    <div class='insight-card'>
+                        <strong>📈 Trend Insight:</strong> In {latest_month}, <strong>{top_type}</strong> was the most requested payment type with <strong>{latest_data['count'].max()}</strong> requests.
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
                 st.info("No payment requests found.")
         
@@ -1074,9 +1272,12 @@ elif choice == "📈 Management Dashboard":
                 
                 fig = px.bar(x=['Cleared', 'Pending'], y=[sur_completed, sur_total - sur_completed],
                             title="Surrender Clearance Status",
-                            color=['Cleared', 'Pending'], color_discrete_sequence=['#00843D', '#FFB81C'],
-                            text_auto=True)
-                fig.update_layout(height=300)
+                            color=['Cleared', 'Pending'], 
+                            color_discrete_sequence=['#00843D', '#FFB81C'],
+                            text_auto=True,
+                            labels={'x': 'Status', 'y': 'Number of Requests'})
+                fig.update_traces(textposition='outside', textfont=dict(size=11, color='#1F2937'))
+                fig.update_layout(height=350, plot_bgcolor='white', paper_bgcolor='white')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No surrender requests found.")
@@ -1099,7 +1300,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1149,7 +1350,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS - ALL USERS CAN SEE PREDICTIONS
+# ENHANCED SEARCH PAYMENT RECORDS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -1173,7 +1374,6 @@ elif choice == "🔍 Search Payment Records":
                                                 "PAYMENT_VERIFIED", "PAYMENT_APPROVED", "PAYMENT_AUTHORIZED", 
                                                 "PAID", "CLEARED", "RETURNED"])
     
-    # Define roles that can see transaction logs (sensitive audit trail)
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     sensitive_roles = ["ADMIN", "MANAGEMENT"] + finance_roles
     can_see_logs = st.session_state.user_role in sensitive_roles or st.session_state.is_finance
@@ -1203,7 +1403,6 @@ elif choice == "🔍 Search Payment Records":
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
                 for _, row in results.iterrows():
-                    # Determine entity name (staff, supplier, customer)
                     entity_name = ""
                     entity_type = ""
                     
@@ -1217,7 +1416,6 @@ elif choice == "🔍 Search Payment Records":
                         entity_name = row['customer_name']
                         entity_type = "Customer"
                     
-                    # Calculate current TAT and SLA status
                     if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                         tat = calculate_tat(row['submission_date'], row['payment_date'])
                         status_badge = f'<span class="status-paid">✅ {row["status"]} (TAT: {tat} days)</span>'
@@ -1227,14 +1425,12 @@ elif choice == "🔍 Search Payment Records":
                         status_badge = f'<span class="status-pending">⏳ {row["status"]} (Pending: {tat} days)</span>'
                         is_completed = False
                     
-                    # SLA Days for this request type
                     sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
                                'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
                                'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
                                'Professional Body': 5, 'Direct Payment': 3}
                     sla_days = sla_map.get(row['request_type'], 5)
                     
-                    # Risk assessment - visible to ALL users now
                     if not is_completed:
                         if tat > sla_days:
                             risk_level = "Critical - Overdue"
@@ -1256,14 +1452,11 @@ elif choice == "🔍 Search Payment Records":
                             risk_level = "Completed (On Time)"
                             risk_color = "#00843D"
                     
-                    # Get reference number
                     ref_number = get_reference_number(row)
                     
-                    # Predict completion date for pending requests - visible to ALL users
                     predicted_date = None
                     confidence = None
                     if not is_completed:
-                        # Calculate average TAT for similar completed requests
                         df_all = get_requests()
                         similar_completed = df_all[
                             (df_all['request_type'] == row['request_type']) & 
@@ -1278,14 +1471,11 @@ elif choice == "🔍 Search Payment Records":
                             predicted_date = date.today() + timedelta(days=remaining_days)
                             confidence = "High" if len(similar_completed) > 20 else "Medium" if len(similar_completed) > 5 else "Low"
                         else:
-                            # Use SLA-based prediction
                             remaining_days = max(1, sla_days - tat)
                             predicted_date = date.today() + timedelta(days=remaining_days)
                             confidence = "Medium (based on SLA)"
                     
-                    # Create expandable result card
                     with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}", expanded=False):
-                        # Header with status and risk
                         col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
                             st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
@@ -1299,7 +1489,6 @@ elif choice == "🔍 Search Payment Records":
                         
                         st.markdown("---")
                         
-                        # Two-column layout for details
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown(f"**💰 Amount:** KES {row['amount']:,.2f}")
@@ -1320,7 +1509,6 @@ elif choice == "🔍 Search Payment Records":
                                 st.markdown(f"**↩️ Return Reason:** :red[{row['return_reason']}]")
                             if not is_completed:
                                 st.markdown(f"**⏱️ Current TAT:** {tat} / {sla_days} days")
-                                # Progress bar
                                 progress_pct = min(100, (tat / sla_days) * 100)
                                 bar_color = "#DC3545" if progress_pct > 100 else "#F59E0B" if progress_pct > 80 else "#00843D"
                                 st.markdown(f"""
@@ -1329,7 +1517,6 @@ elif choice == "🔍 Search Payment Records":
                                 </div>
                                 """, unsafe_allow_html=True)
                         
-                        # Additional details for specific request types
                         st.markdown("---")
                         st.markdown("**📋 Additional Details:**")
                         details_cols = st.columns(4)
@@ -1362,11 +1549,9 @@ elif choice == "🔍 Search Payment Records":
                             with details_cols[i % 4]:
                                 st.markdown(f"**{label}:** {value}")
                         
-                        # Similar requests performance - visible to ALL users
                         st.markdown("---")
                         st.markdown("**📊 Similar Requests Performance**")
                         
-                        # Get similar completed requests
                         df_all = get_requests()
                         similar_completed = df_all[
                             (df_all['request_type'] == row['request_type']) & 
@@ -1386,7 +1571,6 @@ elif choice == "🔍 Search Payment Records":
                             sim_df = pd.DataFrame(similar_data)
                             st.dataframe(sim_df, use_container_width=True, hide_index=True)
                             
-                            # Show average
                             avg_sim_tat = similar_completed.apply(
                                 lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
                             ).mean()
@@ -1394,11 +1578,9 @@ elif choice == "🔍 Search Payment Records":
                         else:
                             st.caption("No completed similar requests found for comparison.")
                         
-                        # Timeline/Progress Section
                         st.markdown("---")
                         st.markdown("**📅 Progress Timeline**")
                         
-                        # Define stages based on request type
                         if row['request_type'] == "Surrender":
                             stages = [
                                 {'name': 'Submitted', 'status_key': 'SUBMITTED', 'date': row['submission_date']},
@@ -1420,13 +1602,11 @@ elif choice == "🔍 Search Payment Records":
                                 {'name': 'Paid', 'status_key': 'PAID', 'date': row['payment_date']}
                             ]
                         
-                        # Determine current stage index
                         current_index = 0
                         status_order = [s['status_key'] for s in stages]
                         if row['status'] in status_order:
                             current_index = status_order.index(row['status'])
                         
-                        # Display timeline
                         for i, stage in enumerate(stages):
                             is_completed_stage = i < current_index
                             is_current = i == current_index
@@ -1457,7 +1637,6 @@ elif choice == "🔍 Search Payment Records":
                             </div>
                             """, unsafe_allow_html=True)
                         
-                        # Warning for overdue
                         if not is_completed:
                             if tat > sla_days:
                                 st.markdown(f"""
@@ -1474,7 +1653,6 @@ elif choice == "🔍 Search Payment Records":
                                 </div>
                                 """, unsafe_allow_html=True)
                         
-                        # Transaction History - ONLY for authorized roles (Finance, Management, Admin)
                         if can_see_logs:
                             with st.expander("📜 View Full Transaction History"):
                                 display_transaction_logs(row['id'])
@@ -1490,8 +1668,11 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST (PRESERVED)
+# NEW REQUEST (PRESERVED - Full implementation from previous)
 # ================================================================
+# Note: The New Request section is preserved exactly as in the previous working version
+# Due to length, I'm indicating it's preserved - the full working code remains
+
 elif choice == "📝 New Request" or choice == "📝 New Request (Department)":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
     
@@ -2177,17 +2358,15 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE (PRESERVED - Full from previous message)
+# APPROVAL QUEUE (PRESERVED - Full implementation from previous)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN" or st.session_state.is_finance:
         st.markdown("<div class='section-header'>✅ Approval Queue</div>", unsafe_allow_html=True)
         
-        # Summary metrics at the top
         df_all = get_requests()
         
-        # Payment summary
         payment_df = df_all[df_all['main_category'] == "Submit Payment Request"]
         payment_counts = {
             'submitted': len(payment_df[payment_df['status'] == 'SUBMITTED']),
@@ -2198,7 +2377,6 @@ elif choice == "✅ Approval Queue":
             'authorized': len(payment_df[payment_df['status'] == 'PAYMENT_AUTHORIZED'])
         }
         
-        # Surrender summary
         surrender_df = df_all[df_all['main_category'] == "Submit Surrender"]
         surrender_counts = {
             'submitted': len(surrender_df[surrender_df['status'] == 'SUBMITTED']),
@@ -2209,7 +2387,6 @@ elif choice == "✅ Approval Queue":
             'posting': len(surrender_df[surrender_df['status'] == 'SURRENDER_POSTING'])
         }
         
-        # Display summary in a clean row
         st.markdown("### 📊 Queue Summary")
         col1, col2 = st.columns(2)
         
@@ -2247,19 +2424,14 @@ elif choice == "✅ Approval Queue":
         
         st.markdown("---")
         
-        # Create tabs for Payment and Surrender
         tab_payment, tab_surrender = st.tabs(["💰 Payment Requests", "📤 Surrender Requests"])
         
-        # ======================================================
-        # PAYMENT REQUESTS TAB
-        # ======================================================
         with tab_payment:
             payment_pending = payment_df[payment_df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 'PAYMENT_VERIFIED', 'PAYMENT_APPROVED', 'PAYMENT_AUTHORIZED'])]
             
             if payment_pending.empty:
                 st.info("No pending payment requests.")
             else:
-                # Section 1: Pending Confirmation
                 section1 = payment_pending[payment_pending['status'] == 'SUBMITTED']
                 if not section1.empty:
                     st.markdown(f"""
@@ -2304,7 +2476,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Please provide a return reason")
                 
-                # Section 2: Received
                 section2 = payment_pending[payment_pending['status'] == 'RECEIVED_BY_FINANCE']
                 if not section2.empty:
                     st.markdown(f"""
@@ -2329,7 +2500,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section 3: Prepared
                 section3 = payment_pending[payment_pending['status'] == 'PAYMENT_PREPARED']
                 if not section3.empty:
                     st.markdown(f"""
@@ -2352,7 +2522,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section 4: Verified
                 section4 = payment_pending[payment_pending['status'] == 'PAYMENT_VERIFIED']
                 if not section4.empty:
                     st.markdown(f"""
@@ -2375,7 +2544,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section 5: Approved
                 section5 = payment_pending[payment_pending['status'] == 'PAYMENT_APPROVED']
                 if not section5.empty:
                     st.markdown(f"""
@@ -2398,7 +2566,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section 6: Authorized
                 section6 = payment_pending[payment_pending['status'] == 'PAYMENT_AUTHORIZED']
                 if not section6.empty:
                     st.markdown(f"""
@@ -2428,16 +2595,12 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Enter payment reference!")
         
-        # ======================================================
-        # SURRENDER REQUESTS TAB
-        # ======================================================
         with tab_surrender:
             surrender_pending = surrender_df[surrender_df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
             
             if surrender_pending.empty:
                 st.info("No pending surrender requests.")
             else:
-                # Section S1: Pending Confirmation
                 s_section1 = surrender_pending[surrender_pending['status'] == 'SUBMITTED']
                 if not s_section1.empty:
                     st.markdown(f"""
@@ -2482,7 +2645,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Please provide a return reason")
                 
-                # Section S2: Received
                 s_section2 = surrender_pending[surrender_pending['status'] == 'RECEIVED_BY_FINANCE']
                 if not s_section2.empty:
                     st.markdown(f"""
@@ -2507,7 +2669,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section S3: First Verification Complete
                 s_section3 = surrender_pending[surrender_pending['status'] == 'SURRENDER_FIRST_VERIFICATION']
                 if not s_section3.empty:
                     st.markdown(f"""
@@ -2530,7 +2691,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section S4: Second Verification Complete
                 s_section4 = surrender_pending[surrender_pending['status'] == 'SURRENDER_SECOND_VERIFICATION']
                 if not s_section4.empty:
                     st.markdown(f"""
@@ -2553,7 +2713,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section S5: Approval
                 s_section5 = surrender_pending[surrender_pending['status'] == 'SURRENDER_APPROVAL']
                 if not s_section5.empty:
                     st.markdown(f"""
@@ -2576,7 +2735,6 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Incorrect password!")
                 
-                # Section S6: Posting
                 s_section6 = surrender_pending[surrender_pending['status'] == 'SURRENDER_POSTING']
                 if not s_section6.empty:
                     st.markdown(f"""
