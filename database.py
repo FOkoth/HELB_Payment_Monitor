@@ -245,7 +245,6 @@ def resubmit_request(request_id, updated_data):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
-        # Build the SET clause dynamically
         set_parts = []
         values = []
         for key, value in updated_data.items():
@@ -253,11 +252,9 @@ def resubmit_request(request_id, updated_data):
                 set_parts.append(f"{key} = ?")
                 values.append(value)
         
-        # Add last_updated
         set_parts.append("last_updated = ?")
         values.append(datetime.now().isoformat())
         
-        # Add the WHERE clause
         values.append(request_id)
         
         query = f"UPDATE requests SET {', '.join(set_parts)} WHERE id = ?"
@@ -1537,3 +1534,175 @@ def get_fastest_request_types(df):
             return result_df
     else:
         return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
+
+
+# ================================================================
+# BULK OPERATIONS FUNCTIONS
+# ================================================================
+
+def get_bulk_eligible_requests(statuses=None, request_types=None, department=None, limit=100):
+    """Get requests eligible for bulk processing"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT id, request_number, request_type, department_name, amount, 
+               status, submission_date, submitted_by
+        FROM requests 
+        WHERE status IN ('SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 
+                        'PAYMENT_VERIFIED', 'PAYMENT_APPROVED')
+    """
+    params = []
+    
+    if statuses:
+        placeholders = ','.join(['?'] * len(statuses))
+        query += f" AND status IN ({placeholders})"
+        params.extend(statuses)
+    
+    if request_types:
+        placeholders = ','.join(['?'] * len(request_types))
+        query += f" AND request_type IN ({placeholders})"
+        params.extend(request_types)
+    
+    if department:
+        query += " AND department_name = ?"
+        params.append(department)
+    
+    query += " ORDER BY submission_date ASC LIMIT ?"
+    params.append(limit)
+    
+    cursor.execute(query, params)
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [{'id': r[0], 'request_number': r[1], 'request_type': r[2], 
+             'department_name': r[3], 'amount': r[4], 'status': r[5],
+             'submission_date': r[6], 'submitted_by': r[7]} for r in results]
+
+
+@retry_on_lock()
+def bulk_update_status(request_ids, new_status, performed_by, performed_by_role, performed_by_dept, 
+                       payment_reference=None, finance_comment=None):
+    """Update multiple requests' status in bulk"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    success_count = 0
+    failed_ids = []
+    
+    for request_id in request_ids:
+        try:
+            # Get current status first
+            cursor.execute("SELECT status, request_number FROM requests WHERE id = ?", (request_id,))
+            current = cursor.fetchone()
+            if not current:
+                failed_ids.append(request_id)
+                continue
+            
+            old_status = current[0]
+            request_number = current[1]
+            
+            # Update status
+            updates = ["status = ?", "last_updated = ?"]
+            params = [new_status, datetime.now().isoformat()]
+            
+            if new_status == 'PAID' and payment_reference:
+                updates.append("payment_date = ?")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("payment_reference = ?")
+                params.append(payment_reference)
+            elif new_status == 'CLEARED' and payment_reference:
+                updates.append("payment_date = ?")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("payment_reference = ?")
+                params.append(payment_reference)
+            elif new_status == 'RECEIVED_BY_FINANCE':
+                updates.append("date_received = ?")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("date_confirmed_by_finance = ?")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+            elif new_status == 'RETURNED' and finance_comment:
+                updates.append("date_returned = ?")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("return_reason = ?")
+                params.append(finance_comment)
+            
+            params.append(request_id)
+            cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
+            
+            # Add log
+            add_request_log(request_id, request_number, f"BULK_{new_status}", 
+                          old_status, new_status, 
+                          f"Bulk processed by {performed_by}", 
+                          performed_by, performed_by_role, performed_by_dept)
+            
+            success_count += 1
+        except Exception as e:
+            failed_ids.append(request_id)
+            print(f"Error processing request {request_id}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    return success_count, failed_ids
+
+
+def bulk_generate_batch_number():
+    """Generate a unique batch number for bulk operations"""
+    batch_no = f"BULK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return batch_no
+
+
+def export_bulk_requests(request_ids):
+    """Export selected requests to CSV for external processing"""
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ','.join(['?'] * len(request_ids))
+    query = f"""
+        SELECT request_number, request_type, department_name, amount, 
+               payment_description, status, submission_date, submitted_by
+        FROM requests WHERE id IN ({placeholders})
+    """
+    df = pd.read_sql_query(query, conn, params=request_ids)
+    conn.close()
+    return df
+
+
+def get_database_health():
+    """Get database health metrics for capacity planning"""
+    import os
+    
+    health = {
+        'db_size_mb': 0,
+        'total_requests': 0,
+        'total_logs': 0,
+        'total_users': 0,
+        'status': 'Healthy'
+    }
+    
+    if os.path.exists(DB_PATH):
+        health['db_size_mb'] = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM requests")
+    health['total_requests'] = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM request_logs")
+    health['total_logs'] = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM users")
+    health['total_users'] = cursor.fetchone()[0]
+    conn.close()
+    
+    # Determine status
+    if health['db_size_mb'] > 500:
+        health['status'] = 'Critical - Migrate to PostgreSQL'
+        health['recommendation'] = 'Immediate action required'
+    elif health['db_size_mb'] > 250:
+        health['status'] = 'Warning - Plan migration'
+        health['recommendation'] = 'Plan PostgreSQL migration in 3 months'
+    elif health['total_requests'] > 200000:
+        health['status'] = 'Warning - High volume'
+        health['recommendation'] = 'Consider archiving old records'
+    else:
+        health['status'] = 'Healthy'
+        health['recommendation'] = 'SQLite is sufficient for current load'
+    
+    return health
