@@ -913,7 +913,7 @@ if choice == "📊 Department Dashboard":
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS (WITH ORIGINAL CARD STYLING)
+# MANAGEMENT DASHBOARD - VISUALIZATIONS
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -966,7 +966,7 @@ elif choice == "📈 Management Dashboard":
         sla_rate = (sla_compliant / len(completed_df) * 100) if len(completed_df) > 0 else 0
         avg_tat = completed_df.apply(lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1).mean() if not completed_df.empty else 0
         
-        # Original KPI Cards with Green Background and Gold Labels
+        # KPI Cards with Green Background and Gold Labels
         st.markdown("<div class='kpi-grid'>", unsafe_allow_html=True)
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
@@ -1035,7 +1035,6 @@ elif choice == "📈 Management Dashboard":
                 status_counts = df['status'].value_counts().reset_index()
                 status_counts.columns = ['Status', 'Count']
                 
-                # Define colors for each status
                 status_colors = {
                     'SUBMITTED': '#FFB81C',
                     'RECEIVED_BY_FINANCE': '#FFA500',
@@ -1054,7 +1053,6 @@ elif choice == "📈 Management Dashboard":
                 
                 colors = [status_colors.get(status, '#00843D') for status in status_counts['Status']]
                 
-                # Create horizontal bar chart
                 fig = go.Figure()
                 fig.add_trace(go.Bar(
                     y=status_counts['Status'],
@@ -1067,10 +1065,10 @@ elif choice == "📈 Management Dashboard":
                 ))
                 
                 fig.update_layout(
-                    title=dict(text="<b>Status Distribution</b>", font=dict(size=14, color='#1F2937'), x=0.5),
+                    title="Status Distribution",
                     height=450,
-                    xaxis=dict(title="<b>Number of Requests</b>", titlefont=dict(size=10, color='#6B7280'), gridcolor='#E5E7EB', showgrid=True, zeroline=False),
-                    yaxis=dict(title="<b>Status</b>", titlefont=dict(size=10, color='#6B7280'), categoryorder='total ascending', gridcolor='#E5E7EB'),
+                    xaxis_title="Number of Requests",
+                    yaxis_title="Status",
                     plot_bgcolor='white',
                     paper_bgcolor='white',
                     margin=dict(l=120, r=40, t=50, b=40),
@@ -1095,7 +1093,7 @@ elif choice == "📈 Management Dashboard":
                 )])
                 
                 fig2.update_layout(
-                    title=dict(text="<b>Request Type Distribution</b>", font=dict(size=14, color='#1F2937'), x=0.5),
+                    title="Request Type Distribution",
                     height=450,
                     plot_bgcolor='white',
                     paper_bgcolor='white',
@@ -1113,7 +1111,6 @@ elif choice == "📈 Management Dashboard":
                 pay_completed = len(payment_df[payment_df['status'].isin(['PAID', 'CLEARED'])])
                 pay_amount = payment_df['amount'].sum()
                 
-                # Secondary cards (light grey)
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL PAYMENT REQUESTS</div><div class='secondary-value'>{pay_total:,}</div></div>", unsafe_allow_html=True)
@@ -1149,12 +1146,13 @@ elif choice == "📈 Management Dashboard":
                     ))
                 
                 fig.update_layout(
-                    title=dict(text="<b>Payment Requests Trend by Type</b>", font=dict(size=14, color='#1F2937'), x=0.5),
-                    xaxis=dict(title="<b>Month</b>", titlefont=dict(size=10, color='#6B7280'), tickangle=-45, gridcolor='#E5E7EB', showgrid=True),
-                    yaxis=dict(title="<b>Number of Requests</b>", titlefont=dict(size=10, color='#6B7280'), gridcolor='#E5E7EB', showgrid=True, zeroline=False),
+                    title="Payment Requests Trend by Type",
+                    xaxis_title="Month",
+                    yaxis_title="Number of Requests",
+                    height=450,
+                    xaxis_tickangle=-45,
                     plot_bgcolor='white',
                     paper_bgcolor='white',
-                    height=450,
                     margin=dict(l=60, r=40, t=50, b=80),
                     hovermode='closest',
                     legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5, font=dict(size=9), bgcolor='rgba(255,255,255,0.9)', bordercolor='#E5E7EB', borderwidth=1)
@@ -1195,7 +1193,7 @@ elif choice == "📈 Management Dashboard":
                             color='Status', color_discrete_sequence=['#00843D', '#FFB81C'],
                             text='Count')
                 fig.update_traces(textposition='outside', textfont=dict(size=11, color='#1F2937'))
-                fig.update_layout(height=350, plot_bgcolor='white', paper_bgcolor='white', title_font=dict(size=14, color='#1F2937'))
+                fig.update_layout(height=350, plot_bgcolor='white', paper_bgcolor='white')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("No surrender requests found.")
@@ -1239,7 +1237,7 @@ elif choice == "📈 Management Dashboard":
                         color='Performance Score', color_continuous_scale='Greens',
                         text='Performance Score')
             fig.update_traces(textposition='outside')
-            fig.update_layout(height=350, plot_bgcolor='white', paper_bgcolor='white', title_font=dict(size=14, color='#1F2937'))
+            fig.update_layout(height=350, plot_bgcolor='white', paper_bgcolor='white')
             st.plotly_chart(fig, use_container_width=True)
         
         with tab5:
@@ -1251,7 +1249,7 @@ elif choice == "📈 Management Dashboard":
                             color_discrete_map={True: '#DC3545', False: '#00843D'},
                             text='Avg Days')
                 fig.update_traces(textposition='outside')
-                fig.update_layout(height=400, xaxis_tickangle=-45, plot_bgcolor='white', paper_bgcolor='white', title_font=dict(size=14, color='#1F2937'))
+                fig.update_layout(height=400, xaxis_tickangle=-45, plot_bgcolor='white', paper_bgcolor='white')
                 st.plotly_chart(fig, use_container_width=True)
                 
                 bottlenecks_list = bottlenecks[bottlenecks['Is Bottleneck']]['Stage'].tolist()
