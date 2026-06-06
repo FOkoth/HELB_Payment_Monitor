@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, date, timedelta
 import numpy as np
 import calendar
+import os
 
 from database import (
     init_database, get_requests, save_request, update_request_status, 
@@ -24,7 +25,8 @@ from database import (
     delete_funder, delete_product, delete_financial_year, delete_semester,
     search_payment_records, update_user_permissions, delete_user,
     get_user_permissions, get_fastest_request_types, identify_bottlenecks,
-    get_returned_request_by_id
+    get_returned_request_by_id, get_bulk_eligible_requests, bulk_update_status,
+    export_bulk_requests, get_database_health
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -397,6 +399,15 @@ st.markdown("""
         margin-top: 0.5rem;
     }
     
+    /* Bulk Operations */
+    .bulk-summary {
+        background: #E8F5E9;
+        border: 1px solid #00843D;
+        border-radius: 8px;
+        padding: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    
     @media (max-width: 768px) {
         .kpi-value { font-size: 1rem; }
         .kpi-card { padding: 0.4rem; }
@@ -684,11 +695,11 @@ with st.sidebar:
     elif st.session_state.user_role == "ADMIN":
         menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Search Payment Records", 
                        "📝 New Request", "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", 
-                       "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
+                       "⚡ Bulk Operations", "📑 Reports", "⚙️ Admin Panel", "🔐 Change Password"]
     elif st.session_state.user_role in ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]:
         menu_options = ["📊 Department Dashboard", "📈 Management Dashboard", "🔍 Search Payment Records", 
                        "📝 New Request", "📋 My Requests", "↩️ Returned Requests", "✅ Approval Queue", 
-                       "📑 Reports", "🔐 Change Password"]
+                       "⚡ Bulk Operations", "📑 Reports", "🔐 Change Password"]
     else:
         menu_options = ["📊 Department Dashboard", "🔍 Search Payment Records", "📝 New Request", 
                        "📋 My Requests", "↩️ Returned Requests", "📑 Reports", "🔐 Change Password"]
@@ -713,7 +724,7 @@ with st.sidebar:
 
 
 # ================================================================
-# DEPARTMENT DASHBOARD
+# DEPARTMENT DASHBOARD (PRESERVED)
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<div class='section-header'>📊 Department Performance Dashboard</div>", unsafe_allow_html=True)
@@ -773,7 +784,7 @@ if choice == "📊 Department Dashboard":
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # Tabs for separate sections - Gold background when selected
+        # Tabs for separate sections
         tab1, tab2, tab3, tab4 = st.tabs(["💰 Payment Requests", "📤 Surrender Requests", "⚡ Performance Analytics", "📋 Recent Activity"])
         
         with tab1:
@@ -784,7 +795,6 @@ if choice == "📊 Department Dashboard":
                 pay_pending = pay_total - pay_completed
                 pay_amount = payment_requests['amount'].sum()
                 
-                # Light grey secondary cards
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 TOTAL</div><div class='secondary-value'>{pay_total}</div></div>", unsafe_allow_html=True)
@@ -863,13 +873,12 @@ if choice == "📊 Department Dashboard":
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export Data", csv, f"dept_report_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
         
-        # Page-specific refresh button
         if st.button("🔄 Refresh This Page", key="dept_refresh"):
             refresh_page()
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD
+# MANAGEMENT DASHBOARD (PRESERVED)
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -895,7 +904,6 @@ elif choice == "📈 Management Dashboard":
     if df.empty:
         st.info("No data available for the selected filters.")
     else:
-        # Executive KPI Cards
         total_requests = len(df)
         total_amount = df['amount'].sum()
         completed = len(df[df['status'].isin(['PAID', 'CLEARED'])])
@@ -982,7 +990,6 @@ elif choice == "📈 Management Dashboard":
                 if long_pending:
                     st.markdown(f"<div class='warning-card'><strong>⏰ Long Pending ({len(long_pending)})</strong></div>", unsafe_allow_html=True)
         
-        # Main Tabs - Gold background when selected
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Executive Summary", "💰 Payment Analytics", "📤 Surrender Analytics", "🏆 Department Performance", "🚦 Bottlenecks"])
         
         with tab1:
@@ -1071,7 +1078,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1113,17 +1120,15 @@ elif choice == "📈 Management Dashboard":
             else:
                 st.info("Insufficient data for bottleneck analysis.")
         
-        # Export
         csv_full = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export Full Data", csv_full, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
         
-        # Page-specific refresh button
         if st.button("🔄 Refresh This Page", key="mgmt_refresh"):
             refresh_page()
 
 
 # ================================================================
-# SEARCH PAYMENT RECORDS
+# SEARCH PAYMENT RECORDS (PRESERVED)
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Search Payment Records</div>", unsafe_allow_html=True)
@@ -1203,13 +1208,12 @@ elif choice == "🔍 Search Payment Records":
         else:
             st.info("Please enter a search term.")
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="search_refresh"):
         refresh_page()
 
 
 # ================================================================
-# NEW REQUEST (PRESERVED)
+# NEW REQUEST (PRESERVED - FULL CODE INCLUDED IN ORIGINAL)
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
@@ -1227,7 +1231,7 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            # Student Payment - Regular
+            # Student Payment - Regular (Lending)
             if main_category == "Submit Payment Request" and selected_type == "Student Payment" and st.session_state.user_dept != "External Resource Mobilization":
                 products = get_products()
                 product_list = products['name'].tolist() if not products.empty else ["Undergraduate", "TVET", "Jielimishe"]
@@ -1600,13 +1604,12 @@ elif choice == "📝 New Request":
                             st.success(f"✅ Request {request_number} submitted!")
                             st.balloons()
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="new_refresh"):
         refresh_page()
 
 
 # ================================================================
-# MY REQUESTS
+# MY REQUESTS (PRESERVED)
 # ================================================================
 elif choice == "📋 My Requests":
     st.markdown("<div class='section-header'>📋 My Requests</div>", unsafe_allow_html=True)
@@ -1640,13 +1643,12 @@ elif choice == "📋 My Requests":
                     st.markdown("---")
                     display_transaction_logs(row['id'])
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="my_refresh"):
         refresh_page()
 
 
 # ================================================================
-# RETURNED REQUESTS - WITH CALL TO ACTION (FIXED)
+# RETURNED REQUESTS WITH RESUBMISSION (PRESERVED)
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -1668,25 +1670,21 @@ elif choice == "↩️ Returned Requests":
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Show original payment details
                 if req.get('payment_description'):
                     st.markdown(f"**Original Description:** {req['payment_description']}")
                 
                 st.markdown("---")
                 st.markdown("### 📝 Make Corrections and Resubmit")
                 
-                # Resubmission form
                 with st.form(key=f"resubmit_form_{req['id']}"):
                     st.markdown("**Please correct the following information:**")
                     
-                    # Editable fields based on request type
                     corrected_description = st.text_area(
                         "Payment Description (if correction needed)", 
                         value=req.get('payment_description', ''),
                         help="Update the payment description if required"
                     )
                     
-                    # Additional fields based on request type
                     if req['request_type'] == "Student Payment":
                         corrected_batch = st.text_input("Batch No.", value=req.get('batch_no', ''))
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
@@ -1734,7 +1732,6 @@ elif choice == "↩️ Returned Requests":
                     st.markdown("</div>", unsafe_allow_html=True)
                     
                     if resubmit:
-                        # Prepare updated data
                         updated_data = {
                             'payment_description': corrected_description,
                             'status': 'SUBMITTED',
@@ -1743,11 +1740,9 @@ elif choice == "↩️ Returned Requests":
                             **correction_data
                         }
                         
-                        # Update the request using resubmit_request
                         success = resubmit_request(req['id'], updated_data)
                         
                         if success:
-                            # Add to logs
                             add_request_log(
                                 req['id'], req['request_number'], "RESUBMITTED", 
                                 "RETURNED", "SUBMITTED", 
@@ -1764,13 +1759,12 @@ elif choice == "↩️ Returned Requests":
                     if cancel:
                         st.info("Resubmission cancelled.")
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="returned_refresh"):
         refresh_page()
 
 
 # ================================================================
-# APPROVAL QUEUE
+# APPROVAL QUEUE (PRESERVED)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -1984,13 +1978,195 @@ elif choice == "✅ Approval Queue":
     else:
         st.error("Access denied. Finance only.")
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="approval_refresh"):
         refresh_page()
 
 
 # ================================================================
-# REPORTS
+# BULK OPERATIONS (NEW)
+# ================================================================
+elif choice == "⚡ Bulk Operations":
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN":
+        st.markdown("<div class='section-header'>⚡ Bulk Operations</div>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>Process multiple requests at once to save time</p>", unsafe_allow_html=True)
+        
+        # Step 1: Filter requests
+        st.markdown("### Step 1: Select Requests to Process")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            bulk_status_filter = st.multiselect(
+                "Filter by Status",
+                ["SUBMITTED", "RECEIVED_BY_FINANCE", "PAYMENT_PREPARED", "PAYMENT_VERIFIED", "PAYMENT_APPROVED"],
+                default=["SUBMITTED"]
+            )
+        with col2:
+            bulk_type_filter = st.multiselect(
+                "Filter by Request Type",
+                ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", 
+                 "Salary Payment", "Refund Payment", "Direct Payment", "Surrender"],
+                default=[]
+            )
+        with col3:
+            departments_list = get_departments()
+            dept_names = ["All"] + departments_list['name'].tolist() if not departments_list.empty else ["All"]
+            bulk_dept_filter = st.selectbox("Filter by Department", dept_names)
+        
+        bulk_limit = st.slider("Maximum requests to load", min_value=10, max_value=200, value=50)
+        
+        if st.button("🔍 Load Eligible Requests", type="primary"):
+            dept_param = None if bulk_dept_filter == "All" else bulk_dept_filter
+            requests_list = get_bulk_eligible_requests(
+                statuses=bulk_status_filter if bulk_status_filter else None,
+                request_types=bulk_type_filter if bulk_type_filter else None,
+                department=dept_param,
+                limit=bulk_limit
+            )
+            
+            if requests_list:
+                st.session_state.bulk_requests = requests_list
+                st.session_state.bulk_selected = []
+                st.success(f"✅ Loaded {len(requests_list)} requests")
+            else:
+                st.warning("No requests found matching the criteria")
+        
+        # Step 2: Select requests
+        if 'bulk_requests' in st.session_state and st.session_state.bulk_requests:
+            st.markdown("### Step 2: Select Requests to Process")
+            
+            # Display requests in a selectable table
+            df_bulk = pd.DataFrame(st.session_state.bulk_requests)
+            df_bulk['Select'] = False
+            
+            edited_df = st.data_editor(
+                df_bulk[['Select', 'request_number', 'request_type', 'department_name', 'amount', 'status']],
+                column_config={
+                    "Select": st.column_config.CheckboxColumn("Select", default=False),
+                    "request_number": "Request Number",
+                    "request_type": "Type",
+                    "department_name": "Department",
+                    "amount": st.column_config.NumberColumn("Amount (KES)", format="KES %.0f"),
+                    "status": "Status"
+                },
+                hide_index=True,
+                use_container_width=True,
+                key="bulk_selector"
+            )
+            
+            selected_ids = []
+            for idx, row in edited_df.iterrows():
+                if row['Select']:
+                    selected_ids.append(st.session_state.bulk_requests[idx]['id'])
+            
+            if selected_ids:
+                st.markdown(f"<div class='bulk-summary'>📋 {len(selected_ids)} request(s) selected for processing</div>", unsafe_allow_html=True)
+                
+                # Step 3: Choose bulk action
+                st.markdown("### Step 3: Choose Action")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    bulk_action = st.selectbox(
+                        "Action to perform",
+                        ["Receive Requests", "Prepare Payment", "Verify Payment", 
+                         "Approve Payment", "Authorize Payment", "Mark as Paid", 
+                         "Return Requests", "Export to CSV"]
+                    )
+                
+                with col2:
+                    if bulk_action == "Mark as Paid":
+                        bulk_payment_ref = st.text_input("Payment Reference (will apply to all selected)")
+                    elif bulk_action == "Return Requests":
+                        bulk_return_reason = st.text_area("Return Reason (will apply to all selected)")
+                
+                # Password for bulk operations
+                pwd = st.text_input("Finance Password", type="password", key="bulk_pwd")
+                
+                if st.button(f"▶️ Execute Bulk Action: {bulk_action}", type="primary"):
+                    if pwd and verify_finance_password(pwd):
+                        # Map action to status
+                        action_map = {
+                            "Receive Requests": "RECEIVED_BY_FINANCE",
+                            "Prepare Payment": "PAYMENT_PREPARED",
+                            "Verify Payment": "PAYMENT_VERIFIED",
+                            "Approve Payment": "PAYMENT_APPROVED",
+                            "Authorize Payment": "PAYMENT_AUTHORIZED",
+                            "Mark as Paid": "PAID",
+                            "Return Requests": "RETURNED"
+                        }
+                        
+                        if bulk_action in action_map:
+                            new_status = action_map[bulk_action]
+                            payment_ref = bulk_payment_ref if bulk_action == "Mark as Paid" else None
+                            return_reason = bulk_return_reason if bulk_action == "Return Requests" else None
+                            
+                            with st.spinner(f"Processing {len(selected_ids)} requests..."):
+                                success_count, failed_ids = bulk_update_status(
+                                    selected_ids, new_status, 
+                                    st.session_state.username, st.session_state.user_role,
+                                    st.session_state.user_dept,
+                                    payment_reference=payment_ref,
+                                    finance_comment=return_reason
+                                )
+                            
+                            if success_count > 0:
+                                st.success(f"✅ Successfully processed {success_count} requests!")
+                                if failed_ids:
+                                    st.warning(f"⚠️ Failed to process {len(failed_ids)} requests. Check logs.")
+                                st.balloons()
+                                # Clear session to refresh
+                                del st.session_state.bulk_requests
+                                st.rerun()
+                            else:
+                                st.error("❌ No requests were processed successfully")
+                        elif bulk_action == "Export to CSV":
+                            export_df = export_bulk_requests(selected_ids)
+                            csv = export_df.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                "📥 Download Export.csv",
+                                csv,
+                                f"bulk_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                "text/csv"
+                            )
+                    else:
+                        st.error("❌ Incorrect finance password")
+                
+                # Warning for large operations
+                if len(selected_ids) > 20:
+                    st.warning(f"⚠️ You are about to process {len(selected_ids)} requests. This may take a moment.")
+            else:
+                st.info("Please select at least one request to process")
+        
+        # Help section
+        with st.expander("ℹ️ Bulk Operations Guide"):
+            st.markdown("""
+            **How to use Bulk Operations:**
+            
+            1. **Filter requests** by status, type, or department
+            2. **Select requests** by checking the boxes in the table
+            3. **Choose an action** (Receive, Prepare, Verify, Approve, Authorize, Pay, Return, Export)
+            4. **Enter Finance Password** and click Execute
+            
+            **Important Notes:**
+            - All selected requests will receive the SAME action
+            - For "Mark as Paid", all will get the SAME payment reference
+            - For "Return Requests", all will get the SAME return reason
+            - Bulk actions are logged individually for audit trail
+            - Maximum 200 requests per batch for performance
+            
+            **Best Practices:**
+            - Process similar request types together
+            - Use filters to narrow down your selection
+            - For large batches (50+), process during off-peak hours
+            """)
+    
+    if st.button("🔄 Refresh This Page", key="bulk_refresh"):
+        refresh_page()
+
+
+# ================================================================
+# REPORTS (PRESERVED)
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
@@ -2018,18 +2194,17 @@ elif choice == "📑 Reports":
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export to CSV", csv, f"helb_export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="reports_refresh"):
         refresh_page()
 
 
 # ================================================================
-# ADMIN PANEL
+# ADMIN PANEL WITH DATABASE HEALTH (UPDATED)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings", "📊 Database Health"])
     
     with tab1:
         st.subheader("👥 User Management")
@@ -2311,13 +2486,73 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 else:
                     st.error("❌ Invalid password!")
     
-    # Page-specific refresh button
+    with tab7:
+        st.subheader("📊 Database Health & Capacity Planning")
+        
+        health = get_database_health()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Database Size", f"{health['db_size_mb']:.1f} MB")
+        with col2:
+            st.metric("Total Requests", f"{health['total_requests']:,}")
+        with col3:
+            st.metric("Audit Logs", f"{health['total_logs']:,}")
+        with col4:
+            st.metric("Active Users", f"{health['total_users']}")
+        
+        # Status indicator
+        status_color = "#00843D" if health['status'] == "Healthy" else "#F59E0B" if "Warning" in health['status'] else "#DC3545"
+        st.markdown(f"""
+        <div class='info-card' style='border-left-color: {status_color};'>
+            <strong>System Status:</strong> {health['status']}<br>
+            <strong>Recommendation:</strong> {health['recommendation']}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Capacity gauge
+        capacity_percent = min(100, (health['db_size_mb'] / 500) * 100)
+        gauge_color = "#00843D" if capacity_percent < 50 else "#F59E0B" if capacity_percent < 80 else "#DC3545"
+        st.markdown(f"""
+        <div class='progress-bar' style='height:20px; background:#E5E7EB;'>
+            <div class='progress-fill' style='width:{capacity_percent}%; background:{gauge_color};'></div>
+        </div>
+        <p style='font-size:0.7rem; margin-top:0.3rem;'>
+            {'✅ Healthy - Good capacity' if capacity_percent < 50 else 
+             '🟡 Moderate usage - Monitor growth' if capacity_percent < 80 else 
+             '⚠️ Near capacity - Plan PostgreSQL migration'}
+        </p>
+        """, unsafe_allow_html=True)
+        
+        # Migration guide
+        if capacity_percent > 70:
+            with st.expander("📖 PostgreSQL Migration Guide", expanded=True):
+                st.markdown("""
+                **When to Migrate to PostgreSQL:**
+                - Database size exceeds 500MB
+                - More than 200,000 requests in the system
+                - Experiencing frequent "database is locked" errors
+                
+                **Migration Steps:**
+                1. Install PostgreSQL: `sudo apt install postgresql`
+                2. Create database: `createdb helb_db`
+                3. Export current data: Use the backup feature
+                4. Import to PostgreSQL: Use pgloader or manual import
+                5. Update connection string in database.py
+                
+                **Need Help?** Contact your system administrator for assistance with migration.
+                """)
+        
+        # Archive recommendation
+        if health['total_requests'] > 100000:
+            st.warning("📦 Consider archiving records older than 3 years to improve performance.")
+    
     if st.button("🔄 Refresh This Page", key="admin_refresh"):
         refresh_page()
 
 
 # ================================================================
-# CHANGE PASSWORD
+# CHANGE PASSWORD (PRESERVED)
 # ================================================================
 elif choice == "🔐 Change Password":
     st.markdown("<div class='section-header'>🔐 Change Password</div>", unsafe_allow_html=True)
@@ -2336,7 +2571,6 @@ elif choice == "🔐 Change Password":
             else:
                 st.error("Passwords do not match or too short")
     
-    # Page-specific refresh button
     if st.button("🔄 Refresh This Page", key="pwd_refresh"):
         refresh_page()
 
@@ -2344,6 +2578,7 @@ elif choice == "🔐 Change Password":
 # Footer
 st.markdown("""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System</p>
+    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v4.0</p>
+    <p>Bulk Operations | Database Health Monitoring | Real-time Analytics</p>
 </div>
 """, unsafe_allow_html=True)
