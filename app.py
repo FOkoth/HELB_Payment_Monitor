@@ -1215,7 +1215,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1265,7 +1265,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS
+# ENHANCED SEARCH PAYMENT RECORDS (FIXED BUSINESS DAYS)
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -1369,6 +1369,7 @@ elif choice == "🔍 Search Payment Records":
                     
                     ref_number = get_reference_number(row)
                     
+                    # FIXED: Calculate predicted date using working days only
                     predicted_date = None
                     confidence = None
                     if not is_completed:
@@ -1380,18 +1381,33 @@ elif choice == "🔍 Search Payment Records":
                                 (df_all['payment_date'].notna())
                             ]
                             if not similar_completed.empty:
-                                avg_tat_similar = similar_completed.apply(
-                                    lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
-                                ).mean()
-                                remaining_days = max(1, int(avg_tat_similar - tat))
-                                predicted_date = date.today() + timedelta(days=remaining_days)
-                                confidence = "High" if len(similar_completed) > 20 else "Medium" if len(similar_completed) > 5 else "Low"
+                                # Calculate average TAT from similar completed requests
+                                tat_values = []
+                                for _, sim in similar_completed.iterrows():
+                                    if sim.get('payment_date'):
+                                        sim_tat = calculate_tat(sim['submission_date'], sim['payment_date'])
+                                        tat_values.append(sim_tat)
+                                if tat_values:
+                                    avg_tat_similar = np.mean(tat_values)
+                                    remaining_days = max(1, int(avg_tat_similar - tat))
+                                    # Use add_working_days to skip weekends and holidays
+                                    predicted_date = add_working_days(date.today(), remaining_days)
+                                    confidence = "High" if len(tat_values) > 20 else "Medium" if len(tat_values) > 5 else "Low"
+                                else:
+                                    predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
+                                    confidence = "Estimated"
                             else:
-                                remaining_days = max(1, sla_days - tat)
-                                predicted_date = date.today() + timedelta(days=remaining_days)
+                                # Use SLA-based prediction with working days
+                                remaining = max(1, sla_days - tat)
+                                predicted_date = add_working_days(date.today(), remaining)
                                 confidence = "Estimated"
-                        except:
-                            predicted_date = None
+                        except Exception as e:
+                            # Fallback to simple working days calculation
+                            try:
+                                predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
+                                confidence = "Estimated"
+                            except:
+                                predicted_date = None
                     
                     with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}", expanded=False):
                         col1, col2, col3 = st.columns([2, 1, 1])
@@ -1401,7 +1417,9 @@ elif choice == "🔍 Search Payment Records":
                             st.markdown(f"**Risk Level:** <span style='color:{risk_color}; font-weight:bold;'>{risk_level}</span>", unsafe_allow_html=True)
                         with col3:
                             if not is_completed and predicted_date:
-                                st.markdown(f"**📅 Estimated Completion:** {predicted_date.strftime('%d %b %Y')} <span style='font-size:0.6rem;'>({confidence})</span>", unsafe_allow_html=True)
+                                # Format date to show day name for verification
+                                day_name = predicted_date.strftime('%A')
+                                st.markdown(f"**📅 Estimated Completion:** {predicted_date.strftime('%d %b %Y')} ({day_name}) <span style='font-size:0.6rem;'>({confidence})</span>", unsafe_allow_html=True)
                             elif is_completed and row.get('payment_date'):
                                 st.markdown(f"**✅ Completed:** {row['payment_date']}")
                         
@@ -1982,12 +2000,11 @@ elif choice == "📝 New Request":
 
 
 # ================================================================
-# MY REQUESTS (FIXED)
+# MY REQUESTS
 # ================================================================
 elif choice == "📋 My Requests":
     st.markdown("<div class='section-header'>📋 My Requests</div>", unsafe_allow_html=True)
     
-    # Get all requests
     df_all = get_requests()
     
     if df_all.empty:
@@ -2721,23 +2738,20 @@ elif choice == "⚡ Bulk Operations":
 
 
 # ================================================================
-# REPORTS (FIXED)
+# REPORTS
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
     
-    # Get data without filters first
     df_raw = get_requests()
     
     if df_raw.empty:
         st.info("No data available in the database.")
     else:
-        # Apply filters
         df = filter_by_filters(df_raw, st.session_state.selected_financial_year, 
                               st.session_state.selected_quarter, st.session_state.selected_month,
                               st.session_state.selected_year)
         
-        # Apply role-based filtering
         finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
         if st.session_state.user_role not in ["ADMIN", "MANAGEMENT"] + finance_roles:
             df = df[df['department_name'] == st.session_state.user_dept]
@@ -2765,7 +2779,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL (PRESERVED - Full functionality)
+# ADMIN PANEL
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
@@ -3134,6 +3148,6 @@ elif choice == "🔐 Change Password":
 st.markdown("""
 <div class='main-footer'>
     <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
-    <p>Intelligent Search | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Database Health Monitoring</p>
+    <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions</p>
 </div>
 """, unsafe_allow_html=True)
