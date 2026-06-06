@@ -37,7 +37,8 @@ KENYA_HOLIDAYS = [
 
 def is_weekend_or_holiday(check_date):
     """Returns True if date is weekend or Kenyan public holiday"""
-    if check_date.weekday() >= 5:  # Saturday=5, Sunday=6
+    # Saturday=5, Sunday=6
+    if check_date.weekday() >= 5:
         return True
     return check_date in KENYA_HOLIDAYS
 
@@ -79,22 +80,3 @@ def get_next_working_day(start_date):
 def is_working_day(check_date):
     """Returns True if date is a working day (not weekend and not holiday)"""
     return not is_weekend_or_holiday(check_date)
-
-def working_days_in_month(year, month):
-    """Calculate number of working days in a specific month"""
-    from calendar import monthrange
-    _, last_day = monthrange(year, month)
-    days = 0
-    for day in range(1, last_day + 1):
-        check_date = date(year, month, day)
-        if is_working_day(check_date):
-            days += 1
-    return days
-
-def get_upcoming_holidays(from_date, days_ahead=30):
-    """Get list of upcoming holidays within the next X days"""
-    upcoming = []
-    for holiday in KENYA_HOLIDAYS:
-        if from_date <= holiday <= from_date + timedelta(days=days_ahead):
-            upcoming.append(holiday)
-    return sorted(upcoming)
