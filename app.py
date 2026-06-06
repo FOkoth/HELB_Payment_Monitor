@@ -913,7 +913,7 @@ if choice == "📊 Department Dashboard":
 
 
 # ================================================================
-# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS (FIXED)
+# MANAGEMENT DASHBOARD - ENHANCED VISUALIZATIONS (COMPLETELY FIXED)
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -1030,7 +1030,7 @@ elif choice == "📈 Management Dashboard":
         with tab1:
             col1, col2 = st.columns(2)
             with col1:
-                # 2-D Horizontal Bar Chart for Status Distribution (FIXED)
+                # 2-D Horizontal Bar Chart for Status Distribution
                 status_counts = df['status'].value_counts().reset_index()
                 status_counts.columns = ['Status', 'Count']
                 
@@ -1061,8 +1061,7 @@ elif choice == "📈 Management Dashboard":
                     orientation='h',
                     marker=dict(
                         color=colors,
-                        line=dict(color='white', width=1),
-                        cornerradius=5
+                        line=dict(color='white', width=1)
                     ),
                     text=status_counts['Count'],
                     textposition='outside',
@@ -1071,20 +1070,20 @@ elif choice == "📈 Management Dashboard":
                 
                 fig.update_layout(
                     title=dict(
-                        text="<b>Status Distribution</b>",
+                        text="Status Distribution",
                         font=dict(size=14, color='#1F2937'),
                         x=0.5
                     ),
                     height=450,
                     xaxis=dict(
-                        title="<b>Number of Requests</b>",
+                        title="Number of Requests",
                         titlefont=dict(size=10, color='#6B7280'),
                         gridcolor='#E5E7EB',
                         showgrid=True,
                         zeroline=False
                     ),
                     yaxis=dict(
-                        title="<b>Status</b>",
+                        title="Status",
                         titlefont=dict(size=10, color='#6B7280'),
                         categoryorder='total ascending',
                         gridcolor='#E5E7EB'
@@ -1102,14 +1101,11 @@ elif choice == "📈 Management Dashboard":
                 type_counts = df['request_type'].value_counts().reset_index()
                 type_counts.columns = ['Type', 'Count']
                 
-                # Create a beautiful pie chart with hole
-                colors_pie = px.colors.sequential.Greens_r
-                
                 fig2 = go.Figure(data=[go.Pie(
                     labels=type_counts['Type'],
                     values=type_counts['Count'],
                     hole=0.4,
-                    marker=dict(colors=colors_pie, line=dict(color='white', width=2)),
+                    marker=dict(colors=px.colors.sequential.Greens_r, line=dict(color='white', width=2)),
                     textinfo='label+percent',
                     textposition='auto',
                     textfont=dict(size=10, color='white')
@@ -1117,7 +1113,7 @@ elif choice == "📈 Management Dashboard":
                 
                 fig2.update_layout(
                     title=dict(
-                        text="<b>Request Type Distribution</b>",
+                        text="Request Type Distribution",
                         font=dict(size=14, color='#1F2937'),
                         x=0.5
                     ),
@@ -1154,18 +1150,14 @@ elif choice == "📈 Management Dashboard":
                 with col3:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
-                # Prepare time series data for line chart
+                # Prepare time series data
                 payment_df['submission_month'] = pd.to_datetime(payment_df['submission_date']).dt.to_period('M').astype(str)
                 monthly_payments = payment_df.groupby(['submission_month', 'request_type']).size().reset_index(name='count')
                 monthly_payments = monthly_payments.sort_values('submission_month')
                 
-                # Get unique request types
                 request_types = monthly_payments['request_type'].unique()
-                
-                # Create color palette
                 color_palette = px.colors.qualitative.Set2 + px.colors.qualitative.Set1 + px.colors.qualitative.Pastel
                 
-                # Create line chart with markers
                 fig = go.Figure()
                 
                 for i, req_type in enumerate(request_types):
@@ -1186,19 +1178,19 @@ elif choice == "📈 Management Dashboard":
                 
                 fig.update_layout(
                     title=dict(
-                        text="<b>Payment Requests Trend by Type</b>",
+                        text="Payment Requests Trend by Type",
                         font=dict(size=14, color='#1F2937'),
                         x=0.5
                     ),
                     xaxis=dict(
-                        title="<b>Month</b>",
+                        title="Month",
                         titlefont=dict(size=10, color='#6B7280'),
                         tickangle=-45,
                         gridcolor='#E5E7EB',
                         showgrid=True
                     ),
                     yaxis=dict(
-                        title="<b>Number of Requests</b>",
+                        title="Number of Requests",
                         titlefont=dict(size=10, color='#6B7280'),
                         gridcolor='#E5E7EB',
                         showgrid=True,
@@ -1224,7 +1216,6 @@ elif choice == "📈 Management Dashboard":
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Add an insight message
                 if not monthly_payments.empty:
                     latest_month = monthly_payments['submission_month'].max()
                     latest_data = monthly_payments[monthly_payments['submission_month'] == latest_month]
@@ -1282,7 +1273,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1329,7 +1320,6 @@ elif choice == "📈 Management Dashboard":
         
         if st.button("🔄 Refresh This Page", key="mgmt_refresh"):
             refresh_page()
-
 
 # ================================================================
 # ENHANCED SEARCH PAYMENT RECORDS
