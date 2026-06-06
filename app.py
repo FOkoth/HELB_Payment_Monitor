@@ -847,7 +847,7 @@ if choice == "📊 Department Dashboard":
                 with col3:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ CLEARED</div><div class='secondary-value'>{sur_completed}</div></div>", unsafe_allow_html=True)
                 with col4:
-                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'> VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 sur_df = surrender_requests[['request_number', 'amount', 'status', 'submission_date']].head(10)
                 st.dataframe(sur_df, use_container_width=True, hide_index=True)
@@ -957,7 +957,7 @@ elif choice == "📈 Management Dashboard":
         with col1:
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>📋 TOTAL REQUESTS</div><div class='kpi-value'>{total_requests:,}</div></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='kpi-card'><div class='kpi-label'> TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><div class='kpi-label'>💰 TOTAL VALUE</div><div class='kpi-value'>KES {total_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
         with col3:
             st.markdown(f"<div class='kpi-card'><div class='kpi-label'>✅ COMPLETION RATE</div><div class='kpi-value'>{completion_rate:.1f}%</div></div>", unsafe_allow_html=True)
         with col4:
@@ -1011,7 +1011,7 @@ elif choice == "📈 Management Dashboard":
                 if long_pending:
                     st.markdown(f"<div class='warning-card'><strong>⏰ Long Pending ({len(long_pending)})</strong></div>", unsafe_allow_html=True)
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Executive Summary", " Payment Analytics", "📤 Surrender Analytics", "🏆 Department Performance", "🚦 Bottlenecks"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Executive Summary", "💰 Payment Analytics", "📤 Surrender Analytics", "🏆 Department Performance", "🚦 Bottlenecks"])
         
         with tab1:
             col1, col2 = st.columns(2)
@@ -1045,7 +1045,7 @@ elif choice == "📈 Management Dashboard":
                 with col2:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ COMPLETED</div><div class='secondary-value'>{pay_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'> TOTAL VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {pay_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 pay_by_type = payment_df.groupby('request_type').agg({'request_number': 'count', 'amount': 'sum'}).reset_index()
                 pay_by_type.columns = ['Type', 'Count', 'Amount']
@@ -1070,7 +1070,7 @@ elif choice == "📈 Management Dashboard":
                 with col2:
                     st.markdown(f"<div class='secondary-card'><div class='secondary-label'>✅ CLEARED</div><div class='secondary-value'>{sur_completed:,}</div></div>", unsafe_allow_html=True)
                 with col3:
-                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'> TOTAL VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='secondary-card'><div class='secondary-label'>💰 TOTAL VALUE</div><div class='secondary-value'>KES {sur_amount/1e6:.1f}M</div></div>", unsafe_allow_html=True)
                 
                 fig = px.bar(x=['Cleared', 'Pending'], y=[sur_completed, sur_total - sur_completed],
                             title="Surrender Clearance Status",
@@ -1099,7 +1099,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1149,7 +1149,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS WITH ROLE-BASED VISIBILITY
+# ENHANCED SEARCH PAYMENT RECORDS - ALL USERS CAN SEE PREDICTIONS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -1157,7 +1157,7 @@ elif choice == "🔍 Search Payment Records":
     st.markdown("""
     <div style='background:#F0F9FF; padding:0.4rem 0.6rem; border-radius:6px; margin-bottom:0.8rem; font-size:0.65rem;'>
         🔎 Search by Request Number, Batch No., Imprest No., Invoice No., Surrender No., Payment Reference, 
-        Staff Name, Supplier Name, or Customer Name.
+        Staff Name, Supplier Name, or Customer Name. View predicted completion dates and risk assessment.
     </div>
     """, unsafe_allow_html=True)
     
@@ -1173,10 +1173,10 @@ elif choice == "🔍 Search Payment Records":
                                                 "PAYMENT_VERIFIED", "PAYMENT_APPROVED", "PAYMENT_AUTHORIZED", 
                                                 "PAID", "CLEARED", "RETURNED"])
     
-    # Define roles that can see sensitive information
+    # Define roles that can see transaction logs (sensitive audit trail)
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     sensitive_roles = ["ADMIN", "MANAGEMENT"] + finance_roles
-    can_see_sensitive = st.session_state.user_role in sensitive_roles or st.session_state.is_finance
+    can_see_logs = st.session_state.user_role in sensitive_roles or st.session_state.is_finance
     
     if st.button("🔍 Search", type="primary"):
         if search_term:
@@ -1203,7 +1203,7 @@ elif choice == "🔍 Search Payment Records":
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
                 for _, row in results.iterrows():
-                    # Determine entity name (staff, supplier, customer) - visible to everyone
+                    # Determine entity name (staff, supplier, customer)
                     entity_name = ""
                     entity_type = ""
                     
@@ -1234,39 +1234,35 @@ elif choice == "🔍 Search Payment Records":
                                'Professional Body': 5, 'Direct Payment': 3}
                     sla_days = sla_map.get(row['request_type'], 5)
                     
-                    # Risk assessment - ONLY for Finance, Management, Admin
-                    if can_see_sensitive:
-                        if not is_completed:
-                            if tat > sla_days:
-                                risk_level = "Critical - Overdue"
-                                risk_color = "#DC2626"
-                            elif tat > sla_days * 0.8:
-                                risk_level = "High - At Risk"
-                                risk_color = "#F59E0B"
-                            elif tat > sla_days * 0.5:
-                                risk_level = "Medium - On Track"
-                                risk_color = "#FFB81C"
-                            else:
-                                risk_level = "Low - Good Progress"
-                                risk_color = "#00843D"
+                    # Risk assessment - visible to ALL users now
+                    if not is_completed:
+                        if tat > sla_days:
+                            risk_level = "Critical - Overdue"
+                            risk_color = "#DC2626"
+                        elif tat > sla_days * 0.8:
+                            risk_level = "High - At Risk"
+                            risk_color = "#F59E0B"
+                        elif tat > sla_days * 0.5:
+                            risk_level = "Medium - On Track"
+                            risk_color = "#FFB81C"
                         else:
-                            if tat > sla_days:
-                                risk_level = "Completed (Delayed)"
-                                risk_color = "#F59E0B"
-                            else:
-                                risk_level = "Completed (On Time)"
-                                risk_color = "#00843D"
+                            risk_level = "Low - Good Progress"
+                            risk_color = "#00843D"
                     else:
-                        risk_level = None
-                        risk_color = None
+                        if tat > sla_days:
+                            risk_level = "Completed (Delayed)"
+                            risk_color = "#F59E0B"
+                        else:
+                            risk_level = "Completed (On Time)"
+                            risk_color = "#00843D"
                     
                     # Get reference number
                     ref_number = get_reference_number(row)
                     
-                    # Predict completion date for pending requests - ONLY for Finance, Management, Admin
+                    # Predict completion date for pending requests - visible to ALL users
                     predicted_date = None
                     confidence = None
-                    if can_see_sensitive and not is_completed:
+                    if not is_completed:
                         # Calculate average TAT for similar completed requests
                         df_all = get_requests()
                         similar_completed = df_all[
@@ -1289,34 +1285,27 @@ elif choice == "🔍 Search Payment Records":
                     
                     # Create expandable result card
                     with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}", expanded=False):
-                        # Header with status and risk (risk only for authorized roles)
+                        # Header with status and risk
                         col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
                             st.markdown(f"**Status:** {status_badge}", unsafe_allow_html=True)
                         with col2:
-                            if can_see_sensitive and risk_level:
-                                st.markdown(f"**Risk Level:** <span style='color:{risk_color}; font-weight:bold;'>{risk_level}</span>", unsafe_allow_html=True)
-                            else:
-                                st.markdown("**Risk Level:** <span style='color:#6B7280;'>Restricted Access</span>", unsafe_allow_html=True)
+                            st.markdown(f"**Risk Level:** <span style='color:{risk_color}; font-weight:bold;'>{risk_level}</span>", unsafe_allow_html=True)
                         with col3:
-                            if can_see_sensitive and not is_completed and predicted_date:
+                            if not is_completed and predicted_date:
                                 st.markdown(f"**📅 Predicted Completion:** {predicted_date.strftime('%d %b %Y')} <span style='font-size:0.6rem;'>({confidence} confidence)</span>", unsafe_allow_html=True)
                             elif is_completed and row.get('payment_date'):
                                 st.markdown(f"**✅ Completed:** {row['payment_date']}")
-                            elif not can_see_sensitive and not is_completed:
-                                st.markdown("**📅 ETA:** Contact Finance")
                         
                         st.markdown("---")
                         
                         # Two-column layout for details
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.markdown(f"** Amount:** KES {row['amount']:,.2f}")
+                            st.markdown(f"**💰 Amount:** KES {row['amount']:,.2f}")
                             st.markdown(f"**📅 Submitted:** {row['submission_date']}")
-                            if can_see_sensitive and row.get('date_received'):
+                            if row.get('date_received'):
                                 st.markdown(f"**📥 Received by Finance:** {row['date_received']}")
-                            elif not can_see_sensitive and row.get('date_received'):
-                                st.markdown(f"**📥 Received by Finance:** Yes")
                             if ref_number and ref_number != '-':
                                 st.markdown(f"**🔢 Reference:** {ref_number}")
                             if entity_name:
@@ -1325,11 +1314,11 @@ elif choice == "🔍 Search Payment Records":
                         with col2:
                             if row.get('payment_description'):
                                 st.markdown(f"**📝 Description:** {row['payment_description'][:100]}{'...' if len(row['payment_description']) > 100 else ''}")
-                            if can_see_sensitive and row.get('payment_reference'):
+                            if row.get('payment_reference'):
                                 st.markdown(f"**🏦 Payment Ref:** {row['payment_reference']}")
                             if row.get('return_reason'):
                                 st.markdown(f"**↩️ Return Reason:** :red[{row['return_reason']}]")
-                            if can_see_sensitive and not is_completed:
+                            if not is_completed:
                                 st.markdown(f"**⏱️ Current TAT:** {tat} / {sla_days} days")
                                 # Progress bar
                                 progress_pct = min(100, (tat / sla_days) * 100)
@@ -1339,8 +1328,6 @@ elif choice == "🔍 Search Payment Records":
                                     <div class='progress-fill' style='width:{min(100, progress_pct)}%; background:{bar_color};'></div>
                                 </div>
                                 """, unsafe_allow_html=True)
-                            elif not can_see_sensitive and not is_completed:
-                                st.markdown(f"**⏱️ Processing Time:** {tat} days")
                         
                         # Additional details for specific request types
                         st.markdown("---")
@@ -1375,38 +1362,37 @@ elif choice == "🔍 Search Payment Records":
                             with details_cols[i % 4]:
                                 st.markdown(f"**{label}:** {value}")
                         
-                        # Similar requests performance - ONLY for authorized roles
-                        if can_see_sensitive:
-                            st.markdown("---")
-                            st.markdown("**📊 Similar Requests Performance**")
+                        # Similar requests performance - visible to ALL users
+                        st.markdown("---")
+                        st.markdown("**📊 Similar Requests Performance**")
+                        
+                        # Get similar completed requests
+                        df_all = get_requests()
+                        similar_completed = df_all[
+                            (df_all['request_type'] == row['request_type']) & 
+                            (df_all['status'].isin(['PAID', 'CLEARED'])) &
+                            (df_all['payment_date'].notna())
+                        ].head(5)
+                        
+                        if not similar_completed.empty:
+                            similar_data = []
+                            for _, sim in similar_completed.iterrows():
+                                sim_tat = calculate_tat(sim['submission_date'], sim['payment_date'])
+                                similar_data.append({
+                                    'Request': sim['request_number'],
+                                    'TAT (days)': sim_tat,
+                                    'Status': 'On Time' if sim_tat <= sla_map.get(sim['request_type'], 5) else 'Delayed'
+                                })
+                            sim_df = pd.DataFrame(similar_data)
+                            st.dataframe(sim_df, use_container_width=True, hide_index=True)
                             
-                            # Get similar completed requests
-                            df_all = get_requests()
-                            similar_completed = df_all[
-                                (df_all['request_type'] == row['request_type']) & 
-                                (df_all['status'].isin(['PAID', 'CLEARED'])) &
-                                (df_all['payment_date'].notna())
-                            ].head(5)
-                            
-                            if not similar_completed.empty:
-                                similar_data = []
-                                for _, sim in similar_completed.iterrows():
-                                    sim_tat = calculate_tat(sim['submission_date'], sim['payment_date'])
-                                    similar_data.append({
-                                        'Request': sim['request_number'],
-                                        'TAT (days)': sim_tat,
-                                        'Status': 'On Time' if sim_tat <= sla_map.get(sim['request_type'], 5) else 'Delayed'
-                                    })
-                                sim_df = pd.DataFrame(similar_data)
-                                st.dataframe(sim_df, use_container_width=True, hide_index=True)
-                                
-                                # Show average
-                                avg_sim_tat = similar_completed.apply(
-                                    lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
-                                ).mean()
-                                st.caption(f"📈 Average TAT for similar requests: {avg_sim_tat:.1f} days (SLA: {sla_days} days)")
-                            else:
-                                st.caption("No completed similar requests found for comparison.")
+                            # Show average
+                            avg_sim_tat = similar_completed.apply(
+                                lambda x: calculate_tat(x['submission_date'], x['payment_date']), axis=1
+                            ).mean()
+                            st.caption(f"📈 Average TAT for similar requests: {avg_sim_tat:.1f} days (SLA: {sla_days} days)")
+                        else:
+                            st.caption("No completed similar requests found for comparison.")
                         
                         # Timeline/Progress Section
                         st.markdown("---")
@@ -1471,8 +1457,8 @@ elif choice == "🔍 Search Payment Records":
                             </div>
                             """, unsafe_allow_html=True)
                         
-                        # Warning for overdue - ONLY for authorized roles
-                        if can_see_sensitive and not is_completed:
+                        # Warning for overdue
+                        if not is_completed:
                             if tat > sla_days:
                                 st.markdown(f"""
                                 <div class='warning-card' style='margin-top:0.5rem;'>
@@ -1489,11 +1475,11 @@ elif choice == "🔍 Search Payment Records":
                                 """, unsafe_allow_html=True)
                         
                         # Transaction History - ONLY for authorized roles (Finance, Management, Admin)
-                        if can_see_sensitive:
+                        if can_see_logs:
                             with st.expander("📜 View Full Transaction History"):
                                 display_transaction_logs(row['id'])
                         else:
-                            st.caption("📜 Transaction history is available to Finance and Management only.")
+                            st.caption("📜 Full transaction history is available to Finance and Management only.")
             else:
                 st.warning("No records found matching your search criteria.")
         else:
@@ -1504,7 +1490,7 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST (FOR REGULAR DEPARTMENT USERS)
+# NEW REQUEST (PRESERVED)
 # ================================================================
 elif choice == "📝 New Request" or choice == "📝 New Request (Department)":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
@@ -2091,7 +2077,7 @@ elif choice == "↩️ Returned Requests":
                 st.markdown(f"""
                 <div class='warning-card'>
                     <strong>⚠️ Return Reason:</strong> {req['return_reason']}<br>
-                    <strong> Amount:</strong> KES {req['amount']:,.2f}<br>
+                    <strong>💰 Amount:</strong> KES {req['amount']:,.2f}<br>
                     <strong>📅 Submitted:</strong> {req['submission_date']}<br>
                     <strong>🏢 Department:</strong> {req['department_name']}
                 </div>
@@ -2191,7 +2177,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE - WITH TABS FOR PAYMENT AND SURRENDER
+# APPROVAL QUEUE (PRESERVED - Full from previous message)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -2228,7 +2214,7 @@ elif choice == "✅ Approval Queue":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("** Payment Requests**")
+            st.markdown("**💰 Payment Requests**")
             pay_cols = st.columns(6)
             with pay_cols[0]:
                 st.markdown(f"<div class='secondary-card'><div class='secondary-label'>📋 NEW</div><div class='secondary-value'>{payment_counts['submitted']}</div></div>", unsafe_allow_html=True)
@@ -2262,7 +2248,7 @@ elif choice == "✅ Approval Queue":
         st.markdown("---")
         
         # Create tabs for Payment and Surrender
-        tab_payment, tab_surrender = st.tabs([" Payment Requests", "📤 Surrender Requests"])
+        tab_payment, tab_surrender = st.tabs(["💰 Payment Requests", "📤 Surrender Requests"])
         
         # ======================================================
         # PAYMENT REQUESTS TAB
@@ -2428,7 +2414,7 @@ elif choice == "✅ Approval Queue":
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             payment_ref = st.text_input("Payment Reference", key=f"pay_ref_{rid}")
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_pay_{rid}")
-                            if st.button(f" Mark as Paid", key=f"pay_btn_paid_{rid}"):
+                            if st.button(f"💰 Mark as Paid", key=f"pay_btn_paid_{rid}"):
                                 if payment_ref:
                                     if pwd and verify_finance_password(pwd):
                                         update_request_status(rid, 'PAID', performed_by=st.session_state.username)
@@ -2992,7 +2978,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                         st.error("❌ Product name already exists!")
     
     with tab4:
-        st.subheader(" Funder Management (ERM)")
+        st.subheader("💰 Funder Management (ERM)")
         funders_df = get_funders()
         if not funders_df.empty:
             for _, funder in funders_df.iterrows():
@@ -3189,6 +3175,6 @@ elif choice == "🔐 Change Password":
 st.markdown("""
 <div class='main-footer'>
     <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
-    <p>Intelligent Search | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Database Health Monitoring</p>
+    <p>Intelligent Search with Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions</p>
 </div>
 """, unsafe_allow_html=True)
