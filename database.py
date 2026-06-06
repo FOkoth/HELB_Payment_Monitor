@@ -1383,7 +1383,7 @@ def get_public_payment_details(search_term, search_type="reference"):
     return None
 
 def calculate_estimated_completion_date(status, current_date):
-    """Calculate estimated completion date based on current status"""
+    """Calculate estimated completion date based on current status using working days only"""
     from utils.holidays_ke import add_working_days
     
     status_map = {
@@ -1401,6 +1401,7 @@ def calculate_estimated_completion_date(status, current_date):
     if status in status_map:
         info = status_map[status]
         if info['days'] is not None and info['days'] > 0:
+            # Use add_working_days to ensure we only count business days
             estimated_date = add_working_days(current_date, info['days'])
             return estimated_date, info['message'], info['days']
         elif status in ['PAID', 'CLEARED']:
@@ -1504,7 +1505,6 @@ def get_fastest_request_types(df):
                 max_tat = np.max(tat_values)
                 count = len(tat_values)
                 
-                # Calculate performance score (lower TAT = higher score)
                 if avg_tat <= 3:
                     perf_score = 100
                 elif avg_tat <= 5:
@@ -1534,7 +1534,6 @@ def get_fastest_request_types(df):
             return result_df
     else:
         return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
-
 
 # ================================================================
 # BULK OPERATIONS FUNCTIONS
@@ -1579,7 +1578,6 @@ def get_bulk_eligible_requests(statuses=None, request_types=None, department=Non
              'department_name': r[3], 'amount': r[4], 'status': r[5],
              'submission_date': r[6], 'submitted_by': r[7]} for r in results]
 
-
 @retry_on_lock()
 def bulk_update_status(request_ids, new_status, performed_by, performed_by_role, performed_by_dept, 
                        payment_reference=None, finance_comment=None):
@@ -1591,7 +1589,6 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
     
     for request_id in request_ids:
         try:
-            # Get current status first
             cursor.execute("SELECT status, request_number FROM requests WHERE id = ?", (request_id,))
             current = cursor.fetchone()
             if not current:
@@ -1601,7 +1598,6 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
             old_status = current[0]
             request_number = current[1]
             
-            # Update status
             updates = ["status = ?", "last_updated = ?"]
             params = [new_status, datetime.now().isoformat()]
             
@@ -1629,7 +1625,6 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
             params.append(request_id)
             cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
             
-            # Add log
             add_request_log(request_id, request_number, f"BULK_{new_status}", 
                           old_status, new_status, 
                           f"Bulk processed by {performed_by}", 
@@ -1645,13 +1640,6 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
     
     return success_count, failed_ids
 
-
-def bulk_generate_batch_number():
-    """Generate a unique batch number for bulk operations"""
-    batch_no = f"BULK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    return batch_no
-
-
 def export_bulk_requests(request_ids):
     """Export selected requests to CSV for external processing"""
     conn = sqlite3.connect(DB_PATH)
@@ -1664,7 +1652,6 @@ def export_bulk_requests(request_ids):
     df = pd.read_sql_query(query, conn, params=request_ids)
     conn.close()
     return df
-
 
 def get_database_health():
     """Get database health metrics for capacity planning"""
@@ -1691,7 +1678,6 @@ def get_database_health():
     health['total_users'] = cursor.fetchone()[0]
     conn.close()
     
-    # Determine status
     if health['db_size_mb'] > 500:
         health['status'] = 'Critical - Migrate to PostgreSQL'
         health['recommendation'] = 'Immediate action required'
