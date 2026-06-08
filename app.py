@@ -2315,7 +2315,7 @@ elif choice == "✅ Approval Queue":
                         rid = req['id']
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_ver_{rid}")
-                            if st.button(f"✅ Verify Payment", key=f"pay_btn_verify_{rid}"):
+                            if st.button(f"✅ Mark as Verified", key=f"pay_btn_verify_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_VERIFIED', performed_by=st.session_state.username)
                                     st.success(f"Payment verified!")
