@@ -1564,7 +1564,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# REQUEST TYPE TAT ANALYSIS (FIXED - SHOWS ALL RECORDS)
+# REQUEST TYPE TAT ANALYSIS 
 # ================================================================
 elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type()
@@ -1901,7 +1901,7 @@ elif choice == "🔍 Search Payment Records":
                         else:
                             st.caption("📜 Full transaction history is available to Finance and Management only.")
             else:
-                st.warning("No records found matching your search criteria.")
+                st.warning("No request matching your search criteria, has been submitted to Finance.")
         else:
             st.info("Please enter a search term.")
     
