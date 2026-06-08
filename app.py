@@ -2338,7 +2338,7 @@ elif choice == "✅ Approval Queue":
                         rid = req['id']
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_app_{rid}")
-                            if st.button(f"✅ Approve Payment", key=f"pay_btn_approve_{rid}"):
+                            if st.button(f"✅ Mark as Approved", key=f"pay_btn_approve_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_APPROVED', performed_by=st.session_state.username)
                                     st.success(f"Payment approved!")
@@ -2361,7 +2361,7 @@ elif choice == "✅ Approval Queue":
                         rid = req['id']
                         with st.expander(f"📄 {req['request_number']} - {req['request_type']} - {req['department_name']} - KES {req['amount']:,.2f}", expanded=False):
                             pwd = st.text_input("Finance Password", type="password", key=f"pay_pwd_auth_{rid}")
-                            if st.button(f"✅ Authorize Payment", key=f"pay_btn_authorize_{rid}"):
+                            if st.button(f"✅ Mark as Authorized", key=f"pay_btn_authorize_{rid}"):
                                 if pwd and verify_finance_password(pwd):
                                     update_request_status(rid, 'PAYMENT_AUTHORIZED', performed_by=st.session_state.username)
                                     st.success(f"Payment authorized!")
