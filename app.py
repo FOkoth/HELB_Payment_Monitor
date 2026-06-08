@@ -1529,7 +1529,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
                 
                 dept_performance.append({
                     'Department': dept,
@@ -3616,7 +3616,7 @@ elif choice == "🔐 Change Password":
 # Footer
 st.markdown("""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
+    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
     <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
