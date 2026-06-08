@@ -609,19 +609,37 @@ def refresh_page():
     st.rerun()
 
 # ================================================================
-# REQUEST TYPE TAT ANALYZER (NEW FEATURE)
+# REQUEST TYPE TAT ANALYZER WITH ROLE-BASED FILTERING
 # ================================================================
 
 def display_tat_by_request_type():
-    """Display TAT analysis grouped by request type"""
+    """Display TAT analysis grouped by request type with role-based filtering"""
     st.markdown("<div class='section-header'>⏱️ Turnaround Time Analysis by Request Type</div>", unsafe_allow_html=True)
     
-    df = get_requests()
+    # Get all requests first
+    df_all = get_requests()
     
-    if df.empty:
+    if df_all.empty:
         st.info("No data available. Submit some requests first.")
         return
     
+    # APPLY ROLE-BASED FILTERING - This is the key addition
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    
+    if st.session_state.user_role in ["ADMIN", "MANAGEMENT"] + finance_roles:
+        # Management and Finance see ALL requests
+        df = df_all.copy()
+        st.info(f"📊 Showing TAT analysis for ALL departments (Management/Finance view)")
+    else:
+        # Regular department users see ONLY their department's requests
+        df = df_all[df_all['department_name'] == st.session_state.user_dept].copy()
+        st.info(f"📊 Showing TAT analysis for {st.session_state.user_dept} department only")
+    
+    if df.empty:
+        st.info(f"No data available for your department. Submit some requests first.")
+        return
+    
+    # Apply date filters
     if data_scope != "All Data" and not df.empty:
         df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
         today = date.today()
@@ -1422,7 +1440,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1472,7 +1490,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# REQUEST TYPE TAT ANALYSIS (NEW FEATURE)
+# REQUEST TYPE TAT ANALYSIS (NEW FEATURE WITH ROLE-BASED FILTERING)
 # ================================================================
 elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type()
@@ -3361,7 +3379,7 @@ elif choice == "🔐 Change Password":
 # Footer
 st.markdown("""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
+    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
     <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
