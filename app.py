@@ -659,12 +659,27 @@ def display_tat_by_request_type():
         st.info("No data matches your filters.")
         return
     
-    sla_map = {
-        'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
-        'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-        'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-        'Professional Body': 5, 'Direct Payment': 3
-    }
+    # Get SLA from database - THIS IS THE ONLY CHANGE
+    def get_sla_from_database():
+        try:
+            conn = sqlite3.connect("helb_data.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT request_type, sla_days FROM sla_config")
+            results = cursor.fetchall()
+            conn.close()
+            sla_map = {}
+            for req_type, sla_days in results:
+                sla_map[req_type] = sla_days
+            return sla_map
+        except:
+            return {
+                'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
+                'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                'Professional Body': 5, 'Direct Payment': 3
+            }
+    
+    sla_map = get_sla_from_database()
     
     results = []
     
@@ -1514,7 +1529,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
