@@ -609,7 +609,7 @@ def refresh_page():
     st.rerun()
 
 # ================================================================
-# REQUEST TYPE TAT ANALYZER (NEW FEATURE - ADDED WITHOUT BREAKING ANYTHING)
+# REQUEST TYPE TAT ANALYZER (NEW FEATURE)
 # ================================================================
 
 def display_tat_by_request_type():
@@ -691,27 +691,34 @@ def display_tat_by_request_type():
                 'P95 (Days)': round(p95_tat, 1),
                 'SLA Target': sla_target,
                 'SLA Compliance %': round(sla_rate, 1),
-                'Rating': rating
+                'Rating': rating,
+                '_avg_tat': avg_tat,
+                '_sla_target': sla_target
             })
     
     if not results:
-        st.info("Complete more requests to see TAT analysis.")
+        st.info("Complete more requests to see TAT analysis. Need at least one completed request per type.")
         return
     
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values('Avg TAT (Days)')
     
     st.markdown("### 📊 Performance Metrics by Request Type")
-    st.dataframe(results_df[['Request Type', 'Sample Size', 'Avg TAT (Days)', 'Median (Days)', 
-                             'P95 (Days)', 'SLA Compliance %', 'Rating']], 
-                 use_container_width=True, hide_index=True)
+    display_cols = ['Request Type', 'Sample Size', 'Avg TAT (Days)', 'Median (Days)', 
+                    'P95 (Days)', 'SLA Compliance %', 'Rating']
+    st.dataframe(results_df[display_cols], use_container_width=True, hide_index=True)
     
     col1, col2 = st.columns(2)
     
     with col1:
         fig = go.Figure()
-        colors = ['#00843D' if row['Avg TAT (Days)'] <= row['SLA Target'] else '#DC2626' 
-                  for _, row in results_df.iterrows()]
+        
+        colors = []
+        for _, row in results_df.iterrows():
+            if row['Avg TAT (Days)'] <= row['_sla_target']:
+                colors.append('#00843D')
+            else:
+                colors.append('#DC2626')
         
         fig.add_trace(go.Bar(
             x=results_df['Request Type'],
@@ -768,8 +775,8 @@ def display_tat_by_request_type():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        fastest = results_df.iloc[0] if not results_df.empty else None
-        if fastest:
+        if len(results_df) > 0:
+            fastest = results_df.iloc[0]
             st.markdown(f"""
             <div class='insight-card'>
                 🏆 <strong>Fastest Processing</strong><br>
@@ -779,8 +786,8 @@ def display_tat_by_request_type():
             """, unsafe_allow_html=True)
     
     with col2:
-        slowest = results_df.iloc[-1] if not results_df.empty else None
-        if slowest:
+        if len(results_df) > 0:
+            slowest = results_df.iloc[-1]
             st.markdown(f"""
             <div class='warning-card'>
                 ⚠️ <strong>Needs Improvement</strong><br>
@@ -790,8 +797,9 @@ def display_tat_by_request_type():
             """, unsafe_allow_html=True)
     
     with col3:
-        best_compliance = results_df.loc[results_df['SLA Compliance %'].idxmax()] if not results_df.empty else None
-        if best_compliance:
+        if len(results_df) > 0:
+            best_compliance_idx = results_df['SLA Compliance %'].idxmax()
+            best_compliance = results_df.loc[best_compliance_idx]
             st.markdown(f"""
             <div class='insight-card'>
                 ✅ <strong>Best SLA Compliance</strong><br>
@@ -800,8 +808,12 @@ def display_tat_by_request_type():
             </div>
             """, unsafe_allow_html=True)
     
-    csv = results_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
+    if len(results_df) > 0:
+        export_df = results_df[['Request Type', 'Sample Size', 'Avg TAT (Days)', 'Median (Days)', 
+                                'Min (Days)', 'Max (Days)', 'P95 (Days)', 'SLA Target', 
+                                'SLA Compliance %', 'Rating']]
+        csv = export_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
 # Login Screen
 if not st.session_state.authenticated:
@@ -1410,7 +1422,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
