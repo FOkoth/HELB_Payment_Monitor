@@ -3085,12 +3085,12 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL
+# ADMIN PANEL (UPDATED WITH SLA CONFIGURATION TAB)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings", "📊 Database Health"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings", "📊 Database Health", "📋 SLA Config"])
     
     with tab1:
         st.subheader("👥 User Management")
@@ -3422,9 +3422,157 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         if health['total_requests'] > 100000:
             st.warning("📦 Consider archiving records older than 3 years to improve performance.")
     
+    with tab8:
+        st.subheader("📋 SLA Configuration (Turnaround Time Targets)")
+        st.markdown("Configure Service Level Agreement (SLA) targets for each request type")
+        st.info("💡 **SLA Target** = Maximum allowed working days for completion. TAT exceeding this is a breach.")
+        
+        # Get current SLA settings
+        conn = sqlite3.connect("helb_data.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT request_type, sla_days FROM sla_config ORDER BY request_type")
+        sla_configs = cursor.fetchall()
+        conn.close()
+        
+        if not sla_configs:
+            st.warning("No SLA configurations found. Please check database.")
+        else:
+            # Display current SLA settings in a nice table
+            sla_data = []
+            for req_type, sla_days in sla_configs:
+                # Determine color based on SLA days
+                if sla_days <= 3:
+                    color = "#00843D"  # Green - Fast
+                elif sla_days <= 5:
+                    color = "#FFB81C"  # Yellow/Gold - Medium
+                else:
+                    color = "#F59E0B"  # Orange - Slow
+                
+                sla_data.append({
+                    'Request Type': req_type,
+                    'Current SLA (Days)': sla_days,
+                    'Priority': '🔴 High' if sla_days <= 3 else '🟡 Medium' if sla_days <= 5 else '🟢 Low'
+                })
+            
+            sla_df = pd.DataFrame(sla_data)
+            st.dataframe(sla_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.markdown("### ✏️ Update SLA Values")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                request_type_to_update = st.selectbox("Select Request Type", [r[0] for r in sla_configs])
+                # Get current value for display
+                current_value = next((r[1] for r in sla_configs if r[0] == request_type_to_update), 5)
+                st.caption(f"Current value: **{current_value} days**")
+            
+            with col2:
+                new_sla_days = st.number_input(
+                    "New SLA Target (Days)", 
+                    min_value=1, 
+                    max_value=30, 
+                    value=current_value, 
+                    step=1,
+                    help="Number of working days allowed for completion"
+                )
+            
+            # SLA recommendation based on request type
+            recommendations = {
+                'Student Payment': 'High priority - Recommend 2-3 days',
+                'Imprest': 'Standard processing - Recommend 3-5 days',
+                'Petty Cash': 'Quick turnaround - Recommend 2-3 days',
+                'Supplier Payment': 'May need verification time - Recommend 5-7 days',
+                'Salary Payment': 'Payroll critical - Recommend 3-5 days',
+                'Refund Payment': 'Customer expectation - Recommend 3-5 days',
+                'Surrender': 'Requires verification - Recommend 3-4 days',
+                'Mileage Claim': 'Simple calculation - Recommend 2-3 days',
+                'Staff Training': 'Document verification - Recommend 3-5 days',
+                'Professional Body': 'External confirmation - Recommend 3-5 days',
+                'Direct Payment': 'Urgent payments - Recommend 2-3 days'
+            }
+            
+            rec = recommendations.get(request_type_to_update, 'Adjust based on business needs')
+            st.info(f"💡 **Recommendation for {request_type_to_update}:** {rec}")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Update SLA", type="primary"):
+                    conn = sqlite3.connect("helb_data.db")
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE sla_config SET sla_days = ? WHERE request_type = ?", (new_sla_days, request_type_to_update))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"✅ Updated {request_type_to_update} SLA to {new_sla_days} days")
+                    st.balloons()
+                    st.rerun()
+            
+            with col2:
+                # Reset to default button
+                default_values = {
+                    'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
+                    'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                    'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                    'Professional Body': 5, 'Direct Payment': 3
+                }
+                default_value = default_values.get(request_type_to_update, 5)
+                if st.button("↩️ Reset to Default", type="secondary"):
+                    conn = sqlite3.connect("helb_data.db")
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE sla_config SET sla_days = ? WHERE request_type = ?", (default_value, request_type_to_update))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"✅ Reset {request_type_to_update} to default ({default_value} days)")
+                    st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### 📊 SLA Impact Analysis")
+            st.markdown("""
+            **How SLA affects the system:**
+            
+            | Feature | How SLA is used |
+            |---------|-----------------|
+            | 🔍 Search Records | Shows risk levels (Critical/High/Medium/Low) based on SLA breach |
+            | 📈 Management Dashboard | Calculates SLA compliance percentage |
+            | 📊 TAT Analysis | Compares actual TAT against SLA targets |
+            | 🚨 Alerts | Flags requests approaching or exceeding SLA |
+            | ⏱️ Predictions | Estimated completion dates based on SLA targets |
+            
+            **Color Coding:**
+            - 🟢 Green: Within SLA (Good)
+            - 🟡 Yellow: At risk (>80% of SLA)
+            - 🔴 Red: SLA Breach
+            """)
+            
+            # Show current SLA distribution chart
+            sla_for_chart = [r[1] for r in sla_configs]
+            types_for_chart = [r[0] for r in sla_configs]
+            
+            fig = go.Figure()
+            colors = ['#00843D' if x <= 3 else '#FFB81C' if x <= 5 else '#F59E0B' for x in sla_for_chart]
+            
+            fig.add_trace(go.Bar(
+                x=types_for_chart,
+                y=sla_for_chart,
+                marker_color=colors,
+                text=sla_for_chart,
+                textposition='outside',
+                name='SLA Days'
+            ))
+            
+            fig.update_layout(
+                title="Current SLA Distribution by Request Type",
+                xaxis_title="Request Type",
+                yaxis_title="SLA Target (Working Days)",
+                height=400,
+                xaxis_tickangle=-45,
+                plot_bgcolor='white'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
     if st.button("🔄 Refresh This Page", key="admin_refresh"):
         refresh_page()
-
 
 # ================================================================
 # CHANGE PASSWORD
