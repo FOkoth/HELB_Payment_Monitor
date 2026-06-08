@@ -609,39 +609,38 @@ def refresh_page():
     st.rerun()
 
 # ================================================================
-# REQUEST TYPE TAT ANALYZER WITH ROLE-BASED FILTERING
+# REQUEST TYPE TAT ANALYZER (NEW FEATURE)
 # ================================================================
 
 def display_tat_by_request_type():
-    """Display TAT analysis grouped by request type with role-based filtering"""
+    """Display TAT analysis grouped by request type"""
     st.markdown("<div class='section-header'>⏱️ Turnaround Time Analysis by Request Type</div>", unsafe_allow_html=True)
     
-    # Get all requests first
-    df_all = get_requests()
+    df = get_requests()
     
-    if df_all.empty:
+    if df.empty:
         st.info("No data available. Submit some requests first.")
         return
     
-    # APPLY ROLE-BASED FILTERING - This is the key addition
+    # Apply role-based filtering
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     
     if st.session_state.user_role in ["ADMIN", "MANAGEMENT"] + finance_roles:
         # Management and Finance see ALL requests
-        df = df_all.copy()
-        st.info(f"📊 Showing TAT analysis for ALL departments (Management/Finance view)")
+        filtered_df = df.copy()
+        st.info("📊 Showing TAT analysis for ALL departments")
     else:
         # Regular department users see ONLY their department's requests
-        df = df_all[df_all['department_name'] == st.session_state.user_dept].copy()
+        filtered_df = df[df['department_name'] == st.session_state.user_dept].copy()
         st.info(f"📊 Showing TAT analysis for {st.session_state.user_dept} department only")
     
-    if df.empty:
-        st.info(f"No data available for your department. Submit some requests first.")
+    if filtered_df.empty:
+        st.info("No data available for your department.")
         return
     
     # Apply date filters
-    if data_scope != "All Data" and not df.empty:
-        df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
+    if data_scope != "All Data" and not filtered_df.empty:
+        filtered_df['submission_date_dt'] = pd.to_datetime(filtered_df['submission_date'])
         today = date.today()
         if data_scope == "Last 30 Days":
             cutoff = today - timedelta(days=30)
@@ -649,13 +648,13 @@ def display_tat_by_request_type():
             cutoff = today - timedelta(days=90)
         elif data_scope == "This Year":
             cutoff = date(today.year, 1, 1)
-        df = df[df['submission_date_dt'].dt.date >= cutoff]
+        filtered_df = filtered_df[filtered_df['submission_date_dt'].dt.date >= cutoff]
     
-    df = filter_by_filters(df, st.session_state.selected_financial_year, 
-                          st.session_state.selected_quarter, st.session_state.selected_month,
-                          st.session_state.selected_year)
+    filtered_df = filter_by_filters(filtered_df, st.session_state.selected_financial_year, 
+                                    st.session_state.selected_quarter, st.session_state.selected_month,
+                                    st.session_state.selected_year)
     
-    if df.empty:
+    if filtered_df.empty:
         st.info("No data matches your filters.")
         return
     
@@ -668,8 +667,8 @@ def display_tat_by_request_type():
     
     results = []
     
-    for req_type in df['request_type'].unique():
-        type_df = df[df['request_type'] == req_type]
+    for req_type in filtered_df['request_type'].unique():
+        type_df = filtered_df[filtered_df['request_type'] == req_type]
         completed = type_df[type_df['status'].isin(['PAID', 'CLEARED']) & type_df['payment_date'].notna()]
         
         tat_values = []
@@ -701,7 +700,7 @@ def display_tat_by_request_type():
             
             results.append({
                 'Request Type': req_type,
-                'Sample Size': sample_size,
+                'No. of Records': sample_size,
                 'Avg TAT (Days)': round(avg_tat, 1),
                 'Median (Days)': round(median_tat, 1),
                 'Min (Days)': min_tat,
@@ -722,7 +721,7 @@ def display_tat_by_request_type():
     results_df = results_df.sort_values('Avg TAT (Days)')
     
     st.markdown("### 📊 Performance Metrics by Request Type")
-    display_cols = ['Request Type', 'Sample Size', 'Avg TAT (Days)', 'Median (Days)', 
+    display_cols = ['Request Type', 'No. of Records', 'Avg TAT (Days)', 'Median (Days)', 
                     'P95 (Days)', 'SLA Compliance %', 'Rating']
     st.dataframe(results_df[display_cols], use_container_width=True, hide_index=True)
     
@@ -822,12 +821,12 @@ def display_tat_by_request_type():
             <div class='insight-card'>
                 ✅ <strong>Best SLA Compliance</strong><br>
                 {best_compliance['Request Type']}: {best_compliance['SLA Compliance %']}%<br>
-                Sample: {best_compliance['Sample Size']} requests
+                Based on {best_compliance['No. of Records']} completed request(s)
             </div>
             """, unsafe_allow_html=True)
     
     if len(results_df) > 0:
-        export_df = results_df[['Request Type', 'Sample Size', 'Avg TAT (Days)', 'Median (Days)', 
+        export_df = results_df[['Request Type', 'No. of Records', 'Avg TAT (Days)', 'Median (Days)', 
                                 'Min (Days)', 'Max (Days)', 'P95 (Days)', 'SLA Target', 
                                 'SLA Compliance %', 'Rating']]
         csv = export_df.to_csv(index=False).encode('utf-8')
@@ -1440,7 +1439,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1490,7 +1489,7 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# REQUEST TYPE TAT ANALYSIS (NEW FEATURE WITH ROLE-BASED FILTERING)
+# REQUEST TYPE TAT ANALYSIS (NEW FEATURE)
 # ================================================================
 elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type()
@@ -3379,7 +3378,7 @@ elif choice == "🔐 Change Password":
 # Footer
 st.markdown("""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
+    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
     <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
