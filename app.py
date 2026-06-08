@@ -609,38 +609,39 @@ def refresh_page():
     st.rerun()
 
 # ================================================================
-# REQUEST TYPE TAT ANALYZER (NEW FEATURE)
+# REQUEST TYPE TAT ANALYZER - SHOWS ALL RECORDS (FIXED)
 # ================================================================
 
 def display_tat_by_request_type():
-    """Display TAT analysis grouped by request type"""
+    """Display TAT analysis grouped by request type - shows ALL records, not just completed"""
     st.markdown("<div class='section-header'>⏱️ Turnaround Time Analysis by Request Type</div>", unsafe_allow_html=True)
     
-    df = get_requests()
+    # Get all requests
+    df_all = get_requests()
     
-    if df.empty:
+    if df_all.empty:
         st.info("No data available. Submit some requests first.")
         return
     
-    # Apply role-based filtering
+    # APPLY ROLE-BASED FILTERING
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     
     if st.session_state.user_role in ["ADMIN", "MANAGEMENT"] + finance_roles:
         # Management and Finance see ALL requests
-        filtered_df = df.copy()
-        st.info("📊 Showing TAT analysis for ALL departments")
+        df = df_all.copy()
+        st.info(f"📊 Showing TAT analysis for ALL departments (Total: {len(df)} records)")
     else:
         # Regular department users see ONLY their department's requests
-        filtered_df = df[df['department_name'] == st.session_state.user_dept].copy()
-        st.info(f"📊 Showing TAT analysis for {st.session_state.user_dept} department only")
+        df = df_all[df_all['department_name'] == st.session_state.user_dept].copy()
+        st.info(f"📊 Showing TAT analysis for {st.session_state.user_dept} department only (Total: {len(df)} records)")
     
-    if filtered_df.empty:
-        st.info("No data available for your department.")
+    if df.empty:
+        st.info(f"No data available for your department. Submit some requests first.")
         return
     
     # Apply date filters
-    if data_scope != "All Data" and not filtered_df.empty:
-        filtered_df['submission_date_dt'] = pd.to_datetime(filtered_df['submission_date'])
+    if data_scope != "All Data" and not df.empty:
+        df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
         today = date.today()
         if data_scope == "Last 30 Days":
             cutoff = today - timedelta(days=30)
@@ -648,13 +649,13 @@ def display_tat_by_request_type():
             cutoff = today - timedelta(days=90)
         elif data_scope == "This Year":
             cutoff = date(today.year, 1, 1)
-        filtered_df = filtered_df[filtered_df['submission_date_dt'].dt.date >= cutoff]
+        df = df[df['submission_date_dt'].dt.date >= cutoff]
     
-    filtered_df = filter_by_filters(filtered_df, st.session_state.selected_financial_year, 
-                                    st.session_state.selected_quarter, st.session_state.selected_month,
-                                    st.session_state.selected_year)
+    df = filter_by_filters(df, st.session_state.selected_financial_year, 
+                          st.session_state.selected_quarter, st.session_state.selected_month,
+                          st.session_state.selected_year)
     
-    if filtered_df.empty:
+    if df.empty:
         st.info("No data matches your filters.")
         return
     
@@ -667,18 +668,42 @@ def display_tat_by_request_type():
     
     results = []
     
-    for req_type in filtered_df['request_type'].unique():
-        type_df = filtered_df[filtered_df['request_type'] == req_type]
-        completed = type_df[type_df['status'].isin(['PAID', 'CLEARED']) & type_df['payment_date'].notna()]
+    # Process EACH request type - using ALL records (both completed and pending)
+    for req_type in df['request_type'].unique():
+        type_df = df[df['request_type'] == req_type]
         
+        # Count ALL records of this type
+        total_records = len(type_df)
+        
+        # For TAT calculation, use ALL records:
+        # - If completed, calculate from submission to payment date
+        # - If pending, calculate from submission to today
         tat_values = []
-        for _, row in completed.iterrows():
+        completed_count = 0
+        pending_count = 0
+        returned_count = 0
+        
+        for _, row in type_df.iterrows():
             try:
-                tat = calculate_tat(row['submission_date'], row['payment_date'])
+                if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
+                    # Completed request - calculate TAT to payment date
+                    tat = calculate_tat(row['submission_date'], row['payment_date'])
+                    completed_count += 1
+                elif row['status'] == 'RETURNED':
+                    # Returned request - don't include in TAT average
+                    returned_count += 1
+                    continue
+                else:
+                    # Pending request - calculate TAT to today
+                    tat = calculate_tat(row['submission_date'])
+                    pending_count += 1
+                
                 if tat and tat > 0:
                     tat_values.append(tat)
             except:
                 pass
+        
+        sla_target = sla_map.get(req_type, 5)
         
         if tat_values:
             avg_tat = np.mean(tat_values)
@@ -686,10 +711,9 @@ def display_tat_by_request_type():
             min_tat = np.min(tat_values)
             max_tat = np.max(tat_values)
             p95_tat = np.percentile(tat_values, 95)
-            sample_size = len(tat_values)
-            sla_target = sla_map.get(req_type, 5)
+            
             sla_compliant = sum(1 for t in tat_values if t <= sla_target)
-            sla_rate = (sla_compliant / sample_size * 100) if sample_size > 0 else 0
+            sla_rate = (sla_compliant / len(tat_values) * 100) if len(tat_values) > 0 else 0
             
             if avg_tat <= sla_target:
                 rating = "✅ Excellent"
@@ -697,94 +721,128 @@ def display_tat_by_request_type():
                 rating = "⚠️ Acceptable"
             else:
                 rating = "❌ Needs Improvement"
-            
-            results.append({
-                'Request Type': req_type,
-                'No. of Records': sample_size,
-                'Avg TAT (Days)': round(avg_tat, 1),
-                'Median (Days)': round(median_tat, 1),
-                'Min (Days)': min_tat,
-                'Max (Days)': max_tat,
-                'P95 (Days)': round(p95_tat, 1),
-                'SLA Target': sla_target,
-                'SLA Compliance %': round(sla_rate, 1),
-                'Rating': rating,
-                '_avg_tat': avg_tat,
-                '_sla_target': sla_target
-            })
+        else:
+            avg_tat = 0
+            median_tat = 0
+            min_tat = 0
+            max_tat = 0
+            p95_tat = 0
+            sla_rate = 0
+            rating = "⏳ No data"
+        
+        results.append({
+            'Request Type': req_type,
+            'Total Records': total_records,
+            'Completed': completed_count,
+            'Pending': pending_count,
+            'Returned': returned_count,
+            'Avg TAT (Days)': round(avg_tat, 1) if avg_tat > 0 else 'N/A',
+            'Median (Days)': round(median_tat, 1) if median_tat > 0 else 'N/A',
+            'Min (Days)': min_tat if min_tat > 0 else 'N/A',
+            'Max (Days)': max_tat if max_tat > 0 else 'N/A',
+            'P95 (Days)': round(p95_tat, 1) if p95_tat > 0 else 'N/A',
+            'SLA Target': f"{sla_target}d",
+            'SLA Compliance %': round(sla_rate, 1) if sla_rate > 0 else 'N/A',
+            'Rating': rating,
+            '_avg_tat': avg_tat if avg_tat > 0 else 0,
+            '_sla_target': sla_target
+        })
     
     if not results:
-        st.info("Complete more requests to see TAT analysis. Need at least one completed request per type.")
+        st.info("No request types found in the data.")
         return
     
     results_df = pd.DataFrame(results)
-    results_df = results_df.sort_values('Avg TAT (Days)')
+    # Sort by average TAT (put N/A at the bottom)
+    results_df['_avg_tat_sort'] = results_df['_avg_tat'].apply(lambda x: 999 if x == 'N/A' else x)
+    results_df = results_df.sort_values('_avg_tat_sort')
     
     st.markdown("### 📊 Performance Metrics by Request Type")
-    display_cols = ['Request Type', 'No. of Records', 'Avg TAT (Days)', 'Median (Days)', 
-                    'P95 (Days)', 'SLA Compliance %', 'Rating']
+    display_cols = ['Request Type', 'Total Records', 'Completed', 'Pending', 'Returned', 
+                    'Avg TAT (Days)', 'Median (Days)', 'P95 (Days)', 'SLA Target', 'SLA Compliance %', 'Rating']
     st.dataframe(results_df[display_cols], use_container_width=True, hide_index=True)
     
-    col1, col2 = st.columns(2)
+    # Filter out rows with no TAT data for charts
+    chart_df = results_df[results_df['Avg TAT (Days)'] != 'N/A'].copy()
     
-    with col1:
-        fig = go.Figure()
+    if not chart_df.empty:
+        col1, col2 = st.columns(2)
         
-        colors = []
-        for _, row in results_df.iterrows():
-            if row['Avg TAT (Days)'] <= row['_sla_target']:
-                colors.append('#00843D')
-            else:
-                colors.append('#DC2626')
+        with col1:
+            fig = go.Figure()
+            
+            colors = []
+            for _, row in chart_df.iterrows():
+                if row['_avg_tat'] <= row['_sla_target']:
+                    colors.append('#00843D')
+                else:
+                    colors.append('#DC2626')
+            
+            fig.add_trace(go.Bar(
+                x=chart_df['Request Type'],
+                y=chart_df['_avg_tat'],
+                marker_color=colors,
+                text=chart_df['_avg_tat'].apply(lambda x: f"{x:.1f}d"),
+                textposition='outside',
+                name='Average TAT'
+            ))
+            
+            fig.add_hline(y=5, line_dash="dash", line_color="#FFB81C", 
+                          annotation_text="SLA Threshold (5 days)", annotation_position="top right")
+            
+            fig.update_layout(
+                title="Average Turnaround Time by Request Type",
+                xaxis_title="",
+                yaxis_title="Days",
+                height=400,
+                xaxis_tickangle=-45,
+                plot_bgcolor='white'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
         
-        fig.add_trace(go.Bar(
-            x=results_df['Request Type'],
-            y=results_df['Avg TAT (Days)'],
-            marker_color=colors,
-            text=results_df['Avg TAT (Days)'].apply(lambda x: f"{x:.1f}d"),
-            textposition='outside',
-            name='Average TAT'
-        ))
-        
-        fig.add_hline(y=5, line_dash="dash", line_color="#FFB81C", 
-                      annotation_text="SLA Threshold (5 days)", annotation_position="top right")
-        
-        fig.update_layout(
-            title="Average Turnaround Time by Request Type",
-            xaxis_title="",
-            yaxis_title="Days",
-            height=400,
-            xaxis_tickangle=-45,
-            plot_bgcolor='white'
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        fig2 = go.Figure()
-        
-        fig2.add_trace(go.Bar(
-            x=results_df['Request Type'],
-            y=results_df['SLA Compliance %'],
-            marker_color='#00843D',
-            text=results_df['SLA Compliance %'].apply(lambda x: f"{x:.0f}%"),
-            textposition='outside',
-            name='SLA Compliance'
-        ))
-        
-        fig2.add_hline(y=80, line_dash="dash", line_color="#FFB81C", 
-                       annotation_text="Target (80%)", annotation_position="top right")
-        
-        fig2.update_layout(
-            title="SLA Compliance by Request Type",
-            xaxis_title="",
-            yaxis_title="Compliance %",
-            height=400,
-            xaxis_tickangle=-45,
-            plot_bgcolor='white'
-        )
-        
-        st.plotly_chart(fig2, use_container_width=True)
+        with col2:
+            # Stacked bar for completion status
+            fig_stack = go.Figure()
+            
+            fig_stack.add_trace(go.Bar(
+                name='Completed',
+                x=results_df['Request Type'],
+                y=results_df['Completed'],
+                marker_color='#00843D',
+                text=results_df['Completed'],
+                textposition='inside'
+            ))
+            
+            fig_stack.add_trace(go.Bar(
+                name='Pending',
+                x=results_df['Request Type'],
+                y=results_df['Pending'],
+                marker_color='#FFB81C',
+                text=results_df['Pending'],
+                textposition='inside'
+            ))
+            
+            fig_stack.add_trace(go.Bar(
+                name='Returned',
+                x=results_df['Request Type'],
+                y=results_df['Returned'],
+                marker_color='#DC3545',
+                text=results_df['Returned'],
+                textposition='inside'
+            ))
+            
+            fig_stack.update_layout(
+                title="Request Status Distribution by Type",
+                xaxis_title="",
+                yaxis_title="Number of Requests",
+                height=400,
+                barmode='stack',
+                xaxis_tickangle=-45,
+                plot_bgcolor='white'
+            )
+            
+            st.plotly_chart(fig_stack, use_container_width=True)
     
     st.markdown("---")
     st.markdown("### 📈 Key Insights")
@@ -792,43 +850,60 @@ def display_tat_by_request_type():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if len(results_df) > 0:
-            fastest = results_df.iloc[0]
+        if len(chart_df) > 0:
+            fastest = chart_df.iloc[0]
             st.markdown(f"""
             <div class='insight-card'>
                 🏆 <strong>Fastest Processing</strong><br>
                 {fastest['Request Type']}: {fastest['Avg TAT (Days)']} days avg<br>
-                Compliance: {fastest['SLA Compliance %']}%
+                Compliance: {fastest['SLA Compliance %']}%<br>
+                Total: {fastest['Total Records']} requests
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class='insight-card'>
+                🏆 <strong>Fastest Processing</strong><br>
+                Complete more requests to see TAT data.
             </div>
             """, unsafe_allow_html=True)
     
     with col2:
-        if len(results_df) > 0:
-            slowest = results_df.iloc[-1]
+        if len(chart_df) > 0:
+            slowest = chart_df.iloc[-1]
             st.markdown(f"""
             <div class='warning-card'>
                 ⚠️ <strong>Needs Improvement</strong><br>
                 {slowest['Request Type']}: {slowest['Avg TAT (Days)']} days avg<br>
-                Compliance: {slowest['SLA Compliance %']}%
+                Compliance: {slowest['SLA Compliance %']}%<br>
+                Total: {slowest['Total Records']} requests
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class='warning-card'>
+                ⚠️ <strong>Needs Improvement</strong><br>
+                Complete more requests to see TAT data.
             </div>
             """, unsafe_allow_html=True)
     
     with col3:
         if len(results_df) > 0:
-            best_compliance_idx = results_df['SLA Compliance %'].idxmax()
-            best_compliance = results_df.loc[best_compliance_idx]
+            # Find highest volume request type
+            highest_volume = results_df.loc[results_df['Total Records'].idxmax()]
             st.markdown(f"""
             <div class='insight-card'>
-                ✅ <strong>Best SLA Compliance</strong><br>
-                {best_compliance['Request Type']}: {best_compliance['SLA Compliance %']}%<br>
-                Based on {best_compliance['No. of Records']} completed request(s)
+                📊 <strong>Highest Volume</strong><br>
+                {highest_volume['Request Type']}: {highest_volume['Total Records']} total requests<br>
+                Completed: {highest_volume['Completed']} | Pending: {highest_volume['Pending']}
             </div>
             """, unsafe_allow_html=True)
     
+    # Export option
     if len(results_df) > 0:
-        export_df = results_df[['Request Type', 'No. of Records', 'Avg TAT (Days)', 'Median (Days)', 
-                                'Min (Days)', 'Max (Days)', 'P95 (Days)', 'SLA Target', 
-                                'SLA Compliance %', 'Rating']]
+        export_df = results_df[['Request Type', 'Total Records', 'Completed', 'Pending', 'Returned', 
+                                'Avg TAT (Days)', 'Median (Days)', 'Min (Days)', 'Max (Days)', 
+                                'P95 (Days)', 'SLA Target', 'SLA Compliance %', 'Rating']]
         csv = export_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
@@ -1439,7 +1514,7 @@ elif choice == "📈 Management Dashboard":
                 else:
                     avg_tat_dept = 0
                 
-                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4)
+                score = (completion_rate * 0.6) + (max(0, min(100, (15 - (avg_tat_dept if not pd.isna(avg_tat_dept) else 15)) * 6.67)) * 0.4
                 
                 dept_performance.append({
                     'Department': dept,
@@ -1489,14 +1564,14 @@ elif choice == "📈 Management Dashboard":
 
 
 # ================================================================
-# REQUEST TYPE TAT ANALYSIS (NEW FEATURE)
+# REQUEST TYPE TAT ANALYSIS (FIXED - SHOWS ALL RECORDS)
 # ================================================================
 elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type()
 
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS (FIXED BUSINESS DAYS)
+# ENHANCED SEARCH PAYMENT RECORDS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -1835,7 +1910,7 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST
+# NEW REQUEST (COMPLETE - UNCHANGED)
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
@@ -3378,7 +3453,7 @@ elif choice == "🔐 Change Password":
 # Footer
 st.markdown("""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
+    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System v5.0</p>
     <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
