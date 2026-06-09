@@ -373,6 +373,10 @@ def init_database():
         )
     ''')
     
+    # Check if fare_reimbursement_details column exists, if not add it
+    cursor.execute("PRAGMA table_info(requests)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
     # Requests table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
@@ -423,10 +427,17 @@ def init_database():
             mileage_claim_details TEXT,
             training_details TEXT,
             professional_body TEXT,
-            direct_payment_details TEXT,
-            fare_reimbursement_details TEXT
+            direct_payment_details TEXT
         )
     ''')
+    
+    # Add fare_reimbursement_details column if it doesn't exist
+    if 'fare_reimbursement_details' not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE requests ADD COLUMN fare_reimbursement_details TEXT")
+            print("Added fare_reimbursement_details column")
+        except:
+            pass
     
     # SLA Config table
     cursor.execute('''
@@ -508,6 +519,11 @@ def init_database():
             ('Professional Body', 5), ('Direct Payment', 3), ('Fare Reimbursement', 3)
         ]
         cursor.executemany("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla_defaults)
+    else:
+        # Check if Fare Reimbursement exists in sla_config, if not add it
+        cursor.execute("SELECT COUNT(*) FROM sla_config WHERE request_type = 'Fare Reimbursement'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", ('Fare Reimbursement', 3))
     
     conn.commit()
     conn.close()
@@ -1206,6 +1222,12 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
     total_amount = df['amount'].sum()
     breaches = 0
     completion_times = []
+    
+    sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+               'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+               'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3}
+    
     for _, row in df.iterrows():
         if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
             try:
@@ -1213,10 +1235,6 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
                 paid = datetime.strptime(row['payment_date'], '%Y-%m-%d').date()
                 days = working_days_between(submitted, paid)
                 completion_times.append(days)
-                sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                           'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                           'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                           'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3}
                 sla_days = sla_map.get(row['request_type'], 5)
                 if days > sla_days:
                     breaches += 1
@@ -1284,18 +1302,18 @@ def get_all_batch_numbers():
     return [r[0] for r in results if r[0]]
 
 # ================================================================
-# UPDATED PERMISSION FUNCTIONS - FIXED FOR FINANCE_ADMIN AND FARE REIMBURSEMENT
+# PERMISSION FUNCTIONS - FIXED
 # ================================================================
 
 def get_allowed_main_categories(user_role, user_dept):
-    """Get allowed main categories for a user - FIXED for Finance Admin"""
+    """Get allowed main categories for a user"""
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     
-    # Finance Admins and Admins can submit requests on behalf of others
+    # Admins and Finance Admins can submit requests
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
         return ["Submit Payment Request", "Submit Surrender"]
     
-    # Finance processors/receivers/releasers cannot submit requests
+    # Other finance roles cannot submit requests
     if user_role in finance_roles:
         return []
     
@@ -1307,7 +1325,7 @@ def get_allowed_main_categories(user_role, user_dept):
     return ["Submit Payment Request", "Submit Surrender"]
 
 def get_allowed_request_types(user_role, user_dept, main_category):
-    """Get allowed request types for a user - ADDED Fare Reimbursement for HR and Field Services"""
+    """Get allowed request types for a user"""
     
     # Admins and Finance Admins can see all request types
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
@@ -1337,9 +1355,9 @@ def get_allowed_request_types(user_role, user_dept, main_category):
             allowed.append("Mileage Claim")
             allowed.append("Staff Training")
             allowed.append("Professional Body")
-            allowed.append("Fare Reimbursement")  # ADDED for HR
+            allowed.append("Fare Reimbursement")
         if user_dept == "Field Services":
-            allowed.append("Fare Reimbursement")  # ADDED for Field Services
+            allowed.append("Fare Reimbursement")
         if user_dept == "Debt Management":
             allowed.append("Refund Payment")
         
