@@ -559,6 +559,8 @@ def get_reference_number(row):
         return row.get('professional_body', '-')
     elif row['request_type'] == "Salary Payment":
         return f"{row.get('salary_month', '')} {row.get('salary_year', '')}" if row.get('salary_month') else '-'
+    elif row['request_type'] == "Fare Reimbursement":
+        return row.get('fare_reimbursement_details', '-')[:20] if row.get('fare_reimbursement_details') else '-'
     else:
         return '-'
 
@@ -678,7 +680,7 @@ def display_tat_by_request_type():
         st.info("No data matches your filters.")
         return
     
-    # Get SLA from database - THIS IS THE ONLY CHANGE
+    # Get SLA from database
     def get_sla_from_database():
         try:
             conn = sqlite3.connect("helb_data.db")
@@ -695,7 +697,8 @@ def display_tat_by_request_type():
                 'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
                 'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
                 'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                'Professional Body': 5, 'Direct Payment': 3
+                'Professional Body': 5, 'Direct Payment': 3,
+                'Fare Reimbursement': 3
             }
     
     sla_map = get_sla_from_database()
@@ -1295,10 +1298,12 @@ elif choice == "📈 Management Dashboard":
         
         completed_df = df[df['status'].isin(['PAID', 'CLEARED']) & df['payment_date'].notna()]
         sla_compliant = 0
-        sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                   'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                   'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                   'Professional Body': 5, 'Direct Payment': 3}
+        sla_map = get_sla_from_database() if 'get_sla_from_database' in dir() else {
+            'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+            'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+            'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+            'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
+        }
         
         for _, row in completed_df.iterrows():
             try:
@@ -1698,10 +1703,12 @@ elif choice == "🔍 Search Payment Records":
                         status_badge = f'<span class="status-pending">⏳ {row["status"]} (Pending: {tat} days)</span>'
                         is_completed = False
                     
-                    sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                               'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                               'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                               'Professional Body': 5, 'Direct Payment': 3}
+                    sla_map = get_sla_from_database() if 'get_sla_from_database' in dir() else {
+                        'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
+                        'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+                        'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+                        'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
+                    }
                     sla_days = sla_map.get(row['request_type'], 5)
                     
                     if not is_completed:
@@ -1727,7 +1734,7 @@ elif choice == "🔍 Search Payment Records":
                     
                     ref_number = get_reference_number(row)
                     
-                    # FIXED: Calculate predicted date using working days only
+                    # Calculate predicted date using working days only
                     predicted_date = None
                     confidence = None
                     if not is_completed:
@@ -1739,7 +1746,6 @@ elif choice == "🔍 Search Payment Records":
                                 (df_all['payment_date'].notna())
                             ]
                             if not similar_completed.empty:
-                                # Calculate average TAT from similar completed requests
                                 tat_values = []
                                 for _, sim in similar_completed.iterrows():
                                     if sim.get('payment_date'):
@@ -1748,19 +1754,16 @@ elif choice == "🔍 Search Payment Records":
                                 if tat_values:
                                     avg_tat_similar = np.mean(tat_values)
                                     remaining_days = max(1, int(avg_tat_similar - tat))
-                                    # Use add_working_days to skip weekends and holidays
                                     predicted_date = add_working_days(date.today(), remaining_days)
                                     confidence = "High" if len(tat_values) > 20 else "Medium" if len(tat_values) > 5 else "Low"
                                 else:
                                     predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
                                     confidence = "Estimated"
                             else:
-                                # Use SLA-based prediction with working days
                                 remaining = max(1, sla_days - tat)
                                 predicted_date = add_working_days(date.today(), remaining)
                                 confidence = "Estimated"
                         except Exception as e:
-                            # Fallback to simple working days calculation
                             try:
                                 predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
                                 confidence = "Estimated"
@@ -1775,7 +1778,6 @@ elif choice == "🔍 Search Payment Records":
                             st.markdown(f"**Risk Level:** <span style='color:{risk_color}; font-weight:bold;'>{risk_level}</span>", unsafe_allow_html=True)
                         with col3:
                             if not is_completed and predicted_date:
-                                # Format date to show day name for verification
                                 day_name = predicted_date.strftime('%A')
                                 st.markdown(f"**📅 Estimated Completion:** {predicted_date.strftime('%d %b %Y')} ({day_name}) <span style='font-size:0.6rem;'>({confidence})</span>", unsafe_allow_html=True)
                             elif is_completed and row.get('payment_date'):
@@ -1838,6 +1840,8 @@ elif choice == "🔍 Search Payment Records":
                             detail_items.append(("Salary Period", f"{row['salary_month']} {row['salary_year']}"))
                         if row.get('professional_body'):
                             detail_items.append(("Professional Body", row['professional_body']))
+                        if row.get('fare_reimbursement_details'):
+                            detail_items.append(("Fare Reimbursement", row['fare_reimbursement_details'][:50]))
                         
                         for i, (label, value) in enumerate(detail_items[:8]):
                             with details_cols[i % 4]:
@@ -1962,33 +1966,55 @@ elif choice == "🔍 Search Payment Records":
 
 
 # ================================================================
-# NEW REQUEST (COMPLETE - UNCHANGED)
+# NEW REQUEST (UPDATED - WITH ON-BEHALF SUBMISSION AND FARE REIMBURSEMENT)
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
     
-    allowed_main_categories = get_allowed_main_categories(st.session_state.user_role, st.session_state.user_dept)
+    # Check if user is Finance Admin (can submit on behalf of other departments)
+    finance_admin_roles = ["FINANCE_ADMIN", "ADMIN"]
+    can_submit_on_behalf = st.session_state.user_role in finance_admin_roles
+    
+    # Department selection for Finance Admins
+    selected_dept = st.session_state.user_dept
+    if can_submit_on_behalf:
+        departments_list = get_departments()
+        dept_options = ["Same as my department"] + departments_list['name'].tolist() if not departments_list.empty else ["Same as my department"]
+        dept_choice = st.selectbox("Submitting for Department:", dept_options)
+        if dept_choice != "Same as my department":
+            selected_dept = dept_choice
+            st.info(f"📝 Submitting request on behalf of: **{selected_dept}**")
+    
+    allowed_main_categories = get_allowed_main_categories(st.session_state.user_role, selected_dept)
     if not allowed_main_categories:
         st.error("Your role does not have permission to submit requests.")
     else:
         main_category = st.radio("What would you like to do?", allowed_main_categories, horizontal=True)
         st.markdown("---")
-        allowed_types = get_allowed_request_types(st.session_state.user_role, st.session_state.user_dept, main_category)
+        allowed_types = get_allowed_request_types(st.session_state.user_role, selected_dept, main_category)
         if not allowed_types:
             st.error("No request types available.")
         else:
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
+            # Get department_id for selected department
+            conn = sqlite3.connect("helb_data.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM departments WHERE name = ?", (selected_dept,))
+            dept_result = cursor.fetchone()
+            dept_id = dept_result[0] if dept_result else st.session_state.user_dept_id
+            conn.close()
+            
             # Student Payment - Regular (Lending)
-            if main_category == "Submit Payment Request" and selected_type == "Student Payment" and st.session_state.user_dept != "External Resource Mobilization":
+            if main_category == "Submit Payment Request" and selected_type == "Student Payment" and selected_dept != "External Resource Mobilization":
                 products = get_products()
                 product_list = products['name'].tolist() if not products.empty else ["Undergraduate", "TVET", "Jielimishe"]
                 product_type = st.selectbox("Product Type", product_list)
                 with st.form(key="student_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     amount = st.number_input("Amount (KShs.)", min_value=0.0, format="%.2f", step=1000.0)
@@ -2009,23 +2035,24 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'batch_no': batch_no, 'product_type': product_type, 'semester': semester,
                                 'payment_type': payment_category, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Student Payment - ERM
-            elif main_category == "Submit Payment Request" and selected_type == "Student Payment" and st.session_state.user_dept == "External Resource Mobilization":
+            elif main_category == "Submit Payment Request" and selected_type == "Student Payment" and selected_dept == "External Resource Mobilization":
                 with st.form(key="erm_student_form"):
                     st.subheader("🎓 Student Payment Details (Partner Funds)")
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
@@ -2048,14 +2075,15 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': "Student Payment",
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'batch_no': batch_no, 'funder_name': funder_name,
                                 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Imprest
@@ -2063,7 +2091,7 @@ elif choice == "📝 New Request":
                 with st.form(key="imprest_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     imprest_no = st.text_input("Imprest No.")
@@ -2077,13 +2105,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'imprest_no': imprest_no, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Petty Cash
@@ -2091,7 +2120,7 @@ elif choice == "📝 New Request":
                 with st.form(key="petty_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     petty_cash_no = st.text_input("Petty Cash No.")
@@ -2105,13 +2134,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'imprest_no': petty_cash_no, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Direct Payment
@@ -2120,7 +2150,7 @@ elif choice == "📝 New Request":
                     st.subheader("💸 Direct Payment Details")
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
@@ -2137,14 +2167,15 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'direct_payment_details': direct_payment_details, 'invoice_no': invoice_no,
                                 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Supplier Payment
@@ -2152,7 +2183,7 @@ elif choice == "📝 New Request":
                 with st.form(key="supplier_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     invoice_no = st.text_input("Invoice No.")
@@ -2167,13 +2198,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'invoice_no': invoice_no, 'supplier_name': supplier_name, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Salary Payment
@@ -2181,7 +2213,7 @@ elif choice == "📝 New Request":
                 with st.form(key="salary_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -2196,13 +2228,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'financial_year': financial_year, 'salary_month': salary_month,
                                 'salary_year': salary_year, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Refund Payment
@@ -2210,7 +2243,7 @@ elif choice == "📝 New Request":
                 with st.form(key="refund_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     refund_id = st.text_input("Refund ID")
@@ -2225,13 +2258,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'financial_year': financial_year, 'imprest_no': refund_id,
                                 'customer_name': customer_name, 'customer_id': customer_id, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Mileage Claim
@@ -2240,7 +2274,7 @@ elif choice == "📝 New Request":
                     st.subheader("⛽ Mileage Claim Details")
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     
@@ -2257,14 +2291,15 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'mileage_claim_details': mileage_claim_details, 'staff_name': staff_name,
                                 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Staff Training
@@ -2272,7 +2307,7 @@ elif choice == "📝 New Request":
                 with st.form(key="training_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     training_details = st.text_area("Training Details (Course, Institution, Duration)")
@@ -2286,13 +2321,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'training_details': training_details, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Professional Body
@@ -2300,7 +2336,7 @@ elif choice == "📝 New Request":
                 with st.form(key="professional_form"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     professional_body = st.text_input("Professional Body Name")
@@ -2314,13 +2350,59 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': selected_type,
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'professional_body': professional_body, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
+                            st.balloons()
+            
+            # Fare Reimbursement (NEW)
+            elif main_category == "Submit Payment Request" and selected_type == "Fare Reimbursement":
+                with st.form(key="fare_reimbursement_form"):
+                    st.subheader("🚕 Fare Reimbursement Details")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input("Department", value=selected_dept, disabled=True)
+                    with col2:
+                        st.date_input("Submission Date", value=datetime.today(), disabled=True)
+                    
+                    staff_name = st.text_input("Staff Name *")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        journey_from = st.text_input("Journey From *")
+                    with col2:
+                        journey_to = st.text_input("Journey To *")
+                    
+                    journey_purpose = st.text_area("Purpose of Journey *")
+                    journey_date = st.date_input("Date of Journey *", value=datetime.today())
+                    amount = st.number_input("Amount Claimed (KShs.)", min_value=0.0, format="%.2f", step=100.0)
+                    financial_years = get_financial_years()
+                    financial_year = st.selectbox("Financial Year", financial_years if financial_years else ["2025/2026", "2026/2027"])
+                    payment_description = st.text_area("Additional Notes (Optional)")
+                    
+                    fare_details = f"From: {journey_from} | To: {journey_to} | Purpose: {journey_purpose} | Date: {journey_date.strftime('%Y-%m-%d')}"
+                    
+                    if st.form_submit_button("Submit"):
+                        if not staff_name or not journey_from or not journey_to or not journey_purpose or amount <= 0:
+                            st.error("Please fill all required fields (*)")
+                        else:
+                            request_data = {
+                                'main_category': main_category, 'request_type': selected_type,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
+                                'payment_description': payment_description or fare_details,
+                                'financial_year': financial_year,
+                                'fare_reimbursement_details': fare_details,
+                                'staff_name': staff_name,
+                                'status': 'SUBMITTED'
+                            }
+                            request_number = save_request(request_data)
+                            st.success(f"✅ Fare Reimbursement request {request_number} submitted for {selected_dept}!")
                             st.balloons()
             
             # Surrender
@@ -2329,7 +2411,7 @@ elif choice == "📝 New Request":
                     st.subheader("📤 Surrender Details")
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.text_input("Department", value=st.session_state.user_dept, disabled=True)
+                        st.text_input("Department", value=selected_dept, disabled=True)
                     with col2:
                         st.date_input("Submission Date", value=datetime.today(), disabled=True)
                     surrender_no = st.text_input("Surrender No.")
@@ -2344,13 +2426,14 @@ elif choice == "📝 New Request":
                         else:
                             request_data = {
                                 'main_category': main_category, 'request_type': "Surrender",
-                                'department_id': st.session_state.user_dept_id, 'department_name': st.session_state.user_dept,
-                                'submitted_by': st.session_state.username, 'amount': amount,
+                                'department_id': dept_id, 'department_name': selected_dept,
+                                'submitted_by': st.session_state.username,
+                                'amount': amount,
                                 'payment_description': payment_description, 'financial_year': financial_year,
                                 'surrender_number': surrender_no, 'staff_name': staff_name, 'status': 'SUBMITTED'
                             }
                             request_number = save_request(request_data)
-                            st.success(f"✅ Request {request_number} submitted!")
+                            st.success(f"✅ Request {request_number} submitted for {selected_dept}!")
                             st.balloons()
     
     if st.button("🔄 Refresh This Page", key="new_refresh"):
@@ -2468,6 +2551,15 @@ elif choice == "↩️ Returned Requests":
                             'staff_name': corrected_staff,
                             'amount': corrected_amount
                         }
+                    elif req['request_type'] == "Fare Reimbursement":
+                        corrected_staff = st.text_input("Staff Name", value=req.get('staff_name', ''))
+                        corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=100.0)
+                        corrected_description = st.text_area("Fare Details", value=req.get('fare_reimbursement_details', ''))
+                        correction_data = {
+                            'staff_name': corrected_staff,
+                            'amount': corrected_amount,
+                            'fare_reimbursement_details': corrected_description
+                        }
                     else:
                         corrected_amount = st.number_input("Amount (KShs.)", value=float(req['amount']), min_value=0.0, step=1000.0)
                         correction_data = {'amount': corrected_amount}
@@ -2515,7 +2607,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE
+# APPROVAL QUEUE (UPDATED - WITH RETURN BUTTON AT EVERY STAGE)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -2589,7 +2681,7 @@ elif choice == "✅ Approval Queue":
             if payment_pending.empty:
                 st.info("No pending payment requests.")
             else:
-                # Section 1
+                # Section 1: SUBMITTED
                 section1 = payment_pending[payment_pending['status'] == 'SUBMITTED']
                 if not section1.empty:
                     st.markdown(f"""
@@ -2622,10 +2714,13 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("Please check both boxes")
                             
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
                             reason = st.text_input("Return Reason", key=f"pay_txt_return_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return_{rid}")
                             if st.button(f"↩️ Return Request", key=f"pay_btn_return_{rid}"):
                                 if reason:
-                                    if pwd and verify_finance_password(pwd):
+                                    if pwd_return and verify_finance_password(pwd_return):
                                         update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
                                         st.warning(f"Request returned!")
                                         st.rerun()
@@ -2634,7 +2729,7 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Please provide a return reason")
                 
-                # Section 2
+                # Section 2: RECEIVED_BY_FINANCE
                 section2 = payment_pending[payment_pending['status'] == 'RECEIVED_BY_FINANCE']
                 if not section2.empty:
                     st.markdown(f"""
@@ -2657,8 +2752,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return2_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return2_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return2_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section 3
+                # Section 3: PAYMENT_PREPARED
                 section3 = payment_pending[payment_pending['status'] == 'PAYMENT_PREPARED']
                 if not section3.empty:
                     st.markdown(f"""
@@ -2680,8 +2790,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return3_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return3_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return3_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section 4
+                # Section 4: PAYMENT_VERIFIED
                 section4 = payment_pending[payment_pending['status'] == 'PAYMENT_VERIFIED']
                 if not section4.empty:
                     st.markdown(f"""
@@ -2703,8 +2828,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return4_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return4_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return4_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section 5
+                # Section 5: PAYMENT_APPROVED
                 section5 = payment_pending[payment_pending['status'] == 'PAYMENT_APPROVED']
                 if not section5.empty:
                     st.markdown(f"""
@@ -2726,8 +2866,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return5_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return5_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return5_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section 6
+                # Section 6: PAYMENT_AUTHORIZED
                 section6 = payment_pending[payment_pending['status'] == 'PAYMENT_AUTHORIZED']
                 if not section6.empty:
                     st.markdown(f"""
@@ -2756,6 +2911,21 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Enter payment reference!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"pay_txt_return6_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"pay_pwd_return6_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"pay_btn_return6_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
         
         with tab_surrender:
             surrender_pending = surrender_df[surrender_df['status'].isin(['SUBMITTED', 'RECEIVED_BY_FINANCE', 'SURRENDER_FIRST_VERIFICATION', 'SURRENDER_SECOND_VERIFICATION', 'SURRENDER_APPROVAL', 'SURRENDER_POSTING'])]
@@ -2763,7 +2933,7 @@ elif choice == "✅ Approval Queue":
             if surrender_pending.empty:
                 st.info("No pending surrender requests.")
             else:
-                # Section S1
+                # Section S1: SUBMITTED
                 s_section1 = surrender_pending[surrender_pending['status'] == 'SUBMITTED']
                 if not s_section1.empty:
                     st.markdown(f"""
@@ -2796,10 +2966,13 @@ elif choice == "✅ Approval Queue":
                                     else:
                                         st.error("Please check both boxes")
                             
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
                             reason = st.text_input("Return Reason", key=f"surr_txt_return_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return_{rid}")
                             if st.button(f"↩️ Return Request", key=f"surr_btn_return_{rid}"):
                                 if reason:
-                                    if pwd and verify_finance_password(pwd):
+                                    if pwd_return and verify_finance_password(pwd_return):
                                         update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
                                         st.warning(f"Request returned!")
                                         st.rerun()
@@ -2808,7 +2981,7 @@ elif choice == "✅ Approval Queue":
                                 else:
                                     st.error("Please provide a return reason")
                 
-                # Section S2
+                # Section S2: RECEIVED_BY_FINANCE
                 s_section2 = surrender_pending[surrender_pending['status'] == 'RECEIVED_BY_FINANCE']
                 if not s_section2.empty:
                     st.markdown(f"""
@@ -2831,8 +3004,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return2_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return2_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return2_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section S3
+                # Section S3: SURRENDER_FIRST_VERIFICATION
                 s_section3 = surrender_pending[surrender_pending['status'] == 'SURRENDER_FIRST_VERIFICATION']
                 if not s_section3.empty:
                     st.markdown(f"""
@@ -2854,8 +3042,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return3_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return3_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return3_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section S4
+                # Section S4: SURRENDER_SECOND_VERIFICATION
                 s_section4 = surrender_pending[surrender_pending['status'] == 'SURRENDER_SECOND_VERIFICATION']
                 if not s_section4.empty:
                     st.markdown(f"""
@@ -2877,8 +3080,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return4_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return4_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return4_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section S5
+                # Section S5: SURRENDER_APPROVAL
                 s_section5 = surrender_pending[surrender_pending['status'] == 'SURRENDER_APPROVAL']
                 if not s_section5.empty:
                     st.markdown(f"""
@@ -2900,8 +3118,23 @@ elif choice == "✅ Approval Queue":
                                     st.rerun()
                                 else:
                                     st.error("Incorrect password!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return5_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return5_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return5_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
                 
-                # Section S6
+                # Section S6: SURRENDER_POSTING
                 s_section6 = surrender_pending[surrender_pending['status'] == 'SURRENDER_POSTING']
                 if not s_section6.empty:
                     st.markdown(f"""
@@ -2930,6 +3163,21 @@ elif choice == "✅ Approval Queue":
                                         st.error("Incorrect password!")
                                 else:
                                     st.error("Enter reference number!")
+                            
+                            st.markdown("---")
+                            st.markdown("**Return Request**")
+                            reason = st.text_input("Return Reason", key=f"surr_txt_return6_{rid}")
+                            pwd_return = st.text_input("Finance Password", type="password", key=f"surr_pwd_return6_{rid}")
+                            if st.button(f"↩️ Return Request", key=f"surr_btn_return6_{rid}"):
+                                if reason:
+                                    if pwd_return and verify_finance_password(pwd_return):
+                                        update_request_status(rid, 'RETURNED', return_reason=reason, performed_by=st.session_state.username)
+                                        st.warning(f"Request returned!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Incorrect password!")
+                                else:
+                                    st.error("Please provide a return reason")
     else:
         st.error("Access denied. Finance only.")
     
@@ -2957,7 +3205,7 @@ elif choice == "⚡ Bulk Operations":
             bulk_type_filter = st.multiselect(
                 "Filter by Request Type",
                 ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", 
-                 "Salary Payment", "Refund Payment", "Direct Payment", "Surrender"],
+                 "Salary Payment", "Refund Payment", "Direct Payment", "Surrender", "Fare Reimbursement"],
                 default=[]
             )
         with col3:
@@ -3541,7 +3789,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                 'Mileage Claim': 'Simple calculation - Recommend 2-3 days',
                 'Staff Training': 'Document verification - Recommend 3-5 days',
                 'Professional Body': 'External confirmation - Recommend 3-5 days',
-                'Direct Payment': 'Urgent payments - Recommend 2-3 days'
+                'Direct Payment': 'Urgent payments - Recommend 2-3 days',
+                'Fare Reimbursement': 'Staff travel - Recommend 2-3 days'
             }
             
             rec = recommendations.get(request_type_to_update, 'Adjust based on business needs')
@@ -3565,7 +3814,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
                     'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
                     'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                    'Professional Body': 5, 'Direct Payment': 3
+                    'Professional Body': 5, 'Direct Payment': 3,
+                    'Fare Reimbursement': 3
                 }
                 default_value = default_values.get(request_type_to_update, 5)
                 if st.button("↩️ Reset to Default", type="secondary"):
@@ -3659,6 +3909,6 @@ else:
 st.markdown(f"""
 <div class='main-footer'>
     <p>{footer_logo} © 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
-    <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
+    <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Fare Reimbursement | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
