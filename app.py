@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 import numpy as np
 import calendar
 import os
+import base64
 
 from database import (
     init_database, get_requests, save_request, update_request_status, 
@@ -31,10 +32,28 @@ from database import (
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
 
+# ================================================================
+# LOAD HELB LOGO
+# ================================================================
+
+def get_helb_logo_base64():
+    """Load HELB logo and convert to base64 string for use in HTML"""
+    try:
+        with open("HELB Logo.png", "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        print("Warning: HELB Logo.png not found. Using emoji fallback.")
+        return None
+    except Exception as e:
+        print(f"Error loading logo: {e}")
+        return None
+
+helb_logo_base64 = get_helb_logo_base64()
+
 # Page config
 st.set_page_config(
     page_title="HELB Payment & Surrender Monitoring System",
-    page_icon="🏦",
+    page_icon="HELB Logo.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -926,9 +945,15 @@ def display_tat_by_request_type():
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("""
+        # Use logo if available, otherwise fallback to emoji
+        if helb_logo_base64:
+            logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 100px; height: auto; margin-bottom: 1rem;">'
+        else:
+            logo_html = '<div class="login-logo">🏦</div>'
+        
+        st.markdown(f"""
         <div class='login-container'>
-            <div class='login-logo'>🏦</div>
+            {logo_html}
             <h1 class='login-title'>HIGHER EDUCATION LOANS BOARD</h1>
             <p class='login-subtitle'>Payment & Surrender Monitoring System</p>
         </div>
@@ -983,10 +1008,15 @@ if st.session_state.show_password_change:
 # Header with Refresh Button
 col_header, col_refresh = st.columns([6, 1])
 with col_header:
-    st.markdown("""
+    if helb_logo_base64:
+        logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 40px; height: auto;">'
+    else:
+        logo_html = '<div style="font-size: 1.3rem;">🏦</div>'
+    
+    st.markdown(f"""
     <div class='dashboard-header'>
         <div class='header-left'>
-            <div style='font-size: 1.3rem;'>🏦</div>
+            {logo_html}
             <div>
                 <h1>HELB Payment & Surrender Monitoring System</h1>
                 <p>Real-time analytics | Performance insights | SLA tracking</p>
@@ -1022,9 +1052,14 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
-    st.markdown("""
+    if helb_logo_base64:
+        logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 60px; height: auto; margin-bottom: 10px;">'
+    else:
+        logo_html = '<div style="font-size: 1.8rem;">🏦</div>'
+    
+    st.markdown(f"""
     <div style='text-align: center; padding: 0.5rem 0;'>
-        <div style='font-size: 1.8rem;'>🏦</div>
+        {logo_html}
         <p style='color: #00843D; font-weight: 700; margin: 0; font-size: 0.8rem;'>HELB</p>
     </div>
     """, unsafe_allow_html=True)
@@ -3616,9 +3651,14 @@ elif choice == "🔐 Change Password":
 
 
 # Footer
-st.markdown("""
+if helb_logo_base64:
+    footer_logo = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 18px; height: auto; vertical-align: middle; margin-right: 5px;">'
+else:
+    footer_logo = '🏦 '
+
+st.markdown(f"""
 <div class='main-footer'>
-    <p>© 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
+    <p>{footer_logo} © 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
     <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | TAT Analysis by Request Type</p>
 </div>
 """, unsafe_allow_html=True)
