@@ -423,7 +423,8 @@ def init_database():
             mileage_claim_details TEXT,
             training_details TEXT,
             professional_body TEXT,
-            direct_payment_details TEXT
+            direct_payment_details TEXT,
+            fare_reimbursement_details TEXT
         )
     ''')
     
@@ -443,9 +444,9 @@ def init_database():
             ('Corporate Communication', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('Debt Management', 0, 0, 0, 0, 0, 1, 0, 0, 0),
             ('External Resource Mobilization', 1, 0, 0, 1, 1, 0, 0, 1, 0),
-            ('Field Services', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Field Services', 1, 1, 0, 0, 1, 0, 1, 0, 0),
             ('Finance', 1, 1, 0, 0, 0, 0, 0, 0, 1),
-            ('Human Resource', 1, 1, 0, 0, 1, 0, 0, 0, 0),
+            ('Human Resource', 1, 1, 0, 0, 1, 0, 1, 0, 0),
             ('ICT', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('Internal Audit', 0, 0, 0, 0, 0, 0, 0, 0, 0),
             ('Legal Services', 0, 0, 0, 0, 0, 0, 0, 0, 0),
@@ -497,14 +498,14 @@ def init_database():
         default_semesters = [('Semester 1',), ('Semester 2',)]
         cursor.executemany("INSERT INTO semesters (name) VALUES (?)", default_semesters)
     
-    # Insert SLA defaults
+    # Insert SLA defaults including Fare Reimbursement
     cursor.execute("SELECT COUNT(*) FROM sla_config")
     if cursor.fetchone()[0] == 0:
         sla_defaults = [
             ('Student Payment', 3), ('Imprest', 5), ('Petty Cash', 3),
             ('Supplier Payment', 7), ('Salary Payment', 5), ('Refund Payment', 10),
             ('Surrender', 4), ('Mileage Claim', 3), ('Staff Training', 5),
-            ('Professional Body', 5), ('Direct Payment', 3)
+            ('Professional Body', 5), ('Direct Payment', 3), ('Fare Reimbursement', 3)
         ]
         cursor.executemany("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla_defaults)
     
@@ -1215,7 +1216,7 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
                 sla_map = {'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
                            'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
                            'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                           'Professional Body': 5, 'Direct Payment': 3}
+                           'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3}
                 sla_days = sla_map.get(row['request_type'], 5)
                 if days > sla_days:
                     breaches += 1
@@ -1282,22 +1283,42 @@ def get_all_batch_numbers():
     conn.close()
     return [r[0] for r in results if r[0]]
 
+# ================================================================
+# UPDATED PERMISSION FUNCTIONS - FIXED FOR FINANCE_ADMIN AND FARE REIMBURSEMENT
+# ================================================================
+
 def get_allowed_main_categories(user_role, user_dept):
+    """Get allowed main categories for a user - FIXED for Finance Admin"""
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
-    if user_role in ["MANAGEMENT"] + finance_roles:
+    
+    # Finance Admins and Admins can submit requests on behalf of others
+    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
+        return ["Submit Payment Request", "Submit Surrender"]
+    
+    # Finance processors/receivers/releasers cannot submit requests
+    if user_role in finance_roles:
         return []
+    
+    # Management cannot submit requests
+    if user_role == "MANAGEMENT":
+        return []
+    
+    # Regular department users
     return ["Submit Payment Request", "Submit Surrender"]
 
 def get_allowed_request_types(user_role, user_dept, main_category):
-    if user_role == "ADMIN":
+    """Get allowed request types for a user - ADDED Fare Reimbursement for HR and Field Services"""
+    
+    # Admins and Finance Admins can see all request types
+    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
         if main_category == "Submit Payment Request":
             return ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", 
                     "Salary Payment", "Refund Payment", "Mileage Claim", "Staff Training", 
-                    "Professional Body", "Direct Payment"]
+                    "Professional Body", "Direct Payment", "Fare Reimbursement"]
         else:
             return ["Surrender"]
     
-    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER"]
     if user_role in finance_roles:
         return []
     
@@ -1306,6 +1327,7 @@ def get_allowed_request_types(user_role, user_dept, main_category):
     
     if main_category == "Submit Payment Request":
         allowed = ["Imprest", "Petty Cash", "Direct Payment"]
+        
         if user_dept in ["Lending", "External Resource Mobilization"]:
             allowed.append("Student Payment")
         if user_dept == "Supply Chain Management":
@@ -1315,8 +1337,12 @@ def get_allowed_request_types(user_role, user_dept, main_category):
             allowed.append("Mileage Claim")
             allowed.append("Staff Training")
             allowed.append("Professional Body")
+            allowed.append("Fare Reimbursement")  # ADDED for HR
+        if user_dept == "Field Services":
+            allowed.append("Fare Reimbursement")  # ADDED for Field Services
         if user_dept == "Debt Management":
             allowed.append("Refund Payment")
+        
         return allowed
     else:
         return ["Surrender"]
@@ -1401,7 +1427,6 @@ def calculate_estimated_completion_date(status, current_date):
     if status in status_map:
         info = status_map[status]
         if info['days'] is not None and info['days'] > 0:
-            # Use add_working_days to ensure we only count business days
             estimated_date = add_working_days(current_date, info['days'])
             return estimated_date, info['message'], info['days']
         elif status in ['PAID', 'CLEARED']:
