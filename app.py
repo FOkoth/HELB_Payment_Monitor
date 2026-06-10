@@ -27,7 +27,9 @@ from database import (
     search_payment_records, update_user_permissions, delete_user,
     get_user_permissions, get_fastest_request_types, identify_bottlenecks,
     get_returned_request_by_id, get_bulk_eligible_requests, bulk_update_status,
-    export_bulk_requests, get_database_health
+    export_bulk_requests, get_database_health, get_sla_from_database,
+    get_intelligent_completion_prediction, get_all_request_types,
+    add_request_type, update_request_type, delete_request_type, update_sla_days
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -352,6 +354,28 @@ st.markdown("""
         font-size: 0.65rem;
     }
     
+    /* Prediction Card Styles */
+    .prediction-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.6rem 0.8rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        font-size: 0.7rem;
+    }
+    .prediction-high {
+        background: linear-gradient(135deg, #00843D 0%, #00B347 100%);
+    }
+    .prediction-medium {
+        background: linear-gradient(135deg, #F59E0B 0%, #FFB81C 100%);
+    }
+    .prediction-low {
+        background: linear-gradient(135deg, #6B7280 0%, #9CA3AF 100%);
+    }
+    .prediction-estimated {
+        background: linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%);
+    }
+    
     /* Log Entries */
     .log-submitted { background: #E3F2FD; border-left: 3px solid #2196F3; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
     .log-received { background: #E8F5E9; border-left: 3px solid #4CAF50; padding: 0.2rem; margin: 0.15rem 0; border-radius: 4px; font-size: 0.6rem; }
@@ -633,7 +657,7 @@ def refresh_page():
 # REQUEST TYPE TAT ANALYZER - SHOWS ALL RECORDS (FIXED)
 # ================================================================
 
-def display_tat_by_request_type():
+def display_tat_by_request_type(data_scope="All Data"):
     """Display TAT analysis grouped by request type - shows ALL records, not just completed"""
     st.markdown("<div class='section-header'>⏱️ Turnaround Time Analysis by Request Type</div>", unsafe_allow_html=True)
     
@@ -680,27 +704,7 @@ def display_tat_by_request_type():
         st.info("No data matches your filters.")
         return
     
-    # Get SLA from database
-    def get_sla_from_database():
-        try:
-            conn = sqlite3.connect("helb_data.db")
-            cursor = conn.cursor()
-            cursor.execute("SELECT request_type, sla_days FROM sla_config")
-            results = cursor.fetchall()
-            conn.close()
-            sla_map = {}
-            for req_type, sla_days in results:
-                sla_map[req_type] = sla_days
-            return sla_map
-        except:
-            return {
-                'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
-                'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                'Professional Body': 5, 'Direct Payment': 3,
-                'Fare Reimbursement': 3
-            }
-    
+    # Get SLA from database (real-time)
     sla_map = get_sla_from_database()
     
     results = []
@@ -1022,7 +1026,7 @@ with col_header:
             {logo_html}
             <div>
                 <h1>HELB Payment & Surrender Monitoring System</h1>
-                <p>Real-time analytics | Performance insights | SLA tracking</p>
+                <p>Real-time analytics | Performance insights | SLA tracking | Intelligent Predictions</p>
             </div>
         </div>
     </div>
@@ -1298,12 +1302,7 @@ elif choice == "📈 Management Dashboard":
         
         completed_df = df[df['status'].isin(['PAID', 'CLEARED']) & df['payment_date'].notna()]
         sla_compliant = 0
-        sla_map = get_sla_from_database() if 'get_sla_from_database' in dir() else {
-            'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-            'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-            'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-            'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
-        }
+        sla_map = get_sla_from_database()
         
         for _, row in completed_df.iterrows():
             try:
@@ -1624,11 +1623,11 @@ elif choice == "📈 Management Dashboard":
 # REQUEST TYPE TAT ANALYSIS 
 # ================================================================
 elif choice == "📊 TAT by Request Type":
-    display_tat_by_request_type()
+    display_tat_by_request_type(data_scope)
 
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS
+# ENHANCED SEARCH PAYMENT RECORDS WITH INTELLIGENT PREDICTIONS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -1636,7 +1635,9 @@ elif choice == "🔍 Search Payment Records":
     st.markdown("""
     <div style='background:#F0F9FF; padding:0.4rem 0.6rem; border-radius:6px; margin-bottom:0.8rem; font-size:0.65rem;'>
         🔎 Search by Request Number, Batch No., Imprest No., Invoice No., Surrender No., Payment Reference, 
-        Staff Name, Supplier Name, or Customer Name.
+        Staff Name, Supplier Name, or Customer Name.<br>
+        🧠 <strong>Intelligent Predictions:</strong> Estimated completion dates are calculated using historical patterns 
+        and AI-based analysis of similar requests.
     </div>
     """, unsafe_allow_html=True)
     
@@ -1680,6 +1681,9 @@ elif choice == "🔍 Search Payment Records":
             if not results.empty:
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
+                # Get real-time SLA from database
+                sla_map = get_sla_from_database()
+                
                 for _, row in results.iterrows():
                     entity_name = ""
                     entity_type = ""
@@ -1703,13 +1707,18 @@ elif choice == "🔍 Search Payment Records":
                         status_badge = f'<span class="status-pending">⏳ {row["status"]} (Pending: {tat} days)</span>'
                         is_completed = False
                     
-                    sla_map = get_sla_from_database() if 'get_sla_from_database' in dir() else {
-                        'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3, 
-                        'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                        'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                        'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
-                    }
+                    # Get SLA from database (real-time)
                     sla_days = sla_map.get(row['request_type'], 5)
+                    
+                    # Generate intelligent prediction
+                    predicted_date = None
+                    confidence = None
+                    reasoning = None
+                    
+                    if not is_completed:
+                        predicted_date, confidence, reasoning = get_intelligent_completion_prediction(
+                            row['id'], row['request_type'], row['status'], tat, sla_days
+                        )
                     
                     if not is_completed:
                         if tat > sla_days:
@@ -1734,42 +1743,6 @@ elif choice == "🔍 Search Payment Records":
                     
                     ref_number = get_reference_number(row)
                     
-                    # Calculate predicted date using working days only
-                    predicted_date = None
-                    confidence = None
-                    if not is_completed:
-                        try:
-                            df_all = get_requests()
-                            similar_completed = df_all[
-                                (df_all['request_type'] == row['request_type']) & 
-                                (df_all['status'].isin(['PAID', 'CLEARED'])) &
-                                (df_all['payment_date'].notna())
-                            ]
-                            if not similar_completed.empty:
-                                tat_values = []
-                                for _, sim in similar_completed.iterrows():
-                                    if sim.get('payment_date'):
-                                        sim_tat = calculate_tat(sim['submission_date'], sim['payment_date'])
-                                        tat_values.append(sim_tat)
-                                if tat_values:
-                                    avg_tat_similar = np.mean(tat_values)
-                                    remaining_days = max(1, int(avg_tat_similar - tat))
-                                    predicted_date = add_working_days(date.today(), remaining_days)
-                                    confidence = "High" if len(tat_values) > 20 else "Medium" if len(tat_values) > 5 else "Low"
-                                else:
-                                    predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
-                                    confidence = "Estimated"
-                            else:
-                                remaining = max(1, sla_days - tat)
-                                predicted_date = add_working_days(date.today(), remaining)
-                                confidence = "Estimated"
-                        except Exception as e:
-                            try:
-                                predicted_date = add_working_days(date.today(), max(1, sla_days - tat))
-                                confidence = "Estimated"
-                            except:
-                                predicted_date = None
-                    
                     with st.expander(f"📄 {row['request_number']} - {row['request_type']} - {row['department_name']}", expanded=False):
                         col1, col2, col3 = st.columns([2, 1, 1])
                         with col1:
@@ -1779,7 +1752,15 @@ elif choice == "🔍 Search Payment Records":
                         with col3:
                             if not is_completed and predicted_date:
                                 day_name = predicted_date.strftime('%A')
-                                st.markdown(f"**📅 Estimated Completion:** {predicted_date.strftime('%d %b %Y')} ({day_name}) <span style='font-size:0.6rem;'>({confidence})</span>", unsafe_allow_html=True)
+                                # Color code confidence
+                                confidence_class = "prediction-high" if confidence == "High" else "prediction-medium" if confidence == "Medium" else "prediction-estimated"
+                                st.markdown(f"""
+                                <div class='prediction-card {confidence_class}' style='padding:0.4rem;'>
+                                    <strong>📅 Estimated Completion:</strong><br>
+                                    {predicted_date.strftime('%d %b %Y')} ({day_name})<br>
+                                    <span style='font-size:0.55rem;'>🤖 {confidence} Confidence</span>
+                                </div>
+                                """, unsafe_allow_html=True)
                             elif is_completed and row.get('payment_date'):
                                 st.markdown(f"**✅ Completed:** {row['payment_date']}")
                         
@@ -1812,6 +1793,9 @@ elif choice == "🔍 Search Payment Records":
                                     <div class='progress-fill' style='width:{min(100, progress_pct)}%; background:{bar_color};'></div>
                                 </div>
                                 """, unsafe_allow_html=True)
+                        
+                        if not is_completed and reasoning:
+                            st.markdown(f"<div class='info-card' style='font-size:0.6rem; margin-top:0.3rem;'>💡 <strong>Prediction Reasoning:</strong> {reasoning}</div>", unsafe_allow_html=True)
                         
                         st.markdown("---")
                         st.markdown("**📋 Additional Details:**")
@@ -3385,12 +3369,12 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL (UPDATED WITH SLA CONFIGURATION TAB)
+# ADMIN PANEL (UPDATED WITH SLA CONFIGURATION AND REQUEST TYPE MANAGEMENT)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings", "📊 Database Health", "📋 SLA Config"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["👥 Users", "🏢 Departments", "📦 Products", "💰 Funders", "📅 Financial Years", "🔐 Finance Settings", "📊 Database Health", "📋 SLA Config", "📝 Request Types"])
     
     with tab1:
         st.subheader("👥 User Management")
@@ -3728,18 +3712,16 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.info("💡 **SLA Target** = Maximum allowed working days for completion. TAT exceeding this is a breach.")
         
         # Get current SLA settings
-        conn = sqlite3.connect("helb_data.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT request_type, sla_days FROM sla_config ORDER BY request_type")
-        sla_configs = cursor.fetchall()
-        conn.close()
+        sla_configs = get_all_request_types()
         
         if not sla_configs:
             st.warning("No SLA configurations found. Please check database.")
         else:
             # Display current SLA settings in a nice table
             sla_data = []
-            for req_type, sla_days in sla_configs:
+            for item in sla_configs:
+                req_type = item['request_type']
+                sla_days = item['sla_days']
                 # Determine color based on SLA days
                 if sla_days <= 3:
                     color = "#00843D"  # Green - Fast
@@ -3762,9 +3744,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             
             col1, col2 = st.columns(2)
             with col1:
-                request_type_to_update = st.selectbox("Select Request Type", [r[0] for r in sla_configs])
-                # Get current value for display
-                current_value = next((r[1] for r in sla_configs if r[0] == request_type_to_update), 5)
+                request_type_to_update = st.selectbox("Select Request Type", [item['request_type'] for item in sla_configs])
+                current_value = next((item['sla_days'] for item in sla_configs if item['request_type'] == request_type_to_update), 5)
                 st.caption(f"Current value: **{current_value} days**")
             
             with col2:
@@ -3777,55 +3758,15 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     help="Number of working days allowed for completion"
                 )
             
-            # SLA recommendation based on request type
-            recommendations = {
-                'Student Payment': 'High priority - Recommend 2-3 days',
-                'Imprest': 'Standard processing - Recommend 3-5 days',
-                'Petty Cash': 'Quick turnaround - Recommend 2-3 days',
-                'Supplier Payment': 'May need verification time - Recommend 5-7 days',
-                'Salary Payment': 'Payroll critical - Recommend 3-5 days',
-                'Refund Payment': 'Customer expectation - Recommend 3-5 days',
-                'Surrender': 'Requires verification - Recommend 3-4 days',
-                'Mileage Claim': 'Simple calculation - Recommend 2-3 days',
-                'Staff Training': 'Document verification - Recommend 3-5 days',
-                'Professional Body': 'External confirmation - Recommend 3-5 days',
-                'Direct Payment': 'Urgent payments - Recommend 2-3 days',
-                'Fare Reimbursement': 'Staff travel - Recommend 2-3 days'
-            }
-            
-            rec = recommendations.get(request_type_to_update, 'Adjust based on business needs')
-            st.info(f"💡 **Recommendation for {request_type_to_update}:** {rec}")
-            
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("✅ Update SLA", type="primary"):
-                    conn = sqlite3.connect("helb_data.db")
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE sla_config SET sla_days = ? WHERE request_type = ?", (new_sla_days, request_type_to_update))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"✅ Updated {request_type_to_update} SLA to {new_sla_days} days")
-                    st.balloons()
-                    st.rerun()
-            
-            with col2:
-                # Reset to default button
-                default_values = {
-                    'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
-                    'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-                    'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-                    'Professional Body': 5, 'Direct Payment': 3,
-                    'Fare Reimbursement': 3
-                }
-                default_value = default_values.get(request_type_to_update, 5)
-                if st.button("↩️ Reset to Default", type="secondary"):
-                    conn = sqlite3.connect("helb_data.db")
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE sla_config SET sla_days = ? WHERE request_type = ?", (default_value, request_type_to_update))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"✅ Reset {request_type_to_update} to default ({default_value} days)")
-                    st.rerun()
+                    if update_sla_days(request_type_to_update, new_sla_days):
+                        st.success(f"✅ Updated {request_type_to_update} SLA to {new_sla_days} days")
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to update SLA")
             
             st.markdown("---")
             st.markdown("### 📊 SLA Impact Analysis")
@@ -3838,7 +3779,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             | 📈 Management Dashboard | Calculates SLA compliance percentage |
             | 📊 TAT Analysis | Compares actual TAT against SLA targets |
             | 🚨 Alerts | Flags requests approaching or exceeding SLA |
-            | ⏱️ Predictions | Estimated completion dates based on SLA targets |
+            | 🤖 Intelligent Predictions | Estimated completion dates based on historical data and SLA |
             
             **Color Coding:**
             - 🟢 Green: Within SLA (Good)
@@ -3847,8 +3788,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             """)
             
             # Show current SLA distribution chart
-            sla_for_chart = [r[1] for r in sla_configs]
-            types_for_chart = [r[0] for r in sla_configs]
+            sla_for_chart = [item['sla_days'] for item in sla_configs]
+            types_for_chart = [item['request_type'] for item in sla_configs]
             
             fig = go.Figure()
             colors = ['#00843D' if x <= 3 else '#FFB81C' if x <= 5 else '#F59E0B' for x in sla_for_chart]
@@ -3872,6 +3813,94 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             )
             
             st.plotly_chart(fig, use_container_width=True)
+    
+    with tab9:
+        st.subheader("📝 Request Type Management")
+        st.markdown("Add, edit, or delete request types in the system")
+        st.warning("⚠️ **Caution:** Deleting a request type will remove it from the system. Existing requests with this type will still be accessible but may not have SLA targets.")
+        
+        # Get current request types
+        current_types = get_all_request_types()
+        
+        if current_types:
+            st.markdown("### Current Request Types")
+            for item in current_types:
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.write(f"**{item['request_type']}**")
+                with col2:
+                    st.write(f"SLA: {item['sla_days']} days")
+                with col3:
+                    if st.button(f"🗑️ Delete", key=f"del_reqtype_{item['request_type']}"):
+                        if item['request_type'] in ["Student Payment", "Imprest", "Petty Cash", "Supplier Payment", "Salary Payment", "Surrender"]:
+                            st.error(f"❌ Cannot delete core request type '{item['request_type']}'")
+                        else:
+                            if delete_request_type(item['request_type']):
+                                st.success(f"✅ Request type '{item['request_type']}' deleted!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete request type")
+        
+        st.markdown("---")
+        st.markdown("### ➕ Add New Request Type")
+        with st.form("add_reqtype_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_req_type = st.text_input("Request Type Name *", placeholder="e.g., Conference Fee, Office Supplies")
+            with col2:
+                new_req_sla = st.number_input("SLA Target (Days) *", min_value=1, max_value=30, value=5)
+            
+            st.info("💡 New request types will be available for all departments to submit.")
+            
+            if st.form_submit_button("Add Request Type"):
+                if new_req_type:
+                    # Check if already exists
+                    existing = [t['request_type'] for t in current_types]
+                    if new_req_type in existing:
+                        st.error(f"❌ Request type '{new_req_type}' already exists!")
+                    else:
+                        if add_request_type(new_req_type, new_req_sla):
+                            st.success(f"✅ Request type '{new_req_type}' added with SLA {new_req_sla} days!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to add request type")
+                else:
+                    st.error("Please enter a request type name")
+        
+        st.markdown("---")
+        st.markdown("### ✏️ Edit Request Type")
+        
+        if current_types:
+            edit_options = [item['request_type'] for item in current_types]
+            selected_edit = st.selectbox("Select Request Type to Edit", edit_options)
+            
+            if selected_edit:
+                current_data = next((item for item in current_types if item['request_type'] == selected_edit), None)
+                if current_data:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        new_name = st.text_input("New Name", value=current_data['request_type'])
+                    with col2:
+                        new_sla = st.number_input("New SLA (Days)", min_value=1, max_value=30, value=current_data['sla_days'])
+                    
+                    if st.button("Update Request Type", type="primary"):
+                        if new_name != current_data['request_type']:
+                            # Check if new name already exists
+                            if new_name in [t['request_type'] for t in current_types if t['request_type'] != selected_edit]:
+                                st.error(f"❌ Request type '{new_name}' already exists!")
+                            else:
+                                if update_request_type(selected_edit, new_name, new_sla):
+                                    st.success(f"✅ Request type updated from '{selected_edit}' to '{new_name}' with SLA {new_sla} days!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to update request type")
+                        else:
+                            if update_sla_days(selected_edit, new_sla):
+                                st.success(f"✅ SLA for '{selected_edit}' updated to {new_sla} days!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to update SLA")
     
     if st.button("🔄 Refresh This Page", key="admin_refresh"):
         refresh_page()
@@ -3909,6 +3938,6 @@ else:
 st.markdown(f"""
 <div class='main-footer'>
     <p>{footer_logo} © 2026 Higher Education Loans Board (HELB) | Payment & Surrender Monitoring System </p>
-    <p>Intelligent Search with Business Day Predictions | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Fare Reimbursement | TAT Analysis by Request Type</p>
+    <p>Intelligent Search with AI-Based Predictions | Real-Time SLA Fetching | Bulk Operations | Categorized Approval Queue | On-Behalf Submissions | Request Type Management</p>
 </div>
 """, unsafe_allow_html=True)
