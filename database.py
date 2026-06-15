@@ -1,15 +1,41 @@
 import sqlite3
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 import json
 import shutil
 import time
 from functools import wraps
 import numpy as np
+import logging
+import hashlib
 
 DB_PATH = "helb_data.db"
 BACKUP_DIR = "backups"
+DB_VERSION = 2
+
+# ================================================================
+# LOGGING SETUP
+# ================================================================
+
+def setup_logging():
+    """Setup comprehensive logging for all database operations"""
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    
+    log_file = os.path.join(log_dir, f"helb_db_{datetime.now().strftime('%Y%m%d')}.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
 
 # ================================================================
 # DATABASE OPTIMIZATIONS
@@ -40,8 +66,9 @@ def enable_wal_mode():
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA cache_size=-20000")
         conn.close()
-    except:
-        pass
+        logger.info("WAL mode enabled")
+    except Exception as e:
+        logger.warning(f"Failed to enable WAL mode: {e}")
 
 def add_performance_indexes():
     """Add performance indexes for faster queries"""
@@ -63,36 +90,182 @@ def add_performance_indexes():
             cursor.execute(idx)
         conn.commit()
         conn.close()
+        logger.info("Performance indexes added")
+    except Exception as e:
+        logger.warning(f"Failed to add indexes: {e}")
+
+# ================================================================
+# DATABASE INTEGRITY AND VERSION MANAGEMENT
+# ================================================================
+
+def get_db_version():
+    """Get current database version"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA user_version")
+        version = cursor.fetchone()[0]
+        conn.close()
+        return version
+    except:
+        return 0
+
+def set_db_version(version):
+    """Set database version"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA user_version = {version}")
+        conn.commit()
+        conn.close()
     except:
         pass
 
+def verify_database_integrity():
+    """Check if database has valid data before using it"""
+    try:
+        if not os.path.exists(DB_PATH):
+            logger.warning(f"Database file {DB_PATH} does not exist")
+            return False
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Check if critical tables exist
+        required_tables = ['requests', 'users', 'departments', 'sla_config']
+        for table in required_tables:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            if not cursor.fetchone():
+                logger.error(f"Critical table '{table}' missing")
+                conn.close()
+                return False
+        
+        # Run integrity check
+        cursor.execute("PRAGMA integrity_check")
+        integrity = cursor.fetchone()[0]
+        
+        if integrity != "ok":
+            logger.error(f"Database integrity check failed: {integrity}")
+            conn.close()
+            return False
+        
+        # Check for data consistency
+        cursor.execute("SELECT COUNT(*) FROM requests")
+        request_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        logger.info(f"Integrity check passed: {request_count} requests, {user_count} users")
+        
+        # If database is suspiciously empty, flag it (but don't fail - might be new DB)
+        if request_count == 0 and user_count == 0:
+            logger.info("Database is empty (new installation)")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Integrity check failed: {e}")
+        return False
+
+def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
+    """Log all database operations for audit trail"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Create audit_logs table if not exists
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                record_id INTEGER,
+                user TEXT,
+                details TEXT,
+                before_state TEXT,
+                after_state TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            INSERT INTO audit_logs (
+                timestamp, operation, table_name, record_id, user, 
+                details, before_state, after_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now().isoformat(),
+            operation,
+            table_name,
+            record_id,
+            user or 'SYSTEM',
+            json.dumps(details) if details else None,
+            json.dumps(before_state) if before_state else None,
+            json.dumps(after_state) if after_state else None
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"AUDIT: {operation} on {table_name}/{record_id} by {user}")
+    except Exception as e:
+        logger.error(f"Failed to write audit log: {e}")
+
 # ================================================================
-# BACKUP FUNCTIONS
+# ENHANCED BACKUP FUNCTIONS
 # ================================================================
+
 def ensure_backup_dir():
+    """Ensure backup directory exists"""
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
+        logger.info(f"Created backup directory: {BACKUP_DIR}")
 
 def create_backup():
+    """Create a verified backup of the database"""
     ensure_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_filename = f"helb_backup_{timestamp}.db"
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
     
     if os.path.exists(DB_PATH):
-        shutil.copy2(DB_PATH, backup_path)
-        metadata = {
-            'backup_date': datetime.now().isoformat(),
-            'original_db': DB_PATH,
-            'file_size': os.path.getsize(DB_PATH)
-        }
-        meta_path = os.path.join(BACKUP_DIR, f"helb_backup_{timestamp}.json")
-        with open(meta_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        return backup_filename, backup_path
+        try:
+            # Create backup
+            shutil.copy2(DB_PATH, backup_path)
+            
+            # Calculate checksum for verification
+            with open(DB_PATH, 'rb') as f:
+                original_checksum = hashlib.md5(f.read()).hexdigest()
+            with open(backup_path, 'rb') as f:
+                backup_checksum = hashlib.md5(f.read()).hexdigest()
+            
+            metadata = {
+                'backup_date': datetime.now().isoformat(),
+                'original_db': DB_PATH,
+                'file_size': os.path.getsize(DB_PATH),
+                'original_checksum': original_checksum,
+                'backup_checksum': backup_checksum,
+                'db_version': DB_VERSION
+            }
+            meta_path = os.path.join(BACKUP_DIR, f"helb_backup_{timestamp}.json")
+            with open(meta_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            
+            logger.info(f"✅ Backup created: {backup_filename} (Size: {metadata['file_size']} bytes)")
+            
+            # Clean old backups (keep last 30 days)
+            cleanup_old_backups()
+            
+            return backup_filename, backup_path
+        except Exception as e:
+            logger.error(f"Backup creation failed: {e}")
+            return None, None
     return None, None
 
 def get_backup_list():
+    """Get list of all backups"""
     ensure_backup_dir()
     backups = []
     for file in os.listdir(BACKUP_DIR):
@@ -118,34 +291,95 @@ def get_backup_list():
     return backups
 
 def restore_backup(backup_filename):
+    """Restore from a verified backup with safety checks"""
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    if os.path.exists(backup_path):
+    
+    if not os.path.exists(backup_path):
+        logger.error(f"Backup file not found: {backup_filename}")
+        return False
+    
+    try:
+        # Create emergency backup of current state before restore
         if os.path.exists(DB_PATH):
             emergency_backup = f"helb_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            shutil.copy2(DB_PATH, os.path.join(BACKUP_DIR, emergency_backup))
+            emergency_path = os.path.join(BACKUP_DIR, emergency_backup)
+            shutil.copy2(DB_PATH, emergency_path)
+            logger.info(f"Emergency backup created: {emergency_backup}")
+        
+        # Perform restore
         shutil.copy2(backup_path, DB_PATH)
+        
+        # Log the restore operation
+        log_audit(
+            operation='RESTORE',
+            table_name='DATABASE',
+            record_id=None,
+            user='SYSTEM',
+            details={'backup_file': backup_filename}
+        )
+        
+        logger.info(f"✅ Database restored from {backup_filename}")
         return True
-    return False
+    except Exception as e:
+        logger.error(f"Restore failed: {e}")
+        return False
 
 def auto_backup_scheduler():
+    """Schedule automatic backups (runs on every write operation)"""
     ensure_backup_dir()
     backups = get_backup_list()
+    
+    # Check if we need to create a backup
+    need_backup = True
+    
     if backups:
         try:
             last_backup_date = datetime.fromisoformat(backups[0]['date']).date()
             today = date.today()
-            if last_backup_date != today:
-                create_backup()
-                return True
+            
+            if last_backup_date == today:
+                # Also check hourly backups
+                last_backup_time = datetime.fromisoformat(backups[0]['date'])
+                hours_since_backup = (datetime.now() - last_backup_time).total_seconds() / 3600
+                if hours_since_backup < 1:
+                    need_backup = False
         except:
-            create_backup()
+            need_backup = True
+    
+    if need_backup:
+        backup_file, backup_path = create_backup()
+        if backup_file:
+            logger.info(f"Auto-backup created: {backup_file}")
             return True
-    else:
-        create_backup()
-        return True
+    
     return False
 
+def cleanup_old_backups(days_to_keep=30):
+    """Remove backups older than specified days"""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        backups = get_backup_list()
+        
+        deleted_count = 0
+        for backup in backups:
+            try:
+                backup_date = datetime.fromisoformat(backup['date'])
+                if backup_date < cutoff_date:
+                    os.remove(backup['path'])
+                    meta_path = backup['path'].replace('.db', '.json')
+                    if os.path.exists(meta_path):
+                        os.remove(meta_path)
+                    deleted_count += 1
+            except:
+                pass
+        
+        if deleted_count > 0:
+            logger.info(f"Cleaned up {deleted_count} old backups (older than {days_to_keep} days)")
+    except Exception as e:
+        logger.error(f"Backup cleanup failed: {e}")
+
 def export_data_to_csv():
+    """Export all data to CSV files"""
     df_requests = get_requests()
     df_users = get_all_users()
     df_departments = get_departments()
@@ -155,11 +389,58 @@ def export_data_to_csv():
     df_requests.to_csv(os.path.join(export_dir, "requests.csv"), index=False)
     df_users.to_csv(os.path.join(export_dir, "users.csv"), index=False)
     df_departments.to_csv(os.path.join(export_dir, "departments.csv"), index=False)
+    logger.info(f"CSV export created: {export_dir}")
     return export_dir
+
+# ================================================================
+# SAFE INITIALIZATION WITH RECOVERY
+# ================================================================
+
+def safe_init_with_recovery():
+    """Initialize database with recovery from backup if needed"""
+    logger.info("Starting safe database initialization with recovery")
+    
+    # Check if we need to recover
+    if os.path.exists(DB_PATH):
+        if not verify_database_integrity():
+            logger.warning("Database integrity check failed. Attempting recovery...")
+            
+            # Try to restore from latest backup
+            backups = get_backup_list()
+            if backups:
+                latest_backup = backups[0]
+                logger.info(f"Attempting to restore from backup: {latest_backup['filename']}")
+                
+                if restore_backup(latest_backup['filename']):
+                    logger.info("✅ Database successfully restored from backup")
+                    
+                    if verify_database_integrity():
+                        logger.info("✅ Restored database integrity verified")
+                    else:
+                        logger.error("❌ Restored database still has integrity issues")
+                else:
+                    logger.error("❌ Failed to restore from backup")
+            else:
+                logger.warning("No backups found. Will initialize fresh database.")
+    
+    # Initialize database (your existing function)
+    init_database()
+    
+    # Set version after init
+    set_db_version(DB_VERSION)
+    
+    # Create immediate backup after initialization
+    backup_file, backup_path = create_backup()
+    if backup_file:
+        logger.info(f"Initial backup created: {backup_file}")
+    
+    logger.info("Database initialization complete")
+    return True
 
 # ================================================================
 # LOGS TABLE
 # ================================================================
+
 def create_logs_table():
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -182,8 +463,9 @@ def create_logs_table():
         ''')
         conn.commit()
         conn.close()
-    except:
-        pass
+        logger.info("Request logs table created/verified")
+    except Exception as e:
+        logger.error(f"Error creating logs table: {e}")
 
 def add_request_log(request_id, request_number, action, status_from, status_to, 
                     comment, performed_by, performed_by_role, performed_by_dept, details=None):
@@ -204,7 +486,7 @@ def add_request_log(request_id, request_number, action, status_from, status_to,
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Error adding log: {e}")
+        logger.error(f"Error adding log: {e}")
 
 def get_request_logs(request_id):
     try:
@@ -224,12 +506,13 @@ def get_request_logs(request_id):
             return [dict(zip(columns, log)) for log in logs]
         return []
     except Exception as e:
-        print(f"Error getting logs: {e}")
+        logger.error(f"Error getting logs: {e}")
         return []
 
 # ================================================================
 # BASIC REQUEST FUNCTIONS
 # ================================================================
+
 def get_returned_requests(department_name):
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query(
@@ -273,9 +556,13 @@ def resubmit_request(request_id, updated_data):
         query = f"UPDATE requests SET {', '.join(set_parts)} WHERE id = ?"
         cursor.execute(query, values)
         conn.commit()
+        
+        # Create backup after modification
+        auto_backup_scheduler()
+        
         return True
     except Exception as e:
-        print(f"Error resubmitting request: {e}")
+        logger.error(f"Error resubmitting request: {e}")
         return False
     finally:
         conn.close()
@@ -296,6 +583,11 @@ def get_request_by_id(request_id):
 def get_column_names(table_name):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    # Safe table name validation
+    allowed_tables = ['requests', 'users', 'departments', 'products', 'funders', 'sla_config', 'request_logs']
+    if table_name not in allowed_tables:
+        conn.close()
+        return []
     cursor.execute(f"PRAGMA table_info({table_name})")
     columns = [column[1] for column in cursor.fetchall()]
     conn.close()
@@ -362,9 +654,10 @@ def add_request_type(request_type, sla_days):
         )
         conn.commit()
         conn.close()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error adding request type: {e}")
+        logger.error(f"Error adding request type: {e}")
         return False
 
 def update_request_type(old_name, new_name, sla_days):
@@ -378,9 +671,10 @@ def update_request_type(old_name, new_name, sla_days):
         )
         conn.commit()
         conn.close()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error updating request type: {e}")
+        logger.error(f"Error updating request type: {e}")
         return False
 
 def delete_request_type(request_type):
@@ -391,9 +685,10 @@ def delete_request_type(request_type):
         cursor.execute("DELETE FROM sla_config WHERE request_type = ?", (request_type,))
         conn.commit()
         conn.close()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error deleting request type: {e}")
+        logger.error(f"Error deleting request type: {e}")
         return False
 
 def update_sla_days(request_type, sla_days):
@@ -407,9 +702,10 @@ def update_sla_days(request_type, sla_days):
         )
         conn.commit()
         conn.close()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error updating SLA days: {e}")
+        logger.error(f"Error updating SLA days: {e}")
         return False
 
 # ================================================================
@@ -456,7 +752,6 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
         if historical_tats:
             avg_historical_tat = np.mean(historical_tats)
             median_historical_tat = np.median(historical_tats)
-            p75_historical_tat = np.percentile(historical_tats, 75)
             
             # Calculate remaining days
             remaining_days_avg = max(1, int(avg_historical_tat - current_tat)) if avg_historical_tat > current_tat else 1
@@ -465,22 +760,18 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             
             # Use weighted average based on data quality
             if len(historical_tats) >= 20:
-                # High confidence - use historical pattern
                 remaining_days = remaining_days_median
                 confidence = "High"
                 reasoning = f"Based on {len(historical_tats)} similar historical requests averaging {avg_historical_tat:.1f} days total."
             elif len(historical_tats) >= 10:
-                # Medium confidence
                 remaining_days = (remaining_days_median + remaining_days_sla) // 2
                 confidence = "Medium"
                 reasoning = f"Based on {len(historical_tats)} similar requests. Historical average: {avg_historical_tat:.1f} days."
             elif len(historical_tats) >= 3:
-                # Low confidence
                 remaining_days = remaining_days_sla
                 confidence = "Low"
                 reasoning = f"Limited historical data ({len(historical_tats)} requests). Using SLA target of {sla_days} days."
             else:
-                # Estimate based on SLA and progress
                 remaining_days = remaining_days_sla
                 confidence = "Estimated"
                 reasoning = f"No historical data available. Using SLA target of {sla_days} days."
@@ -489,11 +780,9 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             progress_percentage = (current_tat / sla_days * 100) if sla_days > 0 else 0
             
             if progress_percentage > 100:
-                # Already over SLA - expedite
                 remaining_days = max(1, remaining_days // 2)
                 reasoning += " This request is already beyond SLA target - expedited processing recommended."
             elif progress_percentage > 80:
-                # Close to SLA breach
                 remaining_days = max(1, remaining_days - 1)
                 reasoning += " This request is approaching SLA deadline - priority processing."
             
@@ -501,7 +790,6 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             
             return predicted_date, confidence, reasoning
         else:
-            # No historical data - use SLA
             remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
             predicted_date = add_working_days(date.today(), remaining_days)
             confidence = "Estimated"
@@ -510,7 +798,7 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             return predicted_date, confidence, reasoning
             
     except Exception as e:
-        print(f"Prediction error: {e}")
+        logger.error(f"Prediction error: {e}")
         from utils.holidays_ke import add_working_days
         remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
         predicted_date = add_working_days(date.today(), remaining_days)
@@ -543,7 +831,7 @@ def get_department_request_types(department_name):
         
         return allowed
     except:
-        return ["Imprest", "Petty Cash"]  # Default minimal
+        return ["Imprest", "Petty Cash"]
 
 # ================================================================
 # INITIALIZATION WITH SAFE MIGRATION
@@ -560,11 +848,11 @@ def safe_add_column(table_name, column_name, column_type):
         if column_name not in existing_columns:
             cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
             conn.commit()
-            print(f"Added column {column_name} to {table_name}")
+            logger.info(f"Added column {column_name} to {table_name}")
         conn.close()
         return True
     except Exception as e:
-        print(f"Error adding column {column_name}: {e}")
+        logger.error(f"Error adding column {column_name}: {e}")
         return False
 
 def init_database():
@@ -638,9 +926,23 @@ def init_database():
             can_receive_requests INTEGER DEFAULT 0,
             can_process_stages INTEGER DEFAULT 0,
             can_release_payments INTEGER DEFAULT 0,
+            created_at TEXT,
+            last_login TEXT,
+            is_active INTEGER DEFAULT 1,
             FOREIGN KEY (department_id) REFERENCES departments(id)
         )
     ''')
+    
+    # Add new columns to users if needed (safe migration)
+    cursor.execute("PRAGMA table_info(users)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    if 'created_at' not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+    if 'last_login' not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+    if 'is_active' not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
     
     # Check existing columns for safe migration
     cursor.execute("PRAGMA table_info(requests)")
@@ -709,9 +1011,25 @@ def init_database():
         )
     ''')
     
+    # Audit logs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            record_id INTEGER,
+            user TEXT,
+            details TEXT,
+            before_state TEXT,
+            after_state TEXT
+        )
+    ''')
+    
     # Insert default departments ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM departments")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default departments")
         default_depts = [
             ('CEO\'s Office', 1, 1, 0, 0, 1, 0, 0, 0, 0),
             ('Corporate Communication', 1, 1, 0, 0, 1, 0, 0, 0, 0),
@@ -728,59 +1046,87 @@ def init_database():
             ('Supply Chain Management', 0, 0, 1, 0, 0, 0, 0, 0, 0),
         ]
         for dept in default_depts:
-            cursor.execute('''
-                INSERT INTO departments (
-                    name, can_submit_imprest, can_submit_petty_cash, 
-                    can_submit_supplier, can_submit_student_payment, 
-                    can_submit_surrender, can_submit_refund, 
-                    requires_product_type, requires_funder, is_finance_dept
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', dept)
+            try:
+                cursor.execute('''
+                    INSERT INTO departments (
+                        name, can_submit_imprest, can_submit_petty_cash, 
+                        can_submit_supplier, can_submit_student_payment, 
+                        can_submit_surrender, can_submit_refund, 
+                        requires_product_type, requires_funder, is_finance_dept
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', dept)
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert default products ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default products")
         default_products = [
             ('Undergraduate', 'LOAN', 1, 1, 1),
             ('TVET', 'LOAN', 1, 1, 1),
             ('Jielimishe', 'SCHOLARSHIP', 0, 0, 1),
         ]
-        cursor.executemany(
-            "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, ?)",
-            default_products
-        )
+        for prod in default_products:
+            try:
+                cursor.executemany(
+                    "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, ?)",
+                    [prod]
+                )
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert default funders ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM funders")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default funders")
         default_funders = [
             ('KMTC',), ('World Bank',), ('AfDB',), ('UNESCO',), 
             ('Mastercard Foundation',), ('KOICA',), ('JICA',), ('USAID',), ('GIZ',)
         ]
-        cursor.executemany("INSERT INTO funders (name) VALUES (?)", default_funders)
+        for funder in default_funders:
+            try:
+                cursor.execute("INSERT INTO funders (name) VALUES (?)", funder)
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert financial years ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM financial_years")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default financial years")
         default_years = [('2024/2025', 0), ('2025/2026', 1), ('2026/2027', 1)]
-        cursor.executemany("INSERT INTO financial_years (name, is_active) VALUES (?, ?)", default_years)
+        for year in default_years:
+            try:
+                cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, ?)", year)
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert semesters ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM semesters")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default semesters")
         default_semesters = [('Semester 1',), ('Semester 2',)]
-        cursor.executemany("INSERT INTO semesters (name) VALUES (?)", default_semesters)
+        for sem in default_semesters:
+            try:
+                cursor.execute("INSERT INTO semesters (name) VALUES (?)", sem)
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert SLA defaults ONLY if table is empty
     cursor.execute("SELECT COUNT(*) FROM sla_config")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default SLA configs")
         sla_defaults = [
             ('Student Payment', 3), ('Imprest', 5), ('Petty Cash', 3),
             ('Supplier Payment', 7), ('Salary Payment', 5), ('Refund Payment', 10),
             ('Surrender', 4), ('Mileage Claim', 3), ('Staff Training', 5),
             ('Professional Body', 5), ('Direct Payment', 3), ('Fare Reimbursement', 3)
         ]
-        cursor.executemany("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla_defaults)
+        for sla in sla_defaults:
+            try:
+                cursor.execute("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla)
+            except sqlite3.IntegrityError:
+                pass
     
     conn.commit()
     conn.close()
@@ -795,30 +1141,39 @@ def init_database():
     
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
+        logger.info("Inserting default users")
+        now = datetime.now().isoformat()
         default_users = [
-            ('admin', 'admin123', 'ADMIN', None, 'System Administrator', 0, 0, 0),
-            ('finance_receiver', 'receiver123', 'FINANCE_RECEIVER', dept_map.get('Finance'), 'Finance Receiver', 1, 0, 0),
-            ('finance_processor', 'processor123', 'FINANCE_PROCESSOR', dept_map.get('Finance'), 'Finance Processor', 0, 1, 0),
-            ('finance_releaser', 'releaser123', 'FINANCE_RELEASER', dept_map.get('Finance'), 'Finance Releaser', 0, 0, 1),
-            ('finance_admin', 'finadmin123', 'FINANCE_ADMIN', dept_map.get('Finance'), 'Finance Admin', 1, 1, 1),
-            ('management_user', 'management123', 'MANAGEMENT', None, 'Management User', 0, 0, 0),
-            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer', 0, 0, 0),
-            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer', 0, 0, 0),
-            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer', 0, 0, 0),
-            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer', 0, 0, 0),
-            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer', 0, 0, 0),
-            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office', 0, 0, 0),
-            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer', 0, 0, 0),
-            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer', 0, 0, 0),
-            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer', 0, 0, 0),
-            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer', 0, 0, 0),
-            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer', 0, 0, 0),
-            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer', 0, 0, 0),
+            ('admin', 'admin123', 'ADMIN', None, 'System Administrator', 0, 0, 0, now, None, 1),
+            ('finance_receiver', 'receiver123', 'FINANCE_RECEIVER', dept_map.get('Finance'), 'Finance Receiver', 1, 0, 0, now, None, 1),
+            ('finance_processor', 'processor123', 'FINANCE_PROCESSOR', dept_map.get('Finance'), 'Finance Processor', 0, 1, 0, now, None, 1),
+            ('finance_releaser', 'releaser123', 'FINANCE_RELEASER', dept_map.get('Finance'), 'Finance Releaser', 0, 0, 1, now, None, 1),
+            ('finance_admin', 'finadmin123', 'FINANCE_ADMIN', dept_map.get('Finance'), 'Finance Admin', 1, 1, 1, now, None, 1),
+            ('management_user', 'management123', 'MANAGEMENT', None, 'Management User', 0, 0, 0, now, None, 1),
+            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer', 0, 0, 0, now, None, 1),
+            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer', 0, 0, 0, now, None, 1),
+            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer', 0, 0, 0, now, None, 1),
+            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer', 0, 0, 0, now, None, 1),
+            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer', 0, 0, 0, now, None, 1),
+            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office', 0, 0, 0, now, None, 1),
+            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer', 0, 0, 0, now, None, 1),
+            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer', 0, 0, 0, now, None, 1),
+            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer', 0, 0, 0, now, None, 1),
+            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer', 0, 0, 0, now, None, 1),
+            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer', 0, 0, 0, now, None, 1),
+            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer', 0, 0, 0, now, None, 1),
         ]
-        cursor.executemany(
-            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            default_users
-        )
+        for user in default_users:
+            try:
+                cursor.execute('''
+                    INSERT INTO users (
+                        username, password, role, department_id, full_name, 
+                        can_receive_requests, can_process_stages, can_release_payments,
+                        created_at, last_login, is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', user)
+            except sqlite3.IntegrityError:
+                pass
     
     # Insert finance settings
     cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='finance_settings'")
@@ -838,7 +1193,7 @@ def init_database():
     conn.commit()
     conn.close()
     
-    # Apply optimizations (safe wrappers)
+    # Apply optimizations
     try:
         enable_wal_mode()
     except:
@@ -847,10 +1202,13 @@ def init_database():
         add_performance_indexes()
     except:
         pass
+    
+    logger.info("Database initialization complete")
 
 # ================================================================
 # FINANCE PASSWORD FUNCTIONS
 # ================================================================
+
 def verify_finance_password(password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -865,6 +1223,7 @@ def update_finance_password(new_password):
     cursor.execute("UPDATE finance_settings SET setting_value = ? WHERE setting_key = 'finance_password'", (new_password,))
     conn.commit()
     conn.close()
+    auto_backup_scheduler()
     return True
 
 def get_finance_password():
@@ -878,11 +1237,13 @@ def get_finance_password():
 # ================================================================
 # ENHANCED USER FUNCTIONS
 # ================================================================
+
 def get_all_users():
     conn = sqlite3.connect(DB_PATH)
     query = '''
         SELECT u.username, u.role, d.name as department, u.full_name,
-               u.can_receive_requests, u.can_process_stages, u.can_release_payments
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+               u.created_at, u.is_active
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
         ORDER BY u.username
@@ -896,14 +1257,16 @@ def create_user(username, password, role, department_id, full_name,
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
+        now = datetime.now().isoformat()
         cursor.execute(
-            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments)
+            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments, now)
         )
         conn.commit()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error creating user: {e}")
+        logger.error(f"Error creating user: {e}")
         return False
     finally:
         conn.close()
@@ -919,9 +1282,10 @@ def update_user_permissions(username, can_receive, can_process, can_release):
             WHERE username = ?
         ''', (1 if can_receive else 0, 1 if can_process else 0, 1 if can_release else 0, username))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error updating permissions: {e}")
+        logger.error(f"Error updating permissions: {e}")
         return False
     finally:
         conn.close()
@@ -952,9 +1316,10 @@ def delete_user(username):
     try:
         cursor.execute("DELETE FROM users WHERE username = ?", (username,))
         conn.commit()
+        auto_backup_scheduler()
         return cursor.rowcount > 0
     except Exception as e:
-        print(f"Error deleting user: {e}")
+        logger.error(f"Error deleting user: {e}")
         return False
     finally:
         conn.close()
@@ -962,6 +1327,7 @@ def delete_user(username):
 # ================================================================
 # DEPARTMENT FUNCTIONS
 # ================================================================
+
 def get_departments():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
@@ -992,9 +1358,10 @@ def create_department(name, permissions):
               1 if requires_funder else 0, 
               1 if is_finance else 0))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except Exception as e:
-        print(f"Error creating department: {e}")
+        logger.error(f"Error creating department: {e}")
         return False
     finally:
         conn.close()
@@ -1010,9 +1377,10 @@ def delete_department(dept_id):
             return False
         cursor.execute("DELETE FROM departments WHERE id = ?", (dept_id,))
         conn.commit()
+        auto_backup_scheduler()
         return cursor.rowcount > 0
     except Exception as e:
-        print(f"Error deleting department: {e}")
+        logger.error(f"Error deleting department: {e}")
         return False
     finally:
         conn.close()
@@ -1020,6 +1388,7 @@ def delete_department(dept_id):
 # ================================================================
 # SEARCH FUNCTIONS
 # ================================================================
+
 def search_payment_records(search_term, search_type="all"):
     """Search payment records by various criteria"""
     conn = sqlite3.connect(DB_PATH)
@@ -1088,6 +1457,7 @@ def add_product(name, category, has_payment_type, has_semester):
             (name, category, has_payment_type, has_semester)
         )
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1100,6 +1470,7 @@ def delete_product(product_id):
     try:
         cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1118,6 +1489,7 @@ def add_financial_year(year_name):
     try:
         cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, 1)", (year_name,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1130,6 +1502,7 @@ def delete_financial_year(year_id):
     try:
         cursor.execute("DELETE FROM financial_years WHERE id = ?", (year_id,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1148,6 +1521,7 @@ def add_semester(semester_name):
     try:
         cursor.execute("INSERT INTO semesters (name) VALUES (?)", (semester_name,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1160,6 +1534,7 @@ def delete_semester(semester_id):
     try:
         cursor.execute("DELETE FROM semesters WHERE id = ?", (semester_id,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1178,6 +1553,7 @@ def add_funder(funder_name):
     try:
         cursor.execute("INSERT INTO funders (name) VALUES (?)", (funder_name,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1190,6 +1566,7 @@ def delete_funder(funder_id):
     try:
         cursor.execute("DELETE FROM funders WHERE id = ?", (funder_id,))
         conn.commit()
+        auto_backup_scheduler()
         return True
     except:
         return False
@@ -1246,11 +1623,25 @@ def save_request(data):
     request_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    
+    # Audit log
+    log_audit(
+        operation='INSERT',
+        table_name='requests',
+        record_id=request_id,
+        user=data.get('submitted_by'),
+        details={'request_number': request_number, 'request_type': data.get('request_type')}
+    )
+    
     try:
         add_request_log(request_id, request_number, "SUBMITTED", None, "SUBMITTED",
                        "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
     except:
         pass
+    
+    # Create backup after save
+    auto_backup_scheduler()
+    
     return request_number
 
 @retry_on_lock()
@@ -1311,7 +1702,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
             params.append(None)
         action = "RESUBMITTED"
     
-    # Payment statuses
     elif status == 'PAYMENT_PREPARED':
         action = "Payment Prepared"
     
@@ -1324,7 +1714,6 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     elif status == 'PAYMENT_AUTHORIZED':
         action = "Payment Authorized"
     
-    # Surrender statuses
     elif status == 'SURRENDER_FIRST_VERIFICATION':
         action = "First Verification"
     
@@ -1364,12 +1753,24 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
     conn.commit()
     conn.close()
     
+    # Audit log
+    log_audit(
+        operation='UPDATE_STATUS',
+        table_name='requests',
+        record_id=request_id,
+        user=performed_by,
+        details={'old_status': old_status, 'new_status': status, 'action': action}
+    )
+    
     if action:
         try:
             add_request_log(request_id, request_number, action, old_status, status,
                            comment, performed_by, performed_by_role, performed_by_dept)
         except:
             pass
+    
+    # Create backup after status change
+    auto_backup_scheduler()
 
 def update_payment_details(request_id, payment_reference):
     conn = sqlite3.connect(DB_PATH)
@@ -1380,6 +1781,7 @@ def update_payment_details(request_id, payment_reference):
     )
     conn.commit()
     conn.close()
+    auto_backup_scheduler()
 
 def authenticate_user(username, password):
     conn = sqlite3.connect(DB_PATH)
@@ -1391,9 +1793,16 @@ def authenticate_user(username, password):
                    u.can_receive_requests, u.can_process_stages, u.can_release_payments
             FROM users u
             LEFT JOIN departments d ON u.department_id = d.id
-            WHERE u.username = ? AND u.password = ?
+            WHERE u.username = ? AND u.password = ? AND u.is_active = 1
         ''', (username, password))
         user = cursor.fetchone()
+        
+        # Update last login time
+        if user:
+            cursor.execute("UPDATE users SET last_login = ? WHERE username = ?", 
+                          (datetime.now().isoformat(), username))
+            conn.commit()
+        
         conn.close()
         return user if user else None
     except:
@@ -1406,6 +1815,7 @@ def update_user_password(username, new_password):
     cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
     conn.commit()
     conn.close()
+    auto_backup_scheduler()
     return True
 
 def get_user_by_username(username):
@@ -1413,7 +1823,8 @@ def get_user_by_username(username):
     cursor = conn.cursor()
     cursor.execute('''
         SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
-               u.can_receive_requests, u.can_process_stages, u.can_release_payments
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+               u.created_at, u.last_login, u.is_active
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
         WHERE u.username = ?
@@ -1564,32 +1975,27 @@ def get_all_batch_numbers():
     return [r[0] for r in results if r[0]]
 
 # ================================================================
-# PERMISSION FUNCTIONS - FIXED
+# PERMISSION FUNCTIONS
 # ================================================================
 
 def get_allowed_main_categories(user_role, user_dept):
     """Get allowed main categories for a user"""
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     
-    # Admins and Finance Admins can submit requests
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
         return ["Submit Payment Request", "Submit Surrender"]
     
-    # Other finance roles cannot submit requests
     if user_role in finance_roles:
         return []
     
-    # Management cannot submit requests
     if user_role == "MANAGEMENT":
         return []
     
-    # Regular department users
     return ["Submit Payment Request", "Submit Surrender"]
 
 def get_allowed_request_types(user_role, user_dept, main_category):
     """Get allowed request types for a user"""
     
-    # Admins and Finance Admins can see all request types
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
         if main_category == "Submit Payment Request":
             all_types = get_all_request_types()
@@ -1894,7 +2300,6 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
     success_count = 0
     failed_ids = []
     
-    # Get existing columns once for efficiency
     cursor.execute("PRAGMA table_info(requests)")
     existing_columns = [col[1] for col in cursor.fetchall()]
     
@@ -1952,10 +2357,11 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
             success_count += 1
         except Exception as e:
             failed_ids.append(request_id)
-            print(f"Error processing request {request_id}: {e}")
+            logger.error(f"Error processing request {request_id}: {e}")
     
     conn.commit()
     conn.close()
+    auto_backup_scheduler()
     
     return success_count, failed_ids
 
@@ -1974,8 +2380,6 @@ def export_bulk_requests(request_ids):
 
 def get_database_health():
     """Get database health metrics for capacity planning"""
-    import os
-    
     health = {
         'db_size_mb': 0,
         'total_requests': 0,
@@ -1987,15 +2391,18 @@ def get_database_health():
     if os.path.exists(DB_PATH):
         health['db_size_mb'] = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests")
-    health['total_requests'] = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM request_logs")
-    health['total_logs'] = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM users")
-    health['total_users'] = cursor.fetchone()[0]
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM requests")
+        health['total_requests'] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM request_logs")
+        health['total_logs'] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users")
+        health['total_users'] = cursor.fetchone()[0]
+        conn.close()
+    except:
+        pass
     
     if health['db_size_mb'] > 500:
         health['status'] = 'Critical - Migrate to PostgreSQL'
@@ -2011,3 +2418,32 @@ def get_database_health():
         health['recommendation'] = 'SQLite is sufficient for current load'
     
     return health
+
+def get_system_health_report():
+    """Generate comprehensive system health report"""
+    health = get_database_health()
+    backups = get_backup_list()
+    
+    report = {
+        'timestamp': datetime.now().isoformat(),
+        'database': health,
+        'backups': {
+            'total_count': len(backups),
+            'latest_backup': backups[0]['filename'] if backups else None,
+            'latest_backup_date': backups[0]['date'] if backups else None
+        },
+        'system': {
+            'db_version': DB_VERSION,
+            'wal_mode_enabled': os.path.exists(f"{DB_PATH}-wal")
+        }
+    }
+    
+    logger.info(f"System health report generated")
+    return report
+
+# ================================================================
+# INITIALIZE DATABASE WITH RECOVERY
+# ================================================================
+
+# Call this when the module loads
+safe_init_with_recovery()
