@@ -11,7 +11,7 @@ import os
 import base64
 
 from database import (
-    init_database, get_requests, save_request, update_request_status, 
+    safe_init_with_recovery, get_requests, save_request, update_request_status, 
     authenticate_user, get_user_department, get_products, get_funders,
     get_all_users, create_user, create_department, get_departments,
     get_financial_years, get_semesters, add_product,
@@ -33,6 +33,11 @@ from database import (
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
+
+# ================================================================
+# IMPORTANT: Initialize database with recovery (replaces init_database)
+# ================================================================
+safe_init_with_recovery()
 
 # ================================================================
 # LOAD HELB LOGO
@@ -496,9 +501,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize database
-init_database()
-
 # Session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
@@ -952,7 +954,6 @@ def display_tat_by_request_type(data_scope="All Data"):
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Use logo if available, otherwise fallback to emoji
         if helb_logo_base64:
             logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 100px; height: auto; margin-bottom: 1rem;">'
         else:
@@ -1114,7 +1115,6 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-
 # ================================================================
 # DEPARTMENT DASHBOARD
 # ================================================================
@@ -1265,7 +1265,6 @@ if choice == "📊 Department Dashboard":
         
         if st.button("🔄 Refresh This Page", key="dept_refresh"):
             refresh_page()
-
 
 # ================================================================
 # MANAGEMENT DASHBOARD
@@ -1618,13 +1617,11 @@ elif choice == "📈 Management Dashboard":
         if st.button("🔄 Refresh This Page", key="mgmt_refresh"):
             refresh_page()
 
-
 # ================================================================
 # REQUEST TYPE TAT ANALYSIS 
 # ================================================================
 elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type(data_scope)
-
 
 # ================================================================
 # ENHANCED SEARCH PAYMENT RECORDS WITH INTELLIGENT PREDICTIONS
