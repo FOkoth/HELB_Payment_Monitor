@@ -10,6 +10,26 @@ import calendar
 import os
 import base64
 
+# ================================================================
+# LOAD ENVIRONMENT VARIABLES - CRITICAL FOR PRODUCTION MODE
+# ================================================================
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, use system env
+
+# Set production mode from environment
+PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
+
+if PRODUCTION_MODE:
+    print("=" * 60)
+    print("⚠️  PRODUCTION MODE ACTIVE - Data protection ENABLED")
+    print("=" * 60)
+
+# ================================================================
+# IMPORTANT: Initialize database with recovery (replaces init_database)
+# ================================================================
 from database import (
     safe_init_with_recovery, get_requests, save_request, update_request_status, 
     authenticate_user, get_user_department, get_products, get_funders,
@@ -29,15 +49,82 @@ from database import (
     get_returned_request_by_id, get_bulk_eligible_requests, bulk_update_status,
     export_bulk_requests, get_database_health, get_sla_from_database,
     get_intelligent_completion_prediction, get_all_request_types,
-    add_request_type, update_request_type, delete_request_type, update_sla_days
+    add_request_type, update_request_type, delete_request_type, update_sla_days,
+    get_backup_list, restore_backup
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
 
 # ================================================================
-# IMPORTANT: Initialize database with recovery (replaces init_database)
+# DATABASE STATE CHECK - CRITICAL FOR DATA PROTECTION
 # ================================================================
-safe_init_with_recovery()
+
+def check_database_state():
+    """Check if database has data before proceeding - prevents data loss"""
+    try:
+        users_df = get_all_users()
+        
+        if users_df.empty:
+            # Database might have been wiped
+            st.error("⚠️ DATABASE WARNING: No users found! Data may have been lost.")
+            st.warning("This could be due to a database reset. Please check backups.")
+            
+            # Check if in production mode
+            if PRODUCTION_MODE:
+                st.error("🚨 PRODUCTION MODE: Database appears empty! Contact administrator immediately.")
+            
+            # Show available backups
+            try:
+                backups = get_backup_list()
+                if backups:
+                    st.info("📋 Available backups:")
+                    for b in backups[:5]:
+                        st.write(f"- {b['filename']} ({b['date']})")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("🔄 Recover Latest Backup", type="primary"):
+                            with st.spinner("Recovering from backup..."):
+                                if restore_backup(backups[0]['filename']):
+                                    st.success("✅ Database recovered successfully! Please refresh.")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Recovery failed. Check logs.")
+                    with col2:
+                        if not PRODUCTION_MODE:
+                            if st.button("🔄 Reinitialize Database (Dev Only)", type="secondary"):
+                                with st.spinner("Reinitializing database..."):
+                                    safe_init_with_recovery()
+                                    st.success("✅ Database reinitialized! Please refresh.")
+                                    st.rerun()
+                else:
+                    st.warning("⚠️ No backups found. Data may be permanently lost.")
+                    
+                    if not PRODUCTION_MODE:
+                        if st.button("🔄 Initialize Fresh Database (Dev Only)", type="secondary"):
+                            with st.spinner("Initializing database..."):
+                                safe_init_with_recovery()
+                                st.success("✅ Database initialized! Please refresh.")
+                                st.rerun()
+            except Exception as e:
+                st.error(f"Error checking backups: {e}")
+            
+            return False
+        
+        # Check if requests exist (warn but don't stop)
+        try:
+            requests_df = get_requests()
+            if requests_df.empty:
+                st.info("ℹ️ No requests found in the database. You can start by creating your first request.")
+        except:
+            pass
+        
+        return True
+    except Exception as e:
+        st.error(f"❌ Database error: {str(e)}")
+        if PRODUCTION_MODE:
+            st.error("🚨 Production mode: Please contact administrator immediately!")
+        return False
 
 # ================================================================
 # LOAD HELB LOGO
@@ -65,7 +152,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Executive Edition
+# ================================================================
+# RUN DATABASE STATE CHECK BEFORE ANYTHING ELSE
+# ================================================================
+# Initialize database first
+safe_init_with_recovery()
+
+# Then check if database has data (critical for production)
+if not check_database_state():
+    st.stop()  # Stop execution if database is empty and can't be recovered
+
+# ================================================================
+# CUSTOM CSS - Executive Edition
+# ================================================================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
@@ -526,6 +625,10 @@ if 'selected_month' not in st.session_state:
     st.session_state.selected_month = "All"
 if 'selected_year' not in st.session_state:
     st.session_state.selected_year = "All"
+
+# ================================================================
+# FILTER AND HELPER FUNCTIONS (UNCHANGED)
+# ================================================================
 
 def filter_by_filters(df, financial_year, quarter, month, year):
     if df.empty or 'submission_date' not in df.columns:
@@ -1116,7 +1219,7 @@ with st.sidebar:
         st.rerun()
 
 # ================================================================
-# DEPARTMENT DASHBOARD
+# DEPARTMENT DASHBOARD (UNCHANGED)
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<div class='section-header'>📊 Department Performance Dashboard</div>", unsafe_allow_html=True)
@@ -1267,7 +1370,7 @@ if choice == "📊 Department Dashboard":
             refresh_page()
 
 # ================================================================
-# MANAGEMENT DASHBOARD
+# MANAGEMENT DASHBOARD (UNCHANGED)
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -2422,7 +2525,7 @@ elif choice == "📝 New Request":
 
 
 # ================================================================
-# MY REQUESTS
+# MY REQUESTS (UNCHANGED)
 # ================================================================
 elif choice == "📋 My Requests":
     st.markdown("<div class='section-header'>📋 My Requests</div>", unsafe_allow_html=True)
@@ -2463,7 +2566,7 @@ elif choice == "📋 My Requests":
 
 
 # ================================================================
-# RETURNED REQUESTS
+# RETURNED REQUESTS (UNCHANGED)
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -2588,7 +2691,7 @@ elif choice == "↩️ Returned Requests":
 
 
 # ================================================================
-# APPROVAL QUEUE (UPDATED - WITH RETURN BUTTON AT EVERY STAGE)
+# APPROVAL QUEUE (UNCHANGED)
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -3167,7 +3270,7 @@ elif choice == "✅ Approval Queue":
 
 
 # ================================================================
-# BULK OPERATIONS
+# BULK OPERATIONS (UNCHANGED)
 # ================================================================
 elif choice == "⚡ Bulk Operations":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -3325,7 +3428,7 @@ elif choice == "⚡ Bulk Operations":
 
 
 # ================================================================
-# REPORTS
+# REPORTS (UNCHANGED)
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
@@ -3366,7 +3469,7 @@ elif choice == "📑 Reports":
 
 
 # ================================================================
-# ADMIN PANEL (UPDATED WITH SLA CONFIGURATION AND REQUEST TYPE MANAGEMENT)
+# ADMIN PANEL (UNCHANGED)
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
@@ -3903,7 +4006,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         refresh_page()
 
 # ================================================================
-# CHANGE PASSWORD
+# CHANGE PASSWORD (UNCHANGED)
 # ================================================================
 elif choice == "🔐 Change Password":
     st.markdown("<div class='section-header'>🔐 Change Password</div>", unsafe_allow_html=True)
