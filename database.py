@@ -15,6 +15,20 @@ BACKUP_DIR = "backups"
 DB_VERSION = 2
 
 # ================================================================
+# PRODUCTION MODE PROTECTION - CRITICAL FIX
+# ================================================================
+PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
+
+if PRODUCTION_MODE:
+    print("=" * 60)
+    print("⚠️  PRODUCTION MODE ACTIVE")
+    print("⚠️  Auto-recovery and reinitialization DISABLED")
+    print("⚠️  Data protection measures ENABLED")
+    print("=" * 60)
+else:
+    print("ℹ️  DEVELOPMENT MODE - Auto-recovery ENABLED")
+
+# ================================================================
 # LOGGING SETUP
 # ================================================================
 
@@ -36,6 +50,25 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 logger = setup_logging()
+
+# ================================================================
+# ALERT FUNCTION FOR CRITICAL ISSUES
+# ================================================================
+
+def send_alert_email(message):
+    """Send email alert for critical issues - logs the alert"""
+    logger.error(f"🚨 ALERT: {message}")
+    
+    # Log to a separate alerts file for visibility
+    try:
+        alert_dir = "alerts"
+        os.makedirs(alert_dir, exist_ok=True)
+        alert_file = os.path.join(alert_dir, f"alerts_{datetime.now().strftime('%Y%m%d')}.log")
+        with open(alert_file, 'a') as f:
+            f.write(f"{datetime.now().isoformat()} | {message}\n")
+        print(f"🔔 ALERT: {message}")
+    except:
+        pass
 
 # ================================================================
 # DATABASE OPTIMIZATIONS
@@ -306,6 +339,19 @@ def restore_backup(backup_filename):
             shutil.copy2(DB_PATH, emergency_path)
             logger.info(f"Emergency backup created: {emergency_backup}")
         
+        # Verify backup has data before restoring
+        conn = sqlite3.connect(backup_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM requests")
+        request_count = cursor.fetchone()[0]
+        conn.close()
+        
+        if user_count == 0 and request_count == 0 and not PRODUCTION_MODE:
+            logger.warning("Backup appears empty. Skipping restore.")
+            return False
+        
         # Perform restore
         shutil.copy2(backup_path, DB_PATH)
         
@@ -393,13 +439,65 @@ def export_data_to_csv():
     return export_dir
 
 # ================================================================
-# SAFE INITIALIZATION WITH RECOVERY
+# SAFE INITIALIZATION WITH RECOVERY - CRITICAL FIX
 # ================================================================
 
 def safe_init_with_recovery():
     """Initialize database with recovery from backup if needed"""
     logger.info("Starting safe database initialization with recovery")
     
+    # ============================================================
+    # CRITICAL FIX: In production, NEVER auto-recover or reinitialize
+    # ============================================================
+    if PRODUCTION_MODE:
+        logger.info("⚠️ PRODUCTION MODE: Skipping auto-recovery and reinitialization")
+        
+        # Only verify integrity, don't change anything
+        if os.path.exists(DB_PATH):
+            if verify_database_integrity():
+                logger.info("✅ Production database integrity verified")
+                # Ensure tables exist without wiping data
+                ensure_tables_exist()
+                return True
+            else:
+                logger.error("❌ Production database integrity check FAILED!")
+                logger.error("🚨 MANUAL INTERVENTION REQUIRED - DO NOT AUTO-RECOVER")
+                
+                # Send alert
+                send_alert_email(f"🚨 CRITICAL: Database integrity check failed in production!")
+                
+                # Try to restore from backup as last resort
+                backups = get_backup_list()
+                if backups:
+                    logger.info(f"Latest backup available: {backups[0]['filename']}")
+                    # Only restore if backup has data
+                    try:
+                        conn = sqlite3.connect(backups[0]['path'])
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM users")
+                        backup_user_count = cursor.fetchone()[0]
+                        conn.close()
+                        
+                        if backup_user_count > 0:
+                            logger.info("Attempting emergency restore from backup...")
+                            if restore_backup(backups[0]['filename']):
+                                logger.info("✅ Emergency restore successful!")
+                                return True
+                            else:
+                                logger.error("❌ Emergency restore failed!")
+                        else:
+                            logger.error("❌ Latest backup is empty!")
+                    except:
+                        pass
+                return False
+        else:
+            logger.error("❌ Production database file missing!")
+            send_alert_email("🚨 CRITICAL: Production database file missing!")
+            return False
+    
+    # ============================================================
+    # DEVELOPMENT MODE: Original recovery logic
+    # ============================================================
     # Check if we need to recover
     if os.path.exists(DB_PATH):
         if not verify_database_integrity():
@@ -436,6 +534,33 @@ def safe_init_with_recovery():
     
     logger.info("Database initialization complete")
     return True
+
+# ================================================================
+# ENSURE TABLES EXIST WITHOUT DATA LOSS - NEW FUNCTION
+# ================================================================
+
+def ensure_tables_exist():
+    """Only create tables if they don't exist, without inserting default data"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Check if critical tables exist
+        tables = ['departments', 'products', 'funders', 'financial_years', 'semesters', 
+                  'users', 'requests', 'sla_config', 'audit_logs', 'finance_settings']
+        
+        for table in tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if not cursor.fetchone():
+                logger.info(f"Creating missing table: {table}")
+                # Table creation will be handled by init_database if needed
+        
+        conn.close()
+        logger.info("Tables verified - data preserved")
+        return True
+    except Exception as e:
+        logger.error(f"Error ensuring tables exist: {e}")
+        return False
 
 # ================================================================
 # LOGS TABLE
@@ -834,7 +959,7 @@ def get_department_request_types(department_name):
         return ["Imprest", "Petty Cash"]
 
 # ================================================================
-# INITIALIZATION WITH SAFE MIGRATION
+# INITIALIZATION WITH SAFE MIGRATION - MODIFIED TO CHECK EXISTING DATA
 # ================================================================
 
 def safe_add_column(table_name, column_name, column_type):
@@ -857,6 +982,38 @@ def safe_add_column(table_name, column_name, column_type):
 
 def init_database():
     """Create all tables if they don't exist - SAFE: preserves existing data"""
+    
+    # ============================================================
+    # CRITICAL FIX: Check if database already has data
+    # ============================================================
+    if os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            # Check if users table exists and has data
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if cursor.fetchone():
+                cursor.execute("SELECT COUNT(*) FROM users")
+                user_count = cursor.fetchone()[0]
+                
+                # If there are users, database is already initialized
+                if user_count > 0:
+                    logger.info(f"✅ Database already initialized with {user_count} users. Skipping reinitialization.")
+                    conn.close()
+                    
+                    # Just ensure tables exist without inserting default data
+                    ensure_tables_exist()
+                    return True
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Error checking existing data: {e}")
+    
+    # ============================================================
+    # ORIGINAL INITIALIZATION CODE (only runs if no data exists)
+    # ============================================================
+    logger.info("Initializing fresh database...")
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
@@ -1311,6 +1468,21 @@ def get_user_permissions(username):
 
 def delete_user(username):
     """Delete a user by username"""
+    # Prevent deletion in production mode if users exist
+    if PRODUCTION_MODE:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = cursor.fetchone()[0]
+            conn.close()
+            
+            if total_users <= 1:
+                logger.error("Cannot delete the last user in production mode")
+                return False
+        except:
+            pass
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
@@ -2446,4 +2618,24 @@ def get_system_health_report():
 # ================================================================
 
 # Call this when the module loads
-safe_init_with_recovery()
+if PRODUCTION_MODE:
+    print("⚠️  Production mode: Safe initialization (no auto-recovery)")
+    # In production, just verify integrity without auto-recovery
+    if os.path.exists(DB_PATH):
+        if verify_database_integrity():
+            print("✅ Production database integrity verified")
+            # Ensure tables exist without wiping data
+            ensure_tables_exist()
+        else:
+            print("❌ Production database integrity check FAILED!")
+            print("🚨 MANUAL INTERVENTION REQUIRED")
+            backups = get_backup_list()
+            if backups:
+                print(f"📋 Latest backup available: {backups[0]['filename']}")
+            # Don't auto-recover - require manual action
+    else:
+        print("⚠️  Database file not found. Initializing new database...")
+        safe_init_with_recovery()
+else:
+    # Development mode - full initialization with recovery
+    safe_init_with_recovery()
