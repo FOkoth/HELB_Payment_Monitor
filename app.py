@@ -10,6 +10,63 @@ import os
 import base64
 
 # ================================================================
+# DIRECT DATABASE CONNECTION TEST - ADD THIS AFTER IMPORTS
+# ================================================================
+print("=" * 60)
+print("🔍 RUNNING DATABASE CONNECTION TEST")
+print("=" * 60)
+
+try:
+    import psycopg2
+    import os
+    
+    # Try to get DATABASE_URL
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    
+    if not DATABASE_URL:
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+            DATABASE_URL = os.getenv('DATABASE_URL')
+        except:
+            pass
+    
+    if not DATABASE_URL:
+        try:
+            import streamlit as st
+            DATABASE_URL = st.secrets.get("DATABASE_URL")
+        except:
+            pass
+    
+    print(f"🔍 DATABASE_URL: {'FOUND' if DATABASE_URL else 'NOT FOUND'}")
+    
+    if DATABASE_URL:
+        print(f"🔍 Attempting direct connection to Supabase...")
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM users")
+        user_count = cursor.fetchone()[0]
+        print(f"✅ Found {user_count} users in database")
+        
+        cursor.execute("SELECT COUNT(*) FROM departments")
+        dept_count = cursor.fetchone()[0]
+        print(f"✅ Found {dept_count} departments in database")
+        
+        cursor.close()
+        conn.close()
+        print("✅ Database connection test PASSED!")
+    else:
+        print("❌ DATABASE_URL not found in any source!")
+        
+except Exception as e:
+    print(f"❌ Database connection test FAILED: {e}")
+    import traceback
+    traceback.print_exc()
+
+print("=" * 60)
+
+# ================================================================
 # LOAD ENVIRONMENT VARIABLES - CRITICAL FOR PRODUCTION MODE
 # ================================================================
 try:
