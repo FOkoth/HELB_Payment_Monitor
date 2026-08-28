@@ -196,15 +196,25 @@ def get_request_logs(request_id):
         return []
 
 def get_all_users():
-    query = """
-        SELECT u.username, u.role, d.name as department, u.full_name,
-               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
-               u.created_at, u.is_active
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        ORDER BY u.username
-    """
-    return df_from_query(query)
+    try:
+        query = """
+            SELECT u.username, u.role, d.name as department, u.full_name,
+                   u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+                   u.created_at, u.is_active
+            FROM users u
+            LEFT JOIN departments d ON u.department_id = d.id
+            ORDER BY u.username
+        """
+        print(f"🔍 get_all_users: Executing query...")
+        result = df_from_query(query)
+        print(f"🔍 get_all_users: Found {len(result)} users")
+        return result
+    except Exception as e:
+        print(f"❌ get_all_users error: {e}")
+        # Return empty DataFrame with correct columns
+        return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
+                                      'can_receive_requests', 'can_process_stages', 
+                                      'can_release_payments', 'created_at', 'is_active'])
 
 def get_user_by_username(username):
     query = """
