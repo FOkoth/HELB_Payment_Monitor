@@ -31,7 +31,11 @@ if not DATABASE_URL:
         pass
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
+    # TEMPORARY - FOR TESTING ONLY - Remove this after confirming connection works
+    # Replace with your actual connection string from Supabase
+    DATABASE_URL = "postgresql://postgres.YOUR_PROJECT_REF:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
+    print("⚠️  USING HARDCODED DATABASE_URL FOR TESTING!")
+    # raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
 
 PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
 
@@ -69,9 +73,12 @@ logger = setup_logging()
 
 def get_connection():
     try:
+        print(f"🔍 get_connection: Connecting to database...")
         conn = psycopg2.connect(DATABASE_URL)
+        print(f"🔍 get_connection: Connected successfully!")
         return conn
     except Exception as e:
+        print(f"❌ get_connection error: {e}")
         logger.error(f"Database connection error: {e}")
         raise
 
@@ -94,6 +101,7 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
         if conn:
             conn.rollback()
         logger.error(f"Query error: {e}")
+        print(f"❌ execute_query error: {e}")
         raise
     finally:
         if cursor:
@@ -104,15 +112,21 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
 def df_from_query(query, params=None):
     conn = None
     try:
+        print(f"🔍 df_from_query: Executing query...")
         conn = get_connection()
+        print(f"🔍 df_from_query: Connection obtained, reading query...")
         df = pd.read_sql_query(query, conn, params=params)
+        print(f"🔍 df_from_query: Query successful, got {len(df)} rows")
         return df
     except Exception as e:
+        print(f"❌ df_from_query error: {e}")
         logger.error(f"DataFrame query error: {e}")
+        # Return empty DataFrame with a note
         return pd.DataFrame()
     finally:
         if conn:
             conn.close()
+            print(f"🔍 df_from_query: Connection closed")
 
 def calculate_tat(submission_date, payment_date=None):
     from utils.holidays_ke import working_days_between
@@ -195,6 +209,9 @@ def get_request_logs(request_id):
         logger.error(f"Error getting logs: {e}")
         return []
 
+# ================================================================
+# FIXED: get_all_users with better error handling
+# ================================================================
 def get_all_users():
     try:
         query = """
@@ -208,6 +225,7 @@ def get_all_users():
         print(f"🔍 get_all_users: Executing query...")
         result = df_from_query(query)
         print(f"🔍 get_all_users: Found {len(result)} users")
+        print(f"🔍 get_all_users: Columns: {result.columns.tolist()}")
         return result
     except Exception as e:
         print(f"❌ get_all_users error: {e}")
@@ -227,9 +245,6 @@ def get_user_by_username(username):
     """
     return execute_query(query, (username,), fetch_one=True)
 
-# ================================================================
-# UPDATED AUTHENTICATE_USER WITH DEBUG PRINTS
-# ================================================================
 def authenticate_user(username, password):
     try:
         print(f"🔍 AUTH DEBUG: Attempting login for username='{username}'")
@@ -277,12 +292,15 @@ def create_user(username, password, role, department_id, full_name,
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
         print(f"🔍 Creating user: {username}")
+        print(f"🔍 Department ID: {department_id}")
         
         # First check if user already exists
-        check_query = "SELECT username FROM users WHERE username = %s"
-        existing = execute_query(check_query, (username,), fetch_one=True)
+        check_query = "SELECT COUNT(*) FROM users WHERE username = %s"
+        count_result = execute_query(check_query, (username,), fetch_one=True)
+        count = count_result[0] if count_result else 0
+        print(f"🔍 User count for '{username}': {count}")
         
-        if existing:
+        if count > 0:
             print(f"❌ User '{username}' already exists!")
             return False
         
@@ -308,6 +326,7 @@ def create_user(username, password, role, department_id, full_name,
         logger.error(f"Error creating user: {e}")
         print(f"❌ Error creating user: {e}")
         return False
+
 def update_user_password(username, new_password):
     try:
         query = "UPDATE users SET password = %s WHERE username = %s"
@@ -367,12 +386,16 @@ def get_user_department(username):
     """
     return execute_query(query, (username,), fetch_one=True)
 
+# ================================================================
+# FIXED: get_departments with better error handling
+# ================================================================
 def get_departments():
     try:
         query = "SELECT id, name FROM departments ORDER BY name"
         print(f"🔍 get_departments: Executing query...")
         result = df_from_query(query)
         print(f"🔍 get_departments: Found {len(result)} departments")
+        print(f"🔍 get_departments: Columns: {result.columns.tolist()}")
         return result
     except Exception as e:
         print(f"❌ get_departments error: {e}")
