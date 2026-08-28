@@ -266,6 +266,17 @@ def authenticate_user(username, password):
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
+        print(f"🔍 Creating user: {username}")
+        
+        # First check if user already exists
+        check_query = "SELECT username FROM users WHERE username = %s"
+        existing = execute_query(check_query, (username,), fetch_one=True)
+        
+        if existing:
+            print(f"❌ User '{username}' already exists!")
+            return False
+        
+        # Insert the user
         query = """
             INSERT INTO users (
                 username, password, role, department_id, full_name, 
@@ -275,15 +286,18 @@ def create_user(username, password, role, department_id, full_name,
         """
         params = (
             username, password, role, department_id, full_name,
-            can_receive_requests, can_process_stages, can_release_payments,
+            1 if can_receive_requests else 0,
+            1 if can_process_stages else 0,
+            1 if can_release_payments else 0,
             datetime.now().isoformat()
         )
         execute_query(query, params, commit=True)
+        print(f"✅ User '{username}' created successfully!")
         return True
     except Exception as e:
         logger.error(f"Error creating user: {e}")
+        print(f"❌ Error creating user: {e}")
         return False
-
 def update_user_password(username, new_password):
     try:
         query = "UPDATE users SET password = %s WHERE username = %s"
