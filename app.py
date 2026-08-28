@@ -63,36 +63,51 @@ def check_database_state():
     try:
         users_df = get_all_users()
         
-        if users_df.empty:
-            # Database might be empty (new installation or no data)
-            st.warning("⚠️ No users found in the database. This might be a fresh installation.")
-            st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
-            
-            # Show available backups info
+        # Check if users exist
+        if users_df is None or users_df.empty:
+            # Check if we can connect to the database at all
             try:
-                backups = get_backup_list()
-                if backups:
-                    st.info("📋 Available backups:")
-                    for b in backups[:3]:
-                        st.write(f"- {b['filename']} ({b['date']})")
-            except Exception as e:
-                st.error(f"Error checking backups: {e}")
-            
-            # Button to check again
-            if st.button("🔄 Check Again", type="primary"):
-                st.rerun()
-            
-            # Allow user to continue to login screen
-            st.info("If you have inserted default data, click 'Check Again' or refresh the page.")
-            return True  # Return True so app doesn't stop
+                # Try a simple query to verify connection
+                test_query = "SELECT 1"
+                from database import execute_query
+                result = execute_query(test_query, fetch_one=True)
+                if result:
+                    # Connection works but no users - this is a fresh database
+                    st.warning("⚠️ No users found in the database. This might be a fresh installation.")
+                    st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
+                    
+                    # Show available backups info
+                    try:
+                        backups = get_backup_list()
+                        if backups:
+                            st.info("📋 Available backups:")
+                            for b in backups[:3]:
+                                st.write(f"- {b['filename']} ({b['date']})")
+                    except Exception as e:
+                        pass
+                    
+                    # Show instructions
+                    st.info("📝 To fix this, run the SQL script in Supabase SQL Editor to insert default data.")
+                    st.info("🔑 After inserting data, refresh the page and log in with admin/admin123")
+                    
+                    # Button to check again
+                    if st.button("🔄 Check Again", type="primary"):
+                        st.rerun()
+                    
+                    return False
+            except:
+                # Connection failed
+                st.error("❌ Database connection error. Please check your DATABASE_URL.")
+                return False
         else:
+            # Users found - database is ready
             st.success(f"✅ Database ready: {len(users_df)} users found")
             return True
             
     except Exception as e:
         st.error(f"❌ Database error: {str(e)}")
         st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
-        return True  # Return True to allow user to see the error and fix it
+        return False
 
 # ================================================================
 # LOAD HELB LOGO
