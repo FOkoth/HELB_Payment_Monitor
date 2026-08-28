@@ -8,27 +8,21 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from functools import wraps
 
-# Try loading from .env file (local development)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# Streamlit Cloud secrets support
 try:
     import streamlit as st
-    # If running on Streamlit Cloud, use secrets
     DATABASE_URL = st.secrets.get("DATABASE_URL")
     PRODUCTION_MODE = st.secrets.get("PRODUCTION_MODE", "False")
 except:
-    # Fallback to environment variables
     DATABASE_URL = os.getenv('DATABASE_URL')
     PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False')
 
-# If still not found, try hardcoded (only for testing - REMOVE IN PRODUCTION)
 if not DATABASE_URL:
-    # Check if running on Streamlit Cloud
     try:
         import streamlit as st
         if hasattr(st, 'secrets'):
