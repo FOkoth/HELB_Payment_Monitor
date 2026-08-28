@@ -31,14 +31,15 @@ if not DATABASE_URL:
         pass
 
 if not DATABASE_URL:
-    # ⚠️ REPLACE WITH YOUR ACTUAL SUPABASE CONNECTION STRING ⚠️
+    # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL CONNECTION STRING ⚠️⚠️⚠️
+    # Go to Supabase → Settings → Database → Connection string → URI
     DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
     print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
 
-print(f"✅ DATABASE_URL loaded")
+print(f"✅ DATABASE_URL loaded: {DATABASE_URL[:40]}...")
 
 PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
 
@@ -111,164 +112,129 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
             conn.close()
 
 # ================================================================
-# FIXED: get_all_users - USES DIRECT CONNECTION
+# get_all_users - SIMPLIFIED
 # ================================================================
 def get_all_users():
+    conn = None
     try:
-        print("🔍 get_all_users: Starting direct connection...")
+        print("🔍 get_all_users: Starting...")
+        conn = psycopg2.connect(DATABASE_URL)
+        print("🔍 get_all_users: Connected!")
         
-        # Use direct connection, no df_from_query
-        conn = None
-        try:
-            conn = psycopg2.connect(DATABASE_URL)
-            print(f"🔍 get_all_users: Connected!")
-            
-            # Simple query
-            query = """
-                SELECT username, role, full_name,
-                       can_receive_requests, can_process_stages, can_release_payments,
-                       created_at, is_active
-                FROM users
-                ORDER BY username
-            """
-            
-            print(f"🔍 get_all_users: Executing query...")
-            df = pd.read_sql_query(query, conn)
-            print(f"🔍 get_all_users: Query returned {len(df)} rows")
-            
-            conn.close()
-            
-            # Add department column (will be populated separately if needed)
-            df['department'] = None
-            
-            # Reorder columns to match expected format
-            df = df[['username', 'role', 'department', 'full_name', 
-                    'can_receive_requests', 'can_process_stages', 
-                    'can_release_payments', 'created_at', 'is_active']]
-            
-            print(f"🔍 get_all_users: Returning {len(df)} users")
-            return df
-            
-        except Exception as e:
-            print(f"❌ get_all_users: Connection failed: {e}")
-            if conn:
-                conn.close()
-            # Return empty DataFrame
-            return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
-                                          'can_receive_requests', 'can_process_stages', 
-                                          'can_release_payments', 'created_at', 'is_active'])
-            
+        # Simple query without joins
+        query = "SELECT username, role, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active FROM users ORDER BY username"
+        
+        print(f"🔍 get_all_users: Executing query...")
+        df = pd.read_sql_query(query, conn)
+        print(f"🔍 get_all_users: Query returned {len(df)} rows")
+        
+        # Add department column (will be empty)
+        df['department'] = None
+        
+        # Reorder columns
+        df = df[['username', 'role', 'department', 'full_name', 
+                'can_receive_requests', 'can_process_stages', 
+                'can_release_payments', 'created_at', 'is_active']]
+        
+        conn.close()
+        print(f"🔍 get_all_users: Returning {len(df)} users")
+        return df
+        
     except Exception as e:
         print(f"❌ get_all_users error: {e}")
         import traceback
         traceback.print_exc()
+        if conn:
+            conn.close()
+        # Return empty DataFrame
         return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
                                       'can_receive_requests', 'can_process_stages', 
                                       'can_release_payments', 'created_at', 'is_active'])
 
 # ================================================================
-# FIXED: get_departments - USES DIRECT CONNECTION
+# get_departments - SIMPLIFIED
 # ================================================================
 def get_departments():
+    conn = None
     try:
-        print("🔍 get_departments: Starting direct connection...")
+        print("🔍 get_departments: Starting...")
+        conn = psycopg2.connect(DATABASE_URL)
+        print("🔍 get_departments: Connected!")
         
-        # Use direct connection, no df_from_query
-        conn = None
-        try:
-            conn = psycopg2.connect(DATABASE_URL)
-            print(f"🔍 get_departments: Connected!")
-            
-            query = "SELECT id, name FROM departments ORDER BY name"
-            
-            print(f"🔍 get_departments: Executing query...")
-            df = pd.read_sql_query(query, conn)
-            print(f"🔍 get_departments: Query returned {len(df)} rows")
-            
-            conn.close()
-            return df
-            
-        except Exception as e:
-            print(f"❌ get_departments: Connection failed: {e}")
-            if conn:
-                conn.close()
-            return pd.DataFrame(columns=['id', 'name'])
-            
+        query = "SELECT id, name FROM departments ORDER BY name"
+        
+        print(f"🔍 get_departments: Executing query...")
+        df = pd.read_sql_query(query, conn)
+        print(f"🔍 get_departments: Query returned {len(df)} rows")
+        
+        conn.close()
+        return df
+        
     except Exception as e:
         print(f"❌ get_departments error: {e}")
         import traceback
         traceback.print_exc()
+        if conn:
+            conn.close()
         return pd.DataFrame(columns=['id', 'name'])
 
 # ================================================================
-# FIXED: get_user_by_username
-# ================================================================
-def get_user_by_username(username):
-    try:
-        query = """
-            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
-                   u.can_receive_requests, u.can_process_stages, u.can_release_payments,
-                   u.created_at, u.last_login, u.is_active
-            FROM users u
-            LEFT JOIN departments d ON u.department_id = d.id
-            WHERE u.username = %s
-        """
-        return execute_query(query, (username,), fetch_one=True)
-    except Exception as e:
-        print(f"❌ get_user_by_username error: {e}")
-        return None
-
-# ================================================================
-# FIXED: authenticate_user
+# authenticate_user - SIMPLIFIED
 # ================================================================
 def authenticate_user(username, password):
+    conn = None
+    cursor = None
     try:
         print(f"🔍 AUTH: Attempting login for '{username}'")
         
-        # Direct query
-        conn = None
-        try:
-            conn = psycopg2.connect(DATABASE_URL)
-            cursor = conn.cursor()
-            
-            query = """
-                SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
-                       COALESCE(d.is_finance_dept, 0) as is_finance_dept,
-                       u.can_receive_requests, u.can_process_stages, u.can_release_payments
-                FROM users u
-                LEFT JOIN departments d ON u.department_id = d.id
-                WHERE u.username = %s AND u.password = %s AND u.is_active = 1
-            """
-            cursor.execute(query, (username, password))
-            user = cursor.fetchone()
-            
-            if user:
-                # Update last login
-                update_query = "UPDATE users SET last_login = %s WHERE username = %s"
-                cursor.execute(update_query, (datetime.now().isoformat(), username))
-                conn.commit()
-                print(f"✅ AUTH: User '{username}' authenticated!")
-            else:
-                print(f"❌ AUTH: User '{username}' not found")
-            
-            cursor.close()
-            conn.close()
-            return user
-            
-        except Exception as e:
-            print(f"❌ AUTH error: {e}")
-            if conn:
-                conn.close()
-            return None
-            
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
+                   COALESCE(d.is_finance_dept, 0) as is_finance_dept,
+                   u.can_receive_requests, u.can_process_stages, u.can_release_payments
+            FROM users u
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE u.username = %s AND u.password = %s AND u.is_active = 1
+        """
+        cursor.execute(query, (username, password))
+        user = cursor.fetchone()
+        
+        if user:
+            # Update last login
+            update_query = "UPDATE users SET last_login = %s WHERE username = %s"
+            cursor.execute(update_query, (datetime.now().isoformat(), username))
+            conn.commit()
+            print(f"✅ AUTH: User '{username}' authenticated!")
+        else:
+            print(f"❌ AUTH: User '{username}' not found")
+        
+        cursor.close()
+        conn.close()
+        return user
+        
     except Exception as e:
-        logger.error(f"Authentication error: {e}")
-        print(f"❌ AUTH: Error: {e}")
+        print(f"❌ AUTH error: {e}")
+        import traceback
+        traceback.print_exc()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
         return None
 
-# ================================================================
-# FIXED: create_user
-# ================================================================
+def get_user_by_username(username):
+    query = """
+        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+               u.created_at, u.last_login, u.is_active
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        WHERE u.username = %s
+    """
+    return execute_query(query, (username,), fetch_one=True)
+
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
