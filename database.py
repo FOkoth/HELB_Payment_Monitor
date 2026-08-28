@@ -41,9 +41,9 @@ if not DATABASE_URL:
 
 # Try 4: Hardcode for testing (REPLACE WITH YOUR ACTUAL CONNECTION STRING)
 if not DATABASE_URL:
-    # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL SUPABASE CONNECTION STRING ⚠️⚠️⚠️
-    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
-    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL FOR TESTING! ⚠️⚠️⚠️")
+   
+    DATABASE_URL = "postgresql://postgres:Helb@2025Secure!@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
+    print("USING HARDCODED DATABASE_URL FOR TESTING!")
 
 if not DATABASE_URL:
     raise ValueError("❌ DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
