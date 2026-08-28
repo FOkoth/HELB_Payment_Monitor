@@ -217,8 +217,28 @@ def get_user_by_username(username):
     """
     return execute_query(query, (username,), fetch_one=True)
 
+# ================================================================
+# UPDATED AUTHENTICATE_USER WITH DEBUG PRINTS
+# ================================================================
 def authenticate_user(username, password):
     try:
+        print(f"🔍 AUTH DEBUG: Attempting login for username='{username}'")
+        print(f"🔍 AUTH DEBUG: Password length: {len(password)} characters")
+        
+        # First, check if user exists with these credentials
+        check_query = "SELECT id, username, role, full_name, department_id, is_active FROM users WHERE username = %s AND password = %s"
+        user_check = execute_query(check_query, (username, password), fetch_one=True)
+        print(f"🔍 AUTH DEBUG: User check result: {user_check}")
+        
+        if not user_check:
+            print(f"❌ AUTH DEBUG: User '{username}' not found with that password")
+            return None
+        
+        if user_check[5] != 1:
+            print(f"❌ AUTH DEBUG: User '{username}' is inactive (is_active = {user_check[5]})")
+            return None
+        
+        # Now get full user info with department
         query = """
             SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
                    COALESCE(d.is_finance_dept, 0) as is_finance_dept,
@@ -228,12 +248,19 @@ def authenticate_user(username, password):
             WHERE u.username = %s AND u.password = %s AND u.is_active = 1
         """
         user = execute_query(query, (username, password), fetch_one=True)
+        print(f"🔍 AUTH DEBUG: Full user query result: {user}")
+        
         if user:
             update_query = "UPDATE users SET last_login = %s WHERE username = %s"
             execute_query(update_query, (datetime.now().isoformat(), username), commit=True)
+            print(f"✅ AUTH DEBUG: User '{username}' authenticated successfully!")
+        else:
+            print(f"❌ AUTH DEBUG: User '{username}' not found in full query - possible department issue")
+        
         return user
     except Exception as e:
         logger.error(f"Authentication error: {e}")
+        print(f"❌ AUTH DEBUG: Error: {e}")
         return None
 
 def create_user(username, password, role, department_id, full_name, 
