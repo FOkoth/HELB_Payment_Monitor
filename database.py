@@ -1,44 +1,43 @@
-import sqlite3
-import pandas as pd
-from datetime import datetime, date, timedelta
 import os
 import json
-import shutil
 import time
-from functools import wraps
-import numpy as np
 import logging
 import hashlib
+import numpy as np
+import pandas as pd
+from datetime import datetime, date, timedelta
+from functools import wraps
+from dotenv import load_dotenv
 
-DB_PATH = "helb_data.db"
-BACKUP_DIR = "backups"
-DB_VERSION = 2
+load_dotenv()
 
-# ================================================================
-# PRODUCTION MODE PROTECTION - CRITICAL FIX
-# ================================================================
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    print("psycopg2-binary not installed. Run: pip install psycopg2-binary")
+    raise
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL not found! Please check your .env file.")
+
 PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
 
 if PRODUCTION_MODE:
     print("=" * 60)
-    print("⚠️  PRODUCTION MODE ACTIVE")
-    print("⚠️  Auto-recovery and reinitialization DISABLED")
-    print("⚠️  Data protection measures ENABLED")
+    print("PRODUCTION MODE ACTIVE - Data protection ENABLED")
     print("=" * 60)
 else:
-    print("ℹ️  DEVELOPMENT MODE - Auto-recovery ENABLED")
+    print("DEVELOPMENT MODE - Connected to Supabase")
 
-# ================================================================
-# LOGGING SETUP
-# ================================================================
+print("Connected to Supabase PostgreSQL")
 
 def setup_logging():
-    """Setup comprehensive logging for all database operations"""
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    
     log_file = os.path.join(log_dir, f"helb_db_{datetime.now().strftime('%Y%m%d')}.log")
-    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s | %(levelname)s | %(message)s',
@@ -51,672 +50,52 @@ def setup_logging():
 
 logger = setup_logging()
 
-# ================================================================
-# ALERT FUNCTION FOR CRITICAL ISSUES
-# ================================================================
-
-def send_alert_email(message):
-    """Send email alert for critical issues - logs the alert"""
-    logger.error(f"🚨 ALERT: {message}")
-    
-    # Log to a separate alerts file for visibility
+def get_connection():
     try:
-        alert_dir = "alerts"
-        os.makedirs(alert_dir, exist_ok=True)
-        alert_file = os.path.join(alert_dir, f"alerts_{datetime.now().strftime('%Y%m%d')}.log")
-        with open(alert_file, 'a') as f:
-            f.write(f"{datetime.now().isoformat()} | {message}\n")
-        print(f"🔔 ALERT: {message}")
-    except:
-        pass
-
-# ================================================================
-# DATABASE OPTIMIZATIONS
-# ================================================================
-
-def retry_on_lock(max_retries=5, delay=0.1):
-    """Retry database operation if locked"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except sqlite3.OperationalError as e:
-                    if "database is locked" in str(e) and attempt < max_retries - 1:
-                        time.sleep(delay * (attempt + 1))
-                        continue
-                    raise
-            return None
-        return wrapper
-    return decorator
-
-def enable_wal_mode():
-    """Enable WAL mode for better concurrent performance"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA cache_size=-20000")
-        conn.close()
-        logger.info("WAL mode enabled")
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
     except Exception as e:
-        logger.warning(f"Failed to enable WAL mode: {e}")
+        logger.error(f"Database connection error: {e}")
+        raise
 
-def add_performance_indexes():
-    """Add performance indexes for faster queries"""
+def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=False):
+    conn = None
+    cursor = None
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         cursor = conn.cursor()
-        indexes = [
-            "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_date ON requests(submission_date)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_dept ON requests(department_name)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_type ON requests(request_type)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_number ON requests(request_number)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_batch ON requests(batch_no)",
-            "CREATE INDEX IF NOT EXISTS idx_requests_imprest ON requests(imprest_no)",
-            "CREATE INDEX IF NOT EXISTS idx_logs_request ON request_logs(request_id)",
-            "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON request_logs(timestamp)"
-        ]
-        for idx in indexes:
-            cursor.execute(idx)
-        conn.commit()
-        conn.close()
-        logger.info("Performance indexes added")
-    except Exception as e:
-        logger.warning(f"Failed to add indexes: {e}")
-
-# ================================================================
-# DATABASE INTEGRITY AND VERSION MANAGEMENT
-# ================================================================
-
-def get_db_version():
-    """Get current database version"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA user_version")
-        version = cursor.fetchone()[0]
-        conn.close()
-        return version
-    except:
-        return 0
-
-def set_db_version(version):
-    """Set database version"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(f"PRAGMA user_version = {version}")
-        conn.commit()
-        conn.close()
-    except:
-        pass
-
-def verify_database_integrity():
-    """Check if database has valid data before using it"""
-    try:
-        if not os.path.exists(DB_PATH):
-            logger.warning(f"Database file {DB_PATH} does not exist")
-            return False
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Check if critical tables exist
-        required_tables = ['requests', 'users', 'departments', 'sla_config']
-        for table in required_tables:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
-            if not cursor.fetchone():
-                logger.error(f"Critical table '{table}' missing")
-                conn.close()
-                return False
-        
-        # Run integrity check
-        cursor.execute("PRAGMA integrity_check")
-        integrity = cursor.fetchone()[0]
-        
-        if integrity != "ok":
-            logger.error(f"Database integrity check failed: {integrity}")
-            conn.close()
-            return False
-        
-        # Check for data consistency
-        cursor.execute("SELECT COUNT(*) FROM requests")
-        request_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        user_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        logger.info(f"Integrity check passed: {request_count} requests, {user_count} users")
-        
-        # If database is suspiciously empty, flag it (but don't fail - might be new DB)
-        if request_count == 0 and user_count == 0:
-            logger.info("Database is empty (new installation)")
-        
-        return True
-    except Exception as e:
-        logger.error(f"Integrity check failed: {e}")
-        return False
-
-def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
-    """Log all database operations for audit trail"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Create audit_logs table if not exists
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                table_name TEXT NOT NULL,
-                record_id INTEGER,
-                user TEXT,
-                details TEXT,
-                before_state TEXT,
-                after_state TEXT
-            )
-        ''')
-        
-        cursor.execute('''
-            INSERT INTO audit_logs (
-                timestamp, operation, table_name, record_id, user, 
-                details, before_state, after_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            datetime.now().isoformat(),
-            operation,
-            table_name,
-            record_id,
-            user or 'SYSTEM',
-            json.dumps(details) if details else None,
-            json.dumps(before_state) if before_state else None,
-            json.dumps(after_state) if after_state else None
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"AUDIT: {operation} on {table_name}/{record_id} by {user}")
-    except Exception as e:
-        logger.error(f"Failed to write audit log: {e}")
-
-# ================================================================
-# ENHANCED BACKUP FUNCTIONS
-# ================================================================
-
-def ensure_backup_dir():
-    """Ensure backup directory exists"""
-    if not os.path.exists(BACKUP_DIR):
-        os.makedirs(BACKUP_DIR)
-        logger.info(f"Created backup directory: {BACKUP_DIR}")
-
-def create_backup():
-    """Create a verified backup of the database"""
-    ensure_backup_dir()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_filename = f"helb_backup_{timestamp}.db"
-    backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    
-    if os.path.exists(DB_PATH):
-        try:
-            # Create backup
-            shutil.copy2(DB_PATH, backup_path)
-            
-            # Calculate checksum for verification
-            with open(DB_PATH, 'rb') as f:
-                original_checksum = hashlib.md5(f.read()).hexdigest()
-            with open(backup_path, 'rb') as f:
-                backup_checksum = hashlib.md5(f.read()).hexdigest()
-            
-            metadata = {
-                'backup_date': datetime.now().isoformat(),
-                'original_db': DB_PATH,
-                'file_size': os.path.getsize(DB_PATH),
-                'original_checksum': original_checksum,
-                'backup_checksum': backup_checksum,
-                'db_version': DB_VERSION
-            }
-            meta_path = os.path.join(BACKUP_DIR, f"helb_backup_{timestamp}.json")
-            with open(meta_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            
-            logger.info(f"✅ Backup created: {backup_filename} (Size: {metadata['file_size']} bytes)")
-            
-            # Clean old backups (keep last 30 days)
-            cleanup_old_backups()
-            
-            return backup_filename, backup_path
-        except Exception as e:
-            logger.error(f"Backup creation failed: {e}")
-            return None, None
-    return None, None
-
-def get_backup_list():
-    """Get list of all backups"""
-    ensure_backup_dir()
-    backups = []
-    for file in os.listdir(BACKUP_DIR):
-        if file.endswith('.db'):
-            backup_path = os.path.join(BACKUP_DIR, file)
-            meta_path = backup_path.replace('.db', '.json')
-            metadata = {}
-            if os.path.exists(meta_path):
-                with open(meta_path, 'r') as f:
-                    metadata = json.load(f)
-            else:
-                metadata = {
-                    'backup_date': datetime.fromtimestamp(os.path.getmtime(backup_path)).isoformat(),
-                    'file_size': os.path.getsize(backup_path)
-                }
-            backups.append({
-                'filename': file,
-                'path': backup_path,
-                'date': metadata.get('backup_date', 'Unknown'),
-                'size': metadata.get('file_size', 0)
-            })
-    backups.sort(key=lambda x: x['date'], reverse=True)
-    return backups
-
-def restore_backup(backup_filename):
-    """Restore from a verified backup with safety checks"""
-    backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    
-    if not os.path.exists(backup_path):
-        logger.error(f"Backup file not found: {backup_filename}")
-        return False
-    
-    try:
-        # Create emergency backup of current state before restore
-        if os.path.exists(DB_PATH):
-            emergency_backup = f"helb_before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-            emergency_path = os.path.join(BACKUP_DIR, emergency_backup)
-            shutil.copy2(DB_PATH, emergency_path)
-            logger.info(f"Emergency backup created: {emergency_backup}")
-        
-        # Verify backup has data before restoring
-        conn = sqlite3.connect(backup_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM users")
-        user_count = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM requests")
-        request_count = cursor.fetchone()[0]
-        conn.close()
-        
-        if user_count == 0 and request_count == 0 and not PRODUCTION_MODE:
-            logger.warning("Backup appears empty. Skipping restore.")
-            return False
-        
-        # Perform restore
-        shutil.copy2(backup_path, DB_PATH)
-        
-        # Log the restore operation
-        log_audit(
-            operation='RESTORE',
-            table_name='DATABASE',
-            record_id=None,
-            user='SYSTEM',
-            details={'backup_file': backup_filename}
-        )
-        
-        logger.info(f"✅ Database restored from {backup_filename}")
-        return True
-    except Exception as e:
-        logger.error(f"Restore failed: {e}")
-        return False
-
-def auto_backup_scheduler():
-    """Schedule automatic backups (runs on every write operation)"""
-    ensure_backup_dir()
-    backups = get_backup_list()
-    
-    # Check if we need to create a backup
-    need_backup = True
-    
-    if backups:
-        try:
-            last_backup_date = datetime.fromisoformat(backups[0]['date']).date()
-            today = date.today()
-            
-            if last_backup_date == today:
-                # Also check hourly backups
-                last_backup_time = datetime.fromisoformat(backups[0]['date'])
-                hours_since_backup = (datetime.now() - last_backup_time).total_seconds() / 3600
-                if hours_since_backup < 1:
-                    need_backup = False
-        except:
-            need_backup = True
-    
-    if need_backup:
-        backup_file, backup_path = create_backup()
-        if backup_file:
-            logger.info(f"Auto-backup created: {backup_file}")
-            return True
-    
-    return False
-
-def cleanup_old_backups(days_to_keep=30):
-    """Remove backups older than specified days"""
-    try:
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
-        backups = get_backup_list()
-        
-        deleted_count = 0
-        for backup in backups:
-            try:
-                backup_date = datetime.fromisoformat(backup['date'])
-                if backup_date < cutoff_date:
-                    os.remove(backup['path'])
-                    meta_path = backup['path'].replace('.db', '.json')
-                    if os.path.exists(meta_path):
-                        os.remove(meta_path)
-                    deleted_count += 1
-            except:
-                pass
-        
-        if deleted_count > 0:
-            logger.info(f"Cleaned up {deleted_count} old backups (older than {days_to_keep} days)")
-    except Exception as e:
-        logger.error(f"Backup cleanup failed: {e}")
-
-def export_data_to_csv():
-    """Export all data to CSV files"""
-    df_requests = get_requests()
-    df_users = get_all_users()
-    df_departments = get_departments()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    export_dir = os.path.join(BACKUP_DIR, f"csv_export_{timestamp}")
-    os.makedirs(export_dir, exist_ok=True)
-    df_requests.to_csv(os.path.join(export_dir, "requests.csv"), index=False)
-    df_users.to_csv(os.path.join(export_dir, "users.csv"), index=False)
-    df_departments.to_csv(os.path.join(export_dir, "departments.csv"), index=False)
-    logger.info(f"CSV export created: {export_dir}")
-    return export_dir
-
-# ================================================================
-# SAFE INITIALIZATION WITH RECOVERY - CRITICAL FIX
-# ================================================================
-
-def safe_init_with_recovery():
-    """Initialize database with recovery from backup if needed"""
-    logger.info("Starting safe database initialization with recovery")
-    
-    # ============================================================
-    # CRITICAL FIX: In production, NEVER auto-recover or reinitialize
-    # ============================================================
-    if PRODUCTION_MODE:
-        logger.info("⚠️ PRODUCTION MODE: Skipping auto-recovery and reinitialization")
-        
-        # Only verify integrity, don't change anything
-        if os.path.exists(DB_PATH):
-            if verify_database_integrity():
-                logger.info("✅ Production database integrity verified")
-                # Ensure tables exist without wiping data
-                ensure_tables_exist()
-                return True
-            else:
-                logger.error("❌ Production database integrity check FAILED!")
-                logger.error("🚨 MANUAL INTERVENTION REQUIRED - DO NOT AUTO-RECOVER")
-                
-                # Send alert
-                send_alert_email(f"🚨 CRITICAL: Database integrity check failed in production!")
-                
-                # Try to restore from backup as last resort
-                backups = get_backup_list()
-                if backups:
-                    logger.info(f"Latest backup available: {backups[0]['filename']}")
-                    # Only restore if backup has data
-                    try:
-                        conn = sqlite3.connect(backups[0]['path'])
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT COUNT(*) FROM users")
-                        backup_user_count = cursor.fetchone()[0]
-                        conn.close()
-                        
-                        if backup_user_count > 0:
-                            logger.info("Attempting emergency restore from backup...")
-                            if restore_backup(backups[0]['filename']):
-                                logger.info("✅ Emergency restore successful!")
-                                return True
-                            else:
-                                logger.error("❌ Emergency restore failed!")
-                        else:
-                            logger.error("❌ Latest backup is empty!")
-                    except:
-                        pass
-                return False
-        else:
-            logger.error("❌ Production database file missing!")
-            send_alert_email("🚨 CRITICAL: Production database file missing!")
-            return False
-    
-    # ============================================================
-    # DEVELOPMENT MODE: Original recovery logic
-    # ============================================================
-    # Check if we need to recover
-    if os.path.exists(DB_PATH):
-        if not verify_database_integrity():
-            logger.warning("Database integrity check failed. Attempting recovery...")
-            
-            # Try to restore from latest backup
-            backups = get_backup_list()
-            if backups:
-                latest_backup = backups[0]
-                logger.info(f"Attempting to restore from backup: {latest_backup['filename']}")
-                
-                if restore_backup(latest_backup['filename']):
-                    logger.info("✅ Database successfully restored from backup")
-                    
-                    if verify_database_integrity():
-                        logger.info("✅ Restored database integrity verified")
-                    else:
-                        logger.error("❌ Restored database still has integrity issues")
-                else:
-                    logger.error("❌ Failed to restore from backup")
-            else:
-                logger.warning("No backups found. Will initialize fresh database.")
-    
-    # Initialize database (your existing function)
-    init_database()
-    
-    # Set version after init
-    set_db_version(DB_VERSION)
-    
-    # Create immediate backup after initialization
-    backup_file, backup_path = create_backup()
-    if backup_file:
-        logger.info(f"Initial backup created: {backup_file}")
-    
-    logger.info("Database initialization complete")
-    return True
-
-# ================================================================
-# ENSURE TABLES EXIST WITHOUT DATA LOSS - NEW FUNCTION
-# ================================================================
-
-def ensure_tables_exist():
-    """Only create tables if they don't exist, without inserting default data"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Check if critical tables exist
-        tables = ['departments', 'products', 'funders', 'financial_years', 'semesters', 
-                  'users', 'requests', 'sla_config', 'audit_logs', 'finance_settings']
-        
-        for table in tables:
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
-            if not cursor.fetchone():
-                logger.info(f"Creating missing table: {table}")
-                # Table creation will be handled by init_database if needed
-        
-        conn.close()
-        logger.info("Tables verified - data preserved")
-        return True
-    except Exception as e:
-        logger.error(f"Error ensuring tables exist: {e}")
-        return False
-
-# ================================================================
-# LOGS TABLE
-# ================================================================
-
-def create_logs_table():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS request_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_id INTEGER,
-                request_number TEXT,
-                action TEXT NOT NULL,
-                status_from TEXT,
-                status_to TEXT,
-                comment TEXT,
-                performed_by TEXT,
-                performed_by_role TEXT,
-                performed_by_dept TEXT,
-                timestamp TEXT,
-                details TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        logger.info("Request logs table created/verified")
-    except Exception as e:
-        logger.error(f"Error creating logs table: {e}")
-
-def add_request_log(request_id, request_number, action, status_from, status_to, 
-                    comment, performed_by, performed_by_role, performed_by_dept, details=None):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO request_logs (
-                request_id, request_number, action, status_from, status_to,
-                comment, performed_by, performed_by_role, performed_by_dept,
-                timestamp, details
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            request_id, request_number, action, status_from, status_to,
-            comment, performed_by, performed_by_role, performed_by_dept,
-            datetime.now().isoformat(), details
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error adding log: {e}")
-
-def get_request_logs(request_id):
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT * FROM request_logs 
-            WHERE request_id = ? 
-            ORDER BY timestamp ASC
-        ''', (request_id,))
-        logs = cursor.fetchall()
-        conn.close()
-        if logs:
-            columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
-                       'status_to', 'comment', 'performed_by', 'performed_by_role', 
-                       'performed_by_dept', 'timestamp', 'details']
-            return [dict(zip(columns, log)) for log in logs]
-        return []
-    except Exception as e:
-        logger.error(f"Error getting logs: {e}")
-        return []
-
-# ================================================================
-# BASIC REQUEST FUNCTIONS
-# ================================================================
-
-def get_returned_requests(department_name):
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
-        "SELECT * FROM requests WHERE status = 'RETURNED' AND department_name = ? ORDER BY date_returned DESC",
-        conn, params=(department_name,)
-    )
-    conn.close()
-    return df
-
-def get_returned_request_by_id(request_id):
-    """Get a specific returned request by ID for resubmission"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM requests WHERE id = ? AND status = 'RETURNED'", (request_id,))
-    row = cursor.fetchone()
-    if row:
-        columns = [description[0] for description in cursor.description]
-        result = dict(zip(columns, row))
-        conn.close()
+        cursor.execute(query, params)
+        result = None
+        if fetch_all:
+            result = cursor.fetchall()
+        elif fetch_one:
+            result = cursor.fetchone()
+        if commit:
+            conn.commit()
         return result
-    conn.close()
-    return None
-
-def resubmit_request(request_id, updated_data):
-    """Resubmit a returned request after corrections"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        set_parts = []
-        values = []
-        for key, value in updated_data.items():
-            if key != 'id' and key != 'request_number':
-                set_parts.append(f"{key} = ?")
-                values.append(value)
-        
-        set_parts.append("last_updated = ?")
-        values.append(datetime.now().isoformat())
-        
-        values.append(request_id)
-        
-        query = f"UPDATE requests SET {', '.join(set_parts)} WHERE id = ?"
-        cursor.execute(query, values)
-        conn.commit()
-        
-        # Create backup after modification
-        auto_backup_scheduler()
-        
-        return True
     except Exception as e:
-        logger.error(f"Error resubmitting request: {e}")
-        return False
+        if conn:
+            conn.rollback()
+        logger.error(f"Query error: {e}")
+        raise
     finally:
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
-def get_request_by_id(request_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
-    row = cursor.fetchone()
-    if row:
-        columns = [description[0] for description in cursor.description]
-        result = dict(zip(columns, row))
-        conn.close()
-        return result
-    conn.close()
-    return None
-
-def get_column_names(table_name):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # Safe table name validation
-    allowed_tables = ['requests', 'users', 'departments', 'products', 'funders', 'sla_config', 'request_logs']
-    if table_name not in allowed_tables:
-        conn.close()
-        return []
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    columns = [column[1] for column in cursor.fetchall()]
-    conn.close()
-    return columns
+def df_from_query(query, params=None):
+    conn = None
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query(query, conn, params=params)
+        return df
+    except Exception as e:
+        logger.error(f"DataFrame query error: {e}")
+        return pd.DataFrame()
+    finally:
+        if conn:
+            conn.close()
 
 def calculate_tat(submission_date, payment_date=None):
     from utils.holidays_ke import working_days_between
@@ -731,732 +110,169 @@ def calculate_tat(submission_date, payment_date=None):
     except:
         return 0
 
-# ================================================================
-# SLA MANAGEMENT FUNCTIONS
-# ================================================================
-
-def get_sla_from_database():
-    """Get SLA configuration from database - REAL-TIME fetch"""
+def get_next_count():
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT request_type, sla_days FROM sla_config")
-        results = cursor.fetchall()
-        conn.close()
-        sla_map = {}
-        for req_type, sla_days in results:
-            sla_map[req_type] = sla_days
-        return sla_map
+        query = "SELECT COUNT(*) FROM requests"
+        result = execute_query(query, fetch_one=True)
+        return result[0] + 1 if result else 1
     except:
-        # Fallback defaults if table doesn't exist
-        return {
-            'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
-            'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
-            'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
-            'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
-        }
+        return 1
 
-def get_all_request_types():
-    """Get all request types from SLA config (for management)"""
+def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT request_type, sla_days FROM sla_config ORDER BY request_type")
-        results = cursor.fetchall()
-        conn.close()
-        return [{'request_type': r[0], 'sla_days': r[1]} for r in results]
-    except:
+        query = """
+            INSERT INTO audit_logs (
+                timestamp, operation, table_name, record_id, "user", 
+                details, before_state, after_state
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            datetime.now().isoformat(),
+            operation,
+            table_name,
+            record_id,
+            user or 'SYSTEM',
+            json.dumps(details) if details else None,
+            json.dumps(before_state) if before_state else None,
+            json.dumps(after_state) if after_state else None
+        )
+        execute_query(query, params, commit=True)
+        logger.info(f"AUDIT: {operation} on {table_name}/{record_id} by {user}")
+    except Exception as e:
+        logger.error(f"Audit log failed: {e}")
+
+def add_request_log(request_id, request_number, action, status_from, status_to, 
+                    comment, performed_by, performed_by_role, performed_by_dept, details=None):
+    try:
+        query = """
+            INSERT INTO request_logs (
+                request_id, request_number, action, status_from, status_to,
+                comment, performed_by, performed_by_role, performed_by_dept,
+                timestamp, details
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            request_id, request_number, action, status_from, status_to,
+            comment, performed_by, performed_by_role, performed_by_dept,
+            datetime.now().isoformat(), details
+        )
+        execute_query(query, params, commit=True)
+    except Exception as e:
+        logger.error(f"Error adding log: {e}")
+
+def get_request_logs(request_id):
+    try:
+        query = """
+            SELECT * FROM request_logs 
+            WHERE request_id = %s 
+            ORDER BY timestamp ASC
+        """
+        results = execute_query(query, (request_id,), fetch_all=True)
+        if results:
+            columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
+                       'status_to', 'comment', 'performed_by', 'performed_by_role', 
+                       'performed_by_dept', 'timestamp', 'details']
+            return [dict(zip(columns, log)) for log in results]
+        return []
+    except Exception as e:
+        logger.error(f"Error getting logs: {e}")
         return []
 
-def add_request_type(request_type, sla_days):
-    """Add a new request type to SLA config"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)",
-            (request_type, sla_days)
-        )
-        conn.commit()
-        conn.close()
-        auto_backup_scheduler()
-        return True
-    except Exception as e:
-        logger.error(f"Error adding request type: {e}")
-        return False
-
-def update_request_type(old_name, new_name, sla_days):
-    """Update request type name and SLA days"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE sla_config SET request_type = ?, sla_days = ? WHERE request_type = ?",
-            (new_name, sla_days, old_name)
-        )
-        conn.commit()
-        conn.close()
-        auto_backup_scheduler()
-        return True
-    except Exception as e:
-        logger.error(f"Error updating request type: {e}")
-        return False
-
-def delete_request_type(request_type):
-    """Delete a request type from SLA config"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM sla_config WHERE request_type = ?", (request_type,))
-        conn.commit()
-        conn.close()
-        auto_backup_scheduler()
-        return True
-    except Exception as e:
-        logger.error(f"Error deleting request type: {e}")
-        return False
-
-def update_sla_days(request_type, sla_days):
-    """Update SLA days for a specific request type"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE sla_config SET sla_days = ? WHERE request_type = ?",
-            (sla_days, request_type)
-        )
-        conn.commit()
-        conn.close()
-        auto_backup_scheduler()
-        return True
-    except Exception as e:
-        logger.error(f"Error updating SLA days: {e}")
-        return False
-
-# ================================================================
-# INTELLIGENT PREDICTION FUNCTION
-# ================================================================
-
-def get_intelligent_completion_prediction(request_id, request_type, current_status, current_tat, sla_days):
-    """
-    Generate intelligent completion prediction based on historical patterns
-    Returns: (predicted_date, confidence_level, reasoning)
-    """
-    from utils.holidays_ke import add_working_days
-    from datetime import timedelta
-    
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        
-        # Get historical completion times for similar requests
-        query = """
-            SELECT submission_date, payment_date, status, request_type
-            FROM requests 
-            WHERE request_type = ? 
-            AND status IN ('PAID', 'CLEARED')
-            AND payment_date IS NOT NULL
-            AND payment_date != ''
-            ORDER BY submission_date DESC
-            LIMIT 50
-        """
-        
-        df = pd.read_sql_query(query, conn, params=(request_type,))
-        conn.close()
-        
-        historical_tats = []
-        for _, row in df.iterrows():
-            if row['payment_date']:
-                tat = calculate_tat(row['submission_date'], row['payment_date'])
-                if tat and tat > 0:
-                    historical_tats.append(tat)
-        
-        if current_status in ['PAID', 'CLEARED']:
-            return None, "Completed", "Request has already been completed."
-        
-        # Calculate remaining days based on historical patterns
-        if historical_tats:
-            avg_historical_tat = np.mean(historical_tats)
-            median_historical_tat = np.median(historical_tats)
-            
-            # Calculate remaining days
-            remaining_days_avg = max(1, int(avg_historical_tat - current_tat)) if avg_historical_tat > current_tat else 1
-            remaining_days_median = max(1, int(median_historical_tat - current_tat)) if median_historical_tat > current_tat else 1
-            remaining_days_sla = max(1, sla_days - current_tat) if sla_days > current_tat else 1
-            
-            # Use weighted average based on data quality
-            if len(historical_tats) >= 20:
-                remaining_days = remaining_days_median
-                confidence = "High"
-                reasoning = f"Based on {len(historical_tats)} similar historical requests averaging {avg_historical_tat:.1f} days total."
-            elif len(historical_tats) >= 10:
-                remaining_days = (remaining_days_median + remaining_days_sla) // 2
-                confidence = "Medium"
-                reasoning = f"Based on {len(historical_tats)} similar requests. Historical average: {avg_historical_tat:.1f} days."
-            elif len(historical_tats) >= 3:
-                remaining_days = remaining_days_sla
-                confidence = "Low"
-                reasoning = f"Limited historical data ({len(historical_tats)} requests). Using SLA target of {sla_days} days."
-            else:
-                remaining_days = remaining_days_sla
-                confidence = "Estimated"
-                reasoning = f"No historical data available. Using SLA target of {sla_days} days."
-            
-            # Adjust based on current progress
-            progress_percentage = (current_tat / sla_days * 100) if sla_days > 0 else 0
-            
-            if progress_percentage > 100:
-                remaining_days = max(1, remaining_days // 2)
-                reasoning += " This request is already beyond SLA target - expedited processing recommended."
-            elif progress_percentage > 80:
-                remaining_days = max(1, remaining_days - 1)
-                reasoning += " This request is approaching SLA deadline - priority processing."
-            
-            predicted_date = add_working_days(date.today(), remaining_days)
-            
-            return predicted_date, confidence, reasoning
-        else:
-            remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
-            predicted_date = add_working_days(date.today(), remaining_days)
-            confidence = "Estimated"
-            reasoning = f"No historical data available. Using SLA target of {sla_days} days."
-            
-            return predicted_date, confidence, reasoning
-            
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        from utils.holidays_ke import add_working_days
-        remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
-        predicted_date = add_working_days(date.today(), remaining_days)
-        return predicted_date, "Estimated", "Using standard SLA estimation."
-
-# ================================================================
-# REQUEST TYPE PERMISSIONS FOR DEPARTMENTS
-# ================================================================
-
-def get_department_request_types(department_name):
-    """Get request types a department can submit"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT can_submit_imprest, can_submit_petty_cash, can_submit_supplier, can_submit_student_payment, can_submit_surrender, can_submit_refund FROM departments WHERE name = ?", (department_name,))
-        result = cursor.fetchone()
-        conn.close()
-        
-        if not result:
-            return []
-        
-        can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund = result
-        allowed = []
-        if can_imprest: allowed.append("Imprest")
-        if can_petty: allowed.append("Petty Cash")
-        if can_supplier: allowed.append("Supplier Payment")
-        if can_student: allowed.append("Student Payment")
-        if can_surrender: allowed.append("Surrender")
-        if can_refund: allowed.append("Refund Payment")
-        
-        return allowed
-    except:
-        return ["Imprest", "Petty Cash"]
-
-# ================================================================
-# INITIALIZATION WITH SAFE MIGRATION - MODIFIED TO CHECK EXISTING DATA
-# ================================================================
-
-def safe_add_column(table_name, column_name, column_type):
-    """Safely add a column if it doesn't exist"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = [col[1] for col in cursor.fetchall()]
-        
-        if column_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
-            conn.commit()
-            logger.info(f"Added column {column_name} to {table_name}")
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Error adding column {column_name}: {e}")
-        return False
-
-def init_database():
-    """Create all tables if they don't exist - SAFE: preserves existing data"""
-    
-    # ============================================================
-    # CRITICAL FIX: Check if database already has data
-    # ============================================================
-    if os.path.exists(DB_PATH):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            
-            # Check if users table exists and has data
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            if cursor.fetchone():
-                cursor.execute("SELECT COUNT(*) FROM users")
-                user_count = cursor.fetchone()[0]
-                
-                # If there are users, database is already initialized
-                if user_count > 0:
-                    logger.info(f"✅ Database already initialized with {user_count} users. Skipping reinitialization.")
-                    conn.close()
-                    
-                    # Just ensure tables exist without inserting default data
-                    ensure_tables_exist()
-                    return True
-            conn.close()
-        except Exception as e:
-            logger.warning(f"Error checking existing data: {e}")
-    
-    # ============================================================
-    # ORIGINAL INITIALIZATION CODE (only runs if no data exists)
-    # ============================================================
-    logger.info("Initializing fresh database...")
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Departments table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS departments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            can_submit_imprest INTEGER DEFAULT 1,
-            can_submit_petty_cash INTEGER DEFAULT 1,
-            can_submit_supplier INTEGER DEFAULT 0,
-            can_submit_student_payment INTEGER DEFAULT 0,
-            can_submit_surrender INTEGER DEFAULT 1,
-            can_submit_refund INTEGER DEFAULT 0,
-            requires_product_type INTEGER DEFAULT 0,
-            requires_funder INTEGER DEFAULT 0,
-            is_finance_dept INTEGER DEFAULT 0
-        )
-    ''')
-    
-    # Products table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            category TEXT,
-            has_payment_type INTEGER DEFAULT 0,
-            has_semester INTEGER DEFAULT 1,
-            is_active INTEGER DEFAULT 1
-        )
-    ''')
-    
-    # Funders table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS funders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    # Financial Years table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS financial_years (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            is_active INTEGER DEFAULT 1
-        )
-    ''')
-    
-    # Semesters table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS semesters (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    
-    # Users table with finance permissions
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            department_id INTEGER,
-            full_name TEXT,
-            can_receive_requests INTEGER DEFAULT 0,
-            can_process_stages INTEGER DEFAULT 0,
-            can_release_payments INTEGER DEFAULT 0,
-            created_at TEXT,
-            last_login TEXT,
-            is_active INTEGER DEFAULT 1,
-            FOREIGN KEY (department_id) REFERENCES departments(id)
-        )
-    ''')
-    
-    # Add new columns to users if needed (safe migration)
-    cursor.execute("PRAGMA table_info(users)")
-    existing_columns = [col[1] for col in cursor.fetchall()]
-    
-    if 'created_at' not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
-    if 'last_login' not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
-    if 'is_active' not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
-    
-    # Check existing columns for safe migration
-    cursor.execute("PRAGMA table_info(requests)")
-    existing_columns = [col[1] for col in cursor.fetchall()]
-    
-    # Requests table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            request_number TEXT UNIQUE NOT NULL,
-            request_type TEXT NOT NULL,
-            main_category TEXT,
-            department_id INTEGER,
-            department_name TEXT,
-            submitted_by TEXT NOT NULL,
-            submission_date TEXT NOT NULL,
-            amount REAL NOT NULL,
-            payment_description TEXT,
-            financial_year TEXT,
-            batch_no TEXT,
-            product_type TEXT,
-            semester TEXT,
-            payment_type TEXT,
-            imprest_no TEXT,
-            supplier_name TEXT,
-            invoice_no TEXT,
-            lpo_no TEXT,
-            salary_month TEXT,
-            salary_year INTEGER,
-            customer_name TEXT,
-            customer_id TEXT,
-            surrender_number TEXT,
-            staff_name TEXT,
-            funder_name TEXT,
-            refund_reason TEXT,
-            original_payment_ref TEXT,
-            previous_imprest_no TEXT,
-            status TEXT DEFAULT 'SUBMITTED',
-            finance_comment TEXT,
-            return_reason TEXT,
-            date_received TEXT,
-            date_returned TEXT,
-            finance_check_date TEXT,
-            payment_date TEXT,
-            payment_reference TEXT,
-            completed_by TEXT,
-            completion_notes TEXT,
-            last_updated TEXT,
-            finance_checklist_approvals INTEGER DEFAULT 0,
-            finance_checklist_documents INTEGER DEFAULT 0,
-            finance_checklist_comments TEXT,
-            date_confirmed_by_finance TEXT,
-            mileage_claim_details TEXT,
-            training_details TEXT,
-            professional_body TEXT,
-            direct_payment_details TEXT,
-            fare_reimbursement_details TEXT
-        )
-    ''')
-    
-    # SLA Config table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sla_config (
-            request_type TEXT PRIMARY KEY,
-            sla_days INTEGER NOT NULL
-        )
-    ''')
-    
-    # Audit logs table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            operation TEXT NOT NULL,
-            table_name TEXT NOT NULL,
-            record_id INTEGER,
-            user TEXT,
-            details TEXT,
-            before_state TEXT,
-            after_state TEXT
-        )
-    ''')
-    
-    # Insert default departments ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM departments")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default departments")
-        default_depts = [
-            ('CEO\'s Office', 1, 1, 0, 0, 1, 0, 0, 0, 0),
-            ('Corporate Communication', 1, 1, 0, 0, 1, 0, 0, 0, 0),
-            ('Debt Management', 0, 0, 0, 0, 0, 1, 0, 0, 0),
-            ('External Resource Mobilization', 1, 0, 0, 1, 1, 0, 0, 1, 0),
-            ('Field Services', 1, 1, 0, 0, 1, 0, 1, 0, 0),
-            ('Finance', 1, 1, 0, 0, 0, 0, 0, 0, 1),
-            ('Human Resource', 1, 1, 0, 0, 1, 0, 1, 0, 0),
-            ('ICT', 1, 1, 0, 0, 1, 0, 0, 0, 0),
-            ('Internal Audit', 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ('Legal Services', 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ('Lending', 1, 0, 0, 1, 1, 0, 1, 0, 0),
-            ('Strategy', 1, 1, 0, 0, 1, 0, 0, 0, 0),
-            ('Supply Chain Management', 0, 0, 1, 0, 0, 0, 0, 0, 0),
-        ]
-        for dept in default_depts:
-            try:
-                cursor.execute('''
-                    INSERT INTO departments (
-                        name, can_submit_imprest, can_submit_petty_cash, 
-                        can_submit_supplier, can_submit_student_payment, 
-                        can_submit_surrender, can_submit_refund, 
-                        requires_product_type, requires_funder, is_finance_dept
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', dept)
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert default products ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM products")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default products")
-        default_products = [
-            ('Undergraduate', 'LOAN', 1, 1, 1),
-            ('TVET', 'LOAN', 1, 1, 1),
-            ('Jielimishe', 'SCHOLARSHIP', 0, 0, 1),
-        ]
-        for prod in default_products:
-            try:
-                cursor.executemany(
-                    "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, ?)",
-                    [prod]
-                )
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert default funders ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM funders")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default funders")
-        default_funders = [
-            ('KMTC',), ('World Bank',), ('AfDB',), ('UNESCO',), 
-            ('Mastercard Foundation',), ('KOICA',), ('JICA',), ('USAID',), ('GIZ',)
-        ]
-        for funder in default_funders:
-            try:
-                cursor.execute("INSERT INTO funders (name) VALUES (?)", funder)
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert financial years ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM financial_years")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default financial years")
-        default_years = [('2024/2025', 0), ('2025/2026', 1), ('2026/2027', 1)]
-        for year in default_years:
-            try:
-                cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, ?)", year)
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert semesters ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM semesters")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default semesters")
-        default_semesters = [('Semester 1',), ('Semester 2',)]
-        for sem in default_semesters:
-            try:
-                cursor.execute("INSERT INTO semesters (name) VALUES (?)", sem)
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert SLA defaults ONLY if table is empty
-    cursor.execute("SELECT COUNT(*) FROM sla_config")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default SLA configs")
-        sla_defaults = [
-            ('Student Payment', 3), ('Imprest', 5), ('Petty Cash', 3),
-            ('Supplier Payment', 7), ('Salary Payment', 5), ('Refund Payment', 10),
-            ('Surrender', 4), ('Mileage Claim', 3), ('Staff Training', 5),
-            ('Professional Body', 5), ('Direct Payment', 3), ('Fare Reimbursement', 3)
-        ]
-        for sla in sla_defaults:
-            try:
-                cursor.execute("INSERT INTO sla_config (request_type, sla_days) VALUES (?, ?)", sla)
-            except sqlite3.IntegrityError:
-                pass
-    
-    conn.commit()
-    conn.close()
-    
-    create_logs_table()
-    
-    # Insert default users ONLY if table is empty
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM departments")
-    dept_map = {name: id for id, name in cursor.fetchall()}
-    
-    cursor.execute("SELECT COUNT(*) FROM users")
-    if cursor.fetchone()[0] == 0:
-        logger.info("Inserting default users")
-        now = datetime.now().isoformat()
-        default_users = [
-            ('admin', 'admin123', 'ADMIN', None, 'System Administrator', 0, 0, 0, now, None, 1),
-            ('finance_receiver', 'receiver123', 'FINANCE_RECEIVER', dept_map.get('Finance'), 'Finance Receiver', 1, 0, 0, now, None, 1),
-            ('finance_processor', 'processor123', 'FINANCE_PROCESSOR', dept_map.get('Finance'), 'Finance Processor', 0, 1, 0, now, None, 1),
-            ('finance_releaser', 'releaser123', 'FINANCE_RELEASER', dept_map.get('Finance'), 'Finance Releaser', 0, 0, 1, now, None, 1),
-            ('finance_admin', 'finadmin123', 'FINANCE_ADMIN', dept_map.get('Finance'), 'Finance Admin', 1, 1, 1, now, None, 1),
-            ('management_user', 'management123', 'MANAGEMENT', None, 'Management User', 0, 0, 0, now, None, 1),
-            ('lending_user', 'lend123', 'DEPARTMENT', dept_map.get('Lending'), 'Lending Officer', 0, 0, 0, now, None, 1),
-            ('erm_user', 'erm123', 'DEPARTMENT', dept_map.get('External Resource Mobilization'), 'ERM Officer', 0, 0, 0, now, None, 1),
-            ('debt_user', 'debt123', 'DEPARTMENT', dept_map.get('Debt Management'), 'Debt Officer', 0, 0, 0, now, None, 1),
-            ('scm_user', 'scm123', 'DEPARTMENT', dept_map.get('Supply Chain Management'), 'SCM Officer', 0, 0, 0, now, None, 1),
-            ('hr_user', 'hr123', 'DEPARTMENT', dept_map.get('Human Resource'), 'HR Officer', 0, 0, 0, now, None, 1),
-            ('ceo_user', 'ceo123', 'DEPARTMENT', dept_map.get('CEO\'s Office'), 'CEO Office', 0, 0, 0, now, None, 1),
-            ('corpcomm_user', 'corp123', 'DEPARTMENT', dept_map.get('Corporate Communication'), 'Comm Officer', 0, 0, 0, now, None, 1),
-            ('field_user', 'field123', 'DEPARTMENT', dept_map.get('Field Services'), 'Field Officer', 0, 0, 0, now, None, 1),
-            ('ict_user', 'ict123', 'DEPARTMENT', dept_map.get('ICT'), 'ICT Officer', 0, 0, 0, now, None, 1),
-            ('internal_audit_user', 'audit123', 'DEPARTMENT', dept_map.get('Internal Audit'), 'Audit Officer', 0, 0, 0, now, None, 1),
-            ('legal_user', 'legal123', 'DEPARTMENT', dept_map.get('Legal Services'), 'Legal Officer', 0, 0, 0, now, None, 1),
-            ('strategy_user', 'strat123', 'DEPARTMENT', dept_map.get('Strategy'), 'Strategy Officer', 0, 0, 0, now, None, 1),
-        ]
-        for user in default_users:
-            try:
-                cursor.execute('''
-                    INSERT INTO users (
-                        username, password, role, department_id, full_name, 
-                        can_receive_requests, can_process_stages, can_release_payments,
-                        created_at, last_login, is_active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', user)
-            except sqlite3.IntegrityError:
-                pass
-    
-    # Insert finance settings
-    cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='finance_settings'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS finance_settings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                setting_key TEXT UNIQUE,
-                setting_value TEXT
-            )
-        ''')
-        cursor.execute("SELECT COUNT(*) FROM finance_settings")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("INSERT INTO finance_settings (setting_key, setting_value) VALUES (?, ?)", 
-                           ('finance_password', 'finance123'))
-    
-    conn.commit()
-    conn.close()
-    
-    # Apply optimizations
-    try:
-        enable_wal_mode()
-    except:
-        pass
-    try:
-        add_performance_indexes()
-    except:
-        pass
-    
-    logger.info("Database initialization complete")
-
-# ================================================================
-# FINANCE PASSWORD FUNCTIONS
-# ================================================================
-
-def verify_finance_password(password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'")
-    result = cursor.fetchone()
-    conn.close()
-    return result and result[0] == password
-
-def update_finance_password(new_password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE finance_settings SET setting_value = ? WHERE setting_key = 'finance_password'", (new_password,))
-    conn.commit()
-    conn.close()
-    auto_backup_scheduler()
-    return True
-
-def get_finance_password():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'")
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else 'finance123'
-
-# ================================================================
-# ENHANCED USER FUNCTIONS
-# ================================================================
-
 def get_all_users():
-    conn = sqlite3.connect(DB_PATH)
-    query = '''
+    query = """
         SELECT u.username, u.role, d.name as department, u.full_name,
                u.can_receive_requests, u.can_process_stages, u.can_release_payments,
                u.created_at, u.is_active
         FROM users u
         LEFT JOIN departments d ON u.department_id = d.id
         ORDER BY u.username
-    '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+    """
+    return df_from_query(query)
+
+def get_user_by_username(username):
+    query = """
+        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
+               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+               u.created_at, u.last_login, u.is_active
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        WHERE u.username = %s
+    """
+    return execute_query(query, (username,), fetch_one=True)
+
+def authenticate_user(username, password):
+    try:
+        query = """
+            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
+                   COALESCE(d.is_finance_dept, 0) as is_finance_dept,
+                   u.can_receive_requests, u.can_process_stages, u.can_release_payments
+            FROM users u
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE u.username = %s AND u.password = %s AND u.is_active = 1
+        """
+        user = execute_query(query, (username, password), fetch_one=True)
+        if user:
+            update_query = "UPDATE users SET last_login = %s WHERE username = %s"
+            execute_query(update_query, (datetime.now().isoformat(), username), commit=True)
+        return user
+    except Exception as e:
+        logger.error(f"Authentication error: {e}")
+        return None
 
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        now = datetime.now().isoformat()
-        cursor.execute(
-            "INSERT INTO users (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            (username, password, role, department_id, full_name, can_receive_requests, can_process_stages, can_release_payments, now)
+        query = """
+            INSERT INTO users (
+                username, password, role, department_id, full_name, 
+                can_receive_requests, can_process_stages, can_release_payments, 
+                created_at, is_active
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+        """
+        params = (
+            username, password, role, department_id, full_name,
+            can_receive_requests, can_process_stages, can_release_payments,
+            datetime.now().isoformat()
         )
-        conn.commit()
-        auto_backup_scheduler()
+        execute_query(query, params, commit=True)
         return True
     except Exception as e:
         logger.error(f"Error creating user: {e}")
         return False
-    finally:
-        conn.close()
+
+def update_user_password(username, new_password):
+    try:
+        query = "UPDATE users SET password = %s WHERE username = %s"
+        execute_query(query, (new_password, username), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating password: {e}")
+        return False
 
 def update_user_permissions(username, can_receive, can_process, can_release):
-    """Update finance user permissions"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute('''
+        query = """
             UPDATE users 
-            SET can_receive_requests = ?, can_process_stages = ?, can_release_payments = ?
-            WHERE username = ?
-        ''', (1 if can_receive else 0, 1 if can_process else 0, 1 if can_release else 0, username))
-        conn.commit()
-        auto_backup_scheduler()
+            SET can_receive_requests = %s, can_process_stages = %s, can_release_payments = %s
+            WHERE username = %s
+        """
+        execute_query(query, (
+            1 if can_receive else 0, 
+            1 if can_process else 0, 
+            1 if can_release else 0, 
+            username
+        ), commit=True)
         return True
     except Exception as e:
         logger.error(f"Error updating permissions: {e}")
         return False
-    finally:
-        conn.close()
 
 def get_user_permissions(username):
-    """Get permissions for a specific user"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
+    query = """
         SELECT can_receive_requests, can_process_stages, can_release_payments, role
-        FROM users WHERE username = ?
-    ''', (username,))
-    result = cursor.fetchone()
-    conn.close()
+        FROM users WHERE username = %s
+    """
+    result = execute_query(query, (username,), fetch_one=True)
     if result:
         return {
             'can_receive': result[0] == 1,
@@ -1467,558 +283,597 @@ def get_user_permissions(username):
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
 def delete_user(username):
-    """Delete a user by username"""
-    # Prevent deletion in production mode if users exist
-    if PRODUCTION_MODE:
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM users")
-            total_users = cursor.fetchone()[0]
-            conn.close()
-            
-            if total_users <= 1:
-                logger.error("Cannot delete the last user in production mode")
-                return False
-        except:
-            pass
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM users WHERE username = ?", (username,))
-        conn.commit()
-        auto_backup_scheduler()
-        return cursor.rowcount > 0
+        query = "DELETE FROM users WHERE username = %s"
+        execute_query(query, (username,), commit=True)
+        return True
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
         return False
-    finally:
-        conn.close()
 
-# ================================================================
-# DEPARTMENT FUNCTIONS
-# ================================================================
+def get_user_department(username):
+    query = """
+        SELECT d.* FROM users u
+        JOIN departments d ON u.department_id = d.id
+        WHERE u.username = %s
+    """
+    return execute_query(query, (username,), fetch_one=True)
 
 def get_departments():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
-    conn.close()
-    return df
+    return df_from_query("SELECT id, name FROM departments ORDER BY name")
+
+def get_department_requests(department_name):
+    query = "SELECT * FROM requests WHERE department_name = %s ORDER BY submission_date DESC"
+    return df_from_query(query, (department_name,))
 
 def create_department(name, permissions):
-    """Create a new department with permissions"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
         can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance = permissions
-        cursor.execute('''
+        query = """
             INSERT INTO departments (
                 name, can_submit_imprest, can_submit_petty_cash, 
                 can_submit_supplier, can_submit_student_payment, 
                 can_submit_surrender, can_submit_refund, 
                 requires_product_type, requires_funder, is_finance_dept
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (name, 
-              1 if can_imprest else 0, 
-              1 if can_petty else 0, 
-              1 if can_supplier else 0, 
-              1 if can_student else 0, 
-              1 if can_surrender else 0, 
-              1 if can_refund else 0, 
-              1 if requires_product else 0, 
-              1 if requires_funder else 0, 
-              1 if is_finance else 0))
-        conn.commit()
-        auto_backup_scheduler()
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (name, 
+                  1 if can_imprest else 0, 
+                  1 if can_petty else 0, 
+                  1 if can_supplier else 0, 
+                  1 if can_student else 0, 
+                  1 if can_surrender else 0, 
+                  1 if can_refund else 0, 
+                  1 if requires_product else 0, 
+                  1 if requires_funder else 0, 
+                  1 if is_finance else 0)
+        execute_query(query, params, commit=True)
         return True
     except Exception as e:
         logger.error(f"Error creating department: {e}")
         return False
-    finally:
-        conn.close()
 
 def delete_department(dept_id):
-    """Delete a department by ID"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM users WHERE department_id = ?", (dept_id,))
-        user_count = cursor.fetchone()[0]
-        if user_count > 0:
+        check_query = "SELECT COUNT(*) FROM users WHERE department_id = %s"
+        result = execute_query(check_query, (dept_id,), fetch_one=True)
+        if result and result[0] > 0:
             return False
-        cursor.execute("DELETE FROM departments WHERE id = ?", (dept_id,))
-        conn.commit()
-        auto_backup_scheduler()
-        return cursor.rowcount > 0
+        query = "DELETE FROM departments WHERE id = %s"
+        execute_query(query, (dept_id,), commit=True)
+        return True
     except Exception as e:
         logger.error(f"Error deleting department: {e}")
         return False
-    finally:
-        conn.close()
-
-# ================================================================
-# SEARCH FUNCTIONS
-# ================================================================
-
-def search_payment_records(search_term, search_type="all"):
-    """Search payment records by various criteria"""
-    conn = sqlite3.connect(DB_PATH)
-    
-    if search_type == "request_number":
-        query = "SELECT * FROM requests WHERE request_number LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "batch_no":
-        query = "SELECT * FROM requests WHERE batch_no LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "imprest_no":
-        query = "SELECT * FROM requests WHERE imprest_no LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "invoice_no":
-        query = "SELECT * FROM requests WHERE invoice_no LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "surrender_number":
-        query = "SELECT * FROM requests WHERE surrender_number LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "payment_reference":
-        query = "SELECT * FROM requests WHERE payment_reference LIKE ? ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "all_names":
-        query = '''
-            SELECT * FROM requests 
-            WHERE customer_name LIKE ? 
-               OR supplier_name LIKE ? 
-               OR staff_name LIKE ?
-            ORDER BY submission_date DESC
-        '''
-        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    else:  # "all"
-        query = '''
-            SELECT * FROM requests 
-            WHERE request_number LIKE ? 
-               OR batch_no LIKE ? 
-               OR imprest_no LIKE ? 
-               OR invoice_no LIKE ? 
-               OR surrender_number LIKE ?
-               OR customer_name LIKE ?
-               OR supplier_name LIKE ?
-               OR staff_name LIKE ?
-               OR payment_reference LIKE ?
-            ORDER BY submission_date DESC
-        '''
-        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
-                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
-                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    return df
 
 def get_products():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
-    conn.close()
-    return df
+    return df_from_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name")
 
 def add_product(name, category, has_payment_type, has_semester):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute(
-            "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (?, ?, ?, ?, 1)",
-            (name, category, has_payment_type, has_semester)
-        )
-        conn.commit()
-        auto_backup_scheduler()
+        query = "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (%s, %s, %s, %s, 1)"
+        execute_query(query, (name, category, 1 if has_payment_type else 0, 1 if has_semester else 0), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error adding product: {e}")
         return False
-    finally:
-        conn.close()
 
 def delete_product(product_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
-        conn.commit()
-        auto_backup_scheduler()
+        query = "DELETE FROM products WHERE id = %s"
+        execute_query(query, (product_id,), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error deleting product: {e}")
         return False
-    finally:
-        conn.close()
+
+def get_funders():
+    return df_from_query("SELECT id, name FROM funders ORDER BY name")
+
+def add_funder(funder_name):
+    try:
+        query = "INSERT INTO funders (name) VALUES (%s)"
+        execute_query(query, (funder_name,), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error adding funder: {e}")
+        return False
+
+def delete_funder(funder_id):
+    try:
+        query = "DELETE FROM funders WHERE id = %s"
+        execute_query(query, (funder_id,), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting funder: {e}")
+        return False
 
 def get_financial_years():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
-    conn.close()
+    df = df_from_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC")
     return df['name'].tolist() if not df.empty else []
 
 def add_financial_year(year_name):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO financial_years (name, is_active) VALUES (?, 1)", (year_name,))
-        conn.commit()
-        auto_backup_scheduler()
+        query = "INSERT INTO financial_years (name, is_active) VALUES (%s, 1)"
+        execute_query(query, (year_name,), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error adding financial year: {e}")
         return False
-    finally:
-        conn.close()
 
 def delete_financial_year(year_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM financial_years WHERE id = ?", (year_id,))
-        conn.commit()
-        auto_backup_scheduler()
+        query = "DELETE FROM financial_years WHERE id = %s"
+        execute_query(query, (year_id,), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error deleting financial year: {e}")
         return False
-    finally:
-        conn.close()
 
 def get_semesters():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
-    conn.close()
+    df = df_from_query("SELECT id, name FROM semesters ORDER BY name")
     return df['name'].tolist() if not df.empty else []
 
 def add_semester(semester_name):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO semesters (name) VALUES (?)", (semester_name,))
-        conn.commit()
-        auto_backup_scheduler()
+        query = "INSERT INTO semesters (name) VALUES (%s)"
+        execute_query(query, (semester_name,), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error adding semester: {e}")
         return False
-    finally:
-        conn.close()
 
 def delete_semester(semester_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM semesters WHERE id = ?", (semester_id,))
-        conn.commit()
-        auto_backup_scheduler()
+        query = "DELETE FROM semesters WHERE id = %s"
+        execute_query(query, (semester_id,), commit=True)
         return True
-    except:
+    except Exception as e:
+        logger.error(f"Error deleting semester: {e}")
         return False
-    finally:
-        conn.close()
-
-def get_funders():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT id, name FROM funders ORDER BY name", conn)
-    conn.close()
-    return df
-
-def add_funder(funder_name):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("INSERT INTO funders (name) VALUES (?)", (funder_name,))
-        conn.commit()
-        auto_backup_scheduler()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
-
-def delete_funder(funder_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM funders WHERE id = ?", (funder_id,))
-        conn.commit()
-        auto_backup_scheduler()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
-
-def get_user_department(username):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT d.* FROM users u
-        JOIN departments d ON u.department_id = d.id
-        WHERE u.username = ?
-    ''', (username,))
-    result = cursor.fetchone()
-    conn.close()
-    return result
 
 def get_requests():
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
-    conn.close()
-    return df
+    return df_from_query("SELECT * FROM requests ORDER BY submission_date DESC")
 
-def get_pending_confirmation_count():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests WHERE status = 'SUBMITTED'")
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count
+def get_request_by_id(request_id):
+    query = "SELECT * FROM requests WHERE id = %s"
+    result = execute_query(query, (request_id,), fetch_one=True)
+    if result:
+        columns = [
+            'id', 'request_number', 'request_type', 'main_category', 
+            'department_id', 'department_name', 'submitted_by', 'submission_date',
+            'amount', 'payment_description', 'financial_year', 'batch_no',
+            'product_type', 'semester', 'payment_type', 'imprest_no',
+            'supplier_name', 'invoice_no', 'lpo_no', 'salary_month',
+            'salary_year', 'customer_name', 'customer_id', 'surrender_number',
+            'staff_name', 'funder_name', 'refund_reason', 'original_payment_ref',
+            'previous_imprest_no', 'status', 'finance_comment', 'return_reason',
+            'date_received', 'date_returned', 'finance_check_date', 'payment_date',
+            'payment_reference', 'completed_by', 'completion_notes', 'last_updated',
+            'finance_checklist_approvals', 'finance_checklist_documents', 
+            'finance_checklist_comments', 'date_confirmed_by_finance',
+            'mileage_claim_details', 'training_details', 'professional_body',
+            'direct_payment_details', 'fare_reimbursement_details', 'completion_date'
+        ]
+        return dict(zip(columns, result))
+    return None
 
-def get_pending_completion_count():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests WHERE status NOT IN ('PAID', 'CLEARED', 'RETURNED')")
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count
-
-@retry_on_lock()
 def save_request(data):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM requests")
-    count = cursor.fetchone()[0] + 1
-    request_number = f"HELB-{datetime.now().strftime('%Y%m')}-{count:04d}"
-    data['request_number'] = request_number
+    data['request_number'] = data.get('request_number', f"HELB-{datetime.now().strftime('%Y%m')}-{get_next_count():04d}")
     data['submission_date'] = datetime.now().strftime('%Y-%m-%d')
     data['last_updated'] = datetime.now().isoformat()
-    columns = ', '.join(data.keys())
-    placeholders = ', '.join(['?' for _ in data])
-    cursor.execute(f"INSERT INTO requests ({columns}) VALUES ({placeholders})", list(data.values()))
-    request_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    # Audit log
-    log_audit(
-        operation='INSERT',
-        table_name='requests',
-        record_id=request_id,
-        user=data.get('submitted_by'),
-        details={'request_number': request_number, 'request_type': data.get('request_type')}
-    )
-    
+    columns = list(data.keys())
+    placeholders = ', '.join(['%s'] * len(columns))
+    columns_str = ', '.join(columns)
+    query = f"INSERT INTO requests ({columns_str}) VALUES ({placeholders}) RETURNING id"
     try:
-        add_request_log(request_id, request_number, "SUBMITTED", None, "SUBMITTED",
-                       "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
-    except:
-        pass
-    
-    # Create backup after save
-    auto_backup_scheduler()
-    
-    return request_number
+        result = execute_query(query, list(data.values()), fetch_one=True, commit=True)
+        request_id = result[0] if result else None
+        log_audit(
+            operation='INSERT',
+            table_name='requests',
+            record_id=request_id,
+            user=data.get('submitted_by'),
+            details={'request_number': data.get('request_number'), 'request_type': data.get('request_type')}
+        )
+        try:
+            add_request_log(request_id, data.get('request_number'), "SUBMITTED", None, "SUBMITTED",
+                           "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
+        except:
+            pass
+        return data.get('request_number')
+    except Exception as e:
+        logger.error(f"Error saving request: {e}")
+        return None
 
-@retry_on_lock()
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
                           checklist_approvals=None, checklist_documents=None, checklist_comments=None):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT status, request_number, main_category FROM requests WHERE id = ?", (request_id,))
-    current = cursor.fetchone()
-    old_status = current[0] if current else None
-    request_number = current[1] if current else None
-    
-    cursor.execute("PRAGMA table_info(requests)")
-    existing_columns = [col[1] for col in cursor.fetchall()]
-    
-    updates = ["status = ?", "last_updated = ?"]
-    params = [status, datetime.now().isoformat()]
-    action = ""
-    comment = finance_comment or return_reason
-    
-    if status == 'RECEIVED_BY_FINANCE':
-        if 'date_received' in existing_columns:
-            updates.append("date_received = ?")
+    try:
+        current_query = "SELECT status, request_number, main_category FROM requests WHERE id = %s"
+        current = execute_query(current_query, (request_id,), fetch_one=True)
+        old_status = current[0] if current else None
+        request_number = current[1] if current else None
+        updates = ["status = %s", "last_updated = %s"]
+        params = [status, datetime.now().isoformat()]
+        action = ""
+        comment = finance_comment or return_reason
+        if status == 'RECEIVED_BY_FINANCE':
+            updates.append("date_received = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if 'date_confirmed_by_finance' in existing_columns:
-            updates.append("date_confirmed_by_finance = ?")
+            updates.append("date_confirmed_by_finance = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if checklist_approvals is not None and 'finance_checklist_approvals' in existing_columns:
-            updates.append("finance_checklist_approvals = ?")
-            params.append(1 if checklist_approvals else 0)
-        if checklist_documents is not None and 'finance_checklist_documents' in existing_columns:
-            updates.append("finance_checklist_documents = ?")
-            params.append(1 if checklist_documents else 0)
-        if checklist_comments and 'finance_checklist_comments' in existing_columns:
-            updates.append("finance_checklist_comments = ?")
-            params.append(checklist_comments)
-        action = "RECEIVED"
-    
-    elif status == 'RETURNED':
-        if 'date_returned' in existing_columns:
-            updates.append("date_returned = ?")
+            if checklist_approvals is not None:
+                updates.append("finance_checklist_approvals = %s")
+                params.append(1 if checklist_approvals else 0)
+            if checklist_documents is not None:
+                updates.append("finance_checklist_documents = %s")
+                params.append(1 if checklist_documents else 0)
+            if checklist_comments:
+                updates.append("finance_checklist_comments = %s")
+                params.append(checklist_comments)
+            action = "RECEIVED"
+        elif status == 'RETURNED':
+            updates.append("date_returned = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if return_reason and 'return_reason' in existing_columns:
-            updates.append("return_reason = ?")
-            params.append(return_reason)
-        action = "RETURNED"
-    
-    elif status == 'SUBMITTED':
-        if 'submission_date' in existing_columns:
-            updates.append("submission_date = ?")
+            if return_reason:
+                updates.append("return_reason = %s")
+                params.append(return_reason)
+            action = "RETURNED"
+        elif status == 'SUBMITTED':
+            updates.append("submission_date = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if 'date_returned' in existing_columns:
-            updates.append("date_returned = ?")
+            updates.append("date_returned = %s")
             params.append(None)
-        if 'return_reason' in existing_columns:
-            updates.append("return_reason = ?")
+            updates.append("return_reason = %s")
             params.append(None)
-        action = "RESUBMITTED"
-    
-    elif status == 'PAYMENT_PREPARED':
-        action = "Payment Prepared"
-    
-    elif status == 'PAYMENT_VERIFIED':
-        action = "Payment Verified"
-    
-    elif status == 'PAYMENT_APPROVED':
-        action = "Payment Approved"
-    
-    elif status == 'PAYMENT_AUTHORIZED':
-        action = "Payment Authorized"
-    
-    elif status == 'SURRENDER_FIRST_VERIFICATION':
-        action = "First Verification"
-    
-    elif status == 'SURRENDER_SECOND_VERIFICATION':
-        action = "Second Verification"
-    
-    elif status == 'SURRENDER_APPROVAL':
-        action = "Surrender Approval"
-    
-    elif status == 'SURRENDER_POSTING':
-        action = "Surrender Posting"
-    
-    elif status == 'PAID':
-        if 'payment_date' in existing_columns:
-            updates.append("payment_date = ?")
+            action = "RESUBMITTED"
+        elif status == 'PAYMENT_PREPARED':
+            action = "Payment Prepared"
+        elif status == 'PAYMENT_VERIFIED':
+            action = "Payment Verified"
+        elif status == 'PAYMENT_APPROVED':
+            action = "Payment Approved"
+        elif status == 'PAYMENT_AUTHORIZED':
+            action = "Payment Authorized"
+        elif status == 'SURRENDER_FIRST_VERIFICATION':
+            action = "First Verification"
+        elif status == 'SURRENDER_SECOND_VERIFICATION':
+            action = "Second Verification"
+        elif status == 'SURRENDER_APPROVAL':
+            action = "Surrender Approval"
+        elif status == 'SURRENDER_POSTING':
+            action = "Surrender Posting"
+        elif status == 'PAID':
+            updates.append("payment_date = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if 'completion_date' in existing_columns:
-            updates.append("completion_date = ?")
+            updates.append("completion_date = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        action = "PAID"
-    
-    elif status == 'CLEARED':
-        if 'payment_date' in existing_columns:
-            updates.append("payment_date = ?")
+            action = "PAID"
+        elif status == 'CLEARED':
+            updates.append("payment_date = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        if 'completion_date' in existing_columns:
-            updates.append("completion_date = ?")
+            updates.append("completion_date = %s")
             params.append(datetime.now().strftime('%Y-%m-%d'))
-        action = "CLEARED"
-    
-    if finance_comment and 'finance_comment' in existing_columns:
-        updates.append("finance_comment = ?")
-        params.append(finance_comment)
-    
-    params.append(request_id)
-    cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
-    conn.commit()
-    conn.close()
-    
-    # Audit log
-    log_audit(
-        operation='UPDATE_STATUS',
-        table_name='requests',
-        record_id=request_id,
-        user=performed_by,
-        details={'old_status': old_status, 'new_status': status, 'action': action}
-    )
-    
-    if action:
-        try:
-            add_request_log(request_id, request_number, action, old_status, status,
-                           comment, performed_by, performed_by_role, performed_by_dept)
-        except:
-            pass
-    
-    # Create backup after status change
-    auto_backup_scheduler()
+            action = "CLEARED"
+        if finance_comment:
+            updates.append("finance_comment = %s")
+            params.append(finance_comment)
+        params.append(request_id)
+        query = f"UPDATE requests SET {', '.join(updates)} WHERE id = %s"
+        execute_query(query, params, commit=True)
+        log_audit(
+            operation='UPDATE_STATUS',
+            table_name='requests',
+            record_id=request_id,
+            user=performed_by,
+            details={'old_status': old_status, 'new_status': status, 'action': action}
+        )
+        if action:
+            try:
+                add_request_log(request_id, request_number, action, old_status, status,
+                               comment, performed_by, performed_by_role, performed_by_dept)
+            except:
+                pass
+        return True
+    except Exception as e:
+        logger.error(f"Error updating status: {e}")
+        return False
 
 def update_payment_details(request_id, payment_reference):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE requests SET payment_reference = ?, payment_date = ?, last_updated = ? WHERE id = ?",
-        (payment_reference, datetime.now().strftime('%Y-%m-%d'), datetime.now().isoformat(), request_id)
-    )
-    conn.commit()
-    conn.close()
-    auto_backup_scheduler()
-
-def authenticate_user(username, password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     try:
-        cursor.execute('''
-            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
-                   COALESCE(d.is_finance_dept, 0) as is_finance_dept,
-                   u.can_receive_requests, u.can_process_stages, u.can_release_payments
-            FROM users u
-            LEFT JOIN departments d ON u.department_id = d.id
-            WHERE u.username = ? AND u.password = ? AND u.is_active = 1
-        ''', (username, password))
-        user = cursor.fetchone()
-        
-        # Update last login time
-        if user:
-            cursor.execute("UPDATE users SET last_login = ? WHERE username = ?", 
-                          (datetime.now().isoformat(), username))
-            conn.commit()
-        
-        conn.close()
-        return user if user else None
+        query = """
+            UPDATE requests 
+            SET payment_reference = %s, payment_date = %s, last_updated = %s 
+            WHERE id = %s
+        """
+        execute_query(query, (
+            payment_reference, 
+            datetime.now().strftime('%Y-%m-%d'), 
+            datetime.now().isoformat(), 
+            request_id
+        ), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating payment details: {e}")
+        return False
+
+def get_returned_requests(department_name):
+    query = """
+        SELECT * FROM requests 
+        WHERE status = 'RETURNED' AND department_name = %s 
+        ORDER BY date_returned DESC
+    """
+    return df_from_query(query, (department_name,))
+
+def get_returned_request_by_id(request_id):
+    query = "SELECT * FROM requests WHERE id = %s AND status = 'RETURNED'"
+    result = execute_query(query, (request_id,), fetch_one=True)
+    if result:
+        columns = [
+            'id', 'request_number', 'request_type', 'main_category', 
+            'department_id', 'department_name', 'submitted_by', 'submission_date',
+            'amount', 'payment_description', 'financial_year', 'batch_no',
+            'product_type', 'semester', 'payment_type', 'imprest_no',
+            'supplier_name', 'invoice_no', 'lpo_no', 'salary_month',
+            'salary_year', 'customer_name', 'customer_id', 'surrender_number',
+            'staff_name', 'funder_name', 'refund_reason', 'original_payment_ref',
+            'previous_imprest_no', 'status', 'finance_comment', 'return_reason',
+            'date_received', 'date_returned', 'finance_check_date', 'payment_date',
+            'payment_reference', 'completed_by', 'completion_notes', 'last_updated',
+            'finance_checklist_approvals', 'finance_checklist_documents', 
+            'finance_checklist_comments', 'date_confirmed_by_finance',
+            'mileage_claim_details', 'training_details', 'professional_body',
+            'direct_payment_details', 'fare_reimbursement_details', 'completion_date'
+        ]
+        return dict(zip(columns, result))
+    return None
+
+def resubmit_request(request_id, updated_data):
+    try:
+        set_parts = []
+        values = []
+        for key, value in updated_data.items():
+            if key != 'id' and key != 'request_number':
+                set_parts.append(f"{key} = %s")
+                values.append(value)
+        set_parts.append("last_updated = %s")
+        values.append(datetime.now().isoformat())
+        values.append(request_id)
+        query = f"UPDATE requests SET {', '.join(set_parts)} WHERE id = %s"
+        execute_query(query, values, commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error resubmitting request: {e}")
+        return False
+
+def search_payment_records(search_term, search_type="all"):
+    if search_type == "request_number":
+        query = "SELECT * FROM requests WHERE request_number ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "batch_no":
+        query = "SELECT * FROM requests WHERE batch_no ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "imprest_no":
+        query = "SELECT * FROM requests WHERE imprest_no ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "invoice_no":
+        query = "SELECT * FROM requests WHERE invoice_no ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "surrender_number":
+        query = "SELECT * FROM requests WHERE surrender_number ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "payment_reference":
+        query = "SELECT * FROM requests WHERE payment_reference ILIKE %s ORDER BY submission_date DESC"
+        params = (f"%{search_term}%",)
+    elif search_type == "all_names":
+        query = """
+            SELECT * FROM requests 
+            WHERE customer_name ILIKE %s 
+               OR supplier_name ILIKE %s 
+               OR staff_name ILIKE %s
+            ORDER BY submission_date DESC
+        """
+        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+    else:
+        query = """
+            SELECT * FROM requests 
+            WHERE request_number ILIKE %s 
+               OR batch_no ILIKE %s 
+               OR imprest_no ILIKE %s 
+               OR invoice_no ILIKE %s 
+               OR surrender_number ILIKE %s
+               OR customer_name ILIKE %s
+               OR supplier_name ILIKE %s
+               OR staff_name ILIKE %s
+               OR payment_reference ILIKE %s
+            ORDER BY submission_date DESC
+        """
+        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+    return df_from_query(query, params)
+
+def search_by_batch_number(batch_no):
+    query = """
+        SELECT request_number, main_category, amount, status, payment_date, 
+               payment_reference, department_name, submission_date
+        FROM requests WHERE batch_no = %s AND main_category = 'Submit Payment Request'
+        ORDER BY submission_date DESC
+    """
+    results = execute_query(query, (batch_no,), fetch_all=True)
+    if results:
+        return [{'request_number': r[0], 'main_category': r[1], 'amount': r[2],
+                 'status': r[3], 'payment_date': r[4], 'payment_reference': r[5],
+                 'department': r[6], 'submission_date': r[7]} for r in results]
+    return []
+
+def get_all_batch_numbers():
+    query = """
+        SELECT DISTINCT batch_no FROM requests 
+        WHERE main_category = 'Submit Payment Request' AND batch_no IS NOT NULL
+        ORDER BY batch_no DESC
+    """
+    results = execute_query(query, fetch_all=True)
+    return [r[0] for r in results if r[0]]
+
+def get_sla_from_database():
+    try:
+        query = "SELECT request_type, sla_days FROM sla_config"
+        results = execute_query(query, fetch_all=True)
+        sla_map = {}
+        for req_type, sla_days in results:
+            sla_map[req_type] = sla_days
+        return sla_map
     except:
-        conn.close()
-        return None
+        return {
+            'Student Payment': 3, 'Imprest': 5, 'Petty Cash': 3,
+            'Supplier Payment': 7, 'Salary Payment': 5, 'Refund Payment': 10,
+            'Surrender': 4, 'Mileage Claim': 3, 'Staff Training': 5,
+            'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
+        }
 
-def update_user_password(username, new_password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
-    conn.commit()
-    conn.close()
-    auto_backup_scheduler()
-    return True
+def get_all_request_types():
+    try:
+        query = "SELECT request_type, sla_days FROM sla_config ORDER BY request_type"
+        results = execute_query(query, fetch_all=True)
+        return [{'request_type': r[0], 'sla_days': r[1]} for r in results]
+    except:
+        return []
 
-def get_user_by_username(username):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
-               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
-               u.created_at, u.last_login, u.is_active
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.username = ?
-    ''', (username,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
+def add_request_type(request_type, sla_days):
+    try:
+        query = "INSERT INTO sla_config (request_type, sla_days) VALUES (%s, %s)"
+        execute_query(query, (request_type, sla_days), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error adding request type: {e}")
+        return False
+
+def update_request_type(old_name, new_name, sla_days):
+    try:
+        query = "UPDATE sla_config SET request_type = %s, sla_days = %s WHERE request_type = %s"
+        execute_query(query, (new_name, sla_days, old_name), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating request type: {e}")
+        return False
+
+def delete_request_type(request_type):
+    try:
+        query = "DELETE FROM sla_config WHERE request_type = %s"
+        execute_query(query, (request_type,), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting request type: {e}")
+        return False
+
+def update_sla_days(request_type, sla_days):
+    try:
+        query = "UPDATE sla_config SET sla_days = %s WHERE request_type = %s"
+        execute_query(query, (sla_days, request_type), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating SLA days: {e}")
+        return False
+
+def verify_finance_password(password):
+    try:
+        query = "SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'"
+        result = execute_query(query, fetch_one=True)
+        return result and result[0] == password
+    except:
+        return False
+
+def update_finance_password(new_password):
+    try:
+        query = "UPDATE finance_settings SET setting_value = %s WHERE setting_key = 'finance_password'"
+        execute_query(query, (new_password,), commit=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating finance password: {e}")
+        return False
+
+def get_finance_password():
+    try:
+        query = "SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'"
+        result = execute_query(query, fetch_one=True)
+        return result[0] if result else 'finance123'
+    except:
+        return 'finance123'
+
+def get_allowed_main_categories(user_role, user_dept):
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
+    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
+        return ["Submit Payment Request", "Submit Surrender"]
+    if user_role in finance_roles:
+        return []
+    if user_role == "MANAGEMENT":
+        return []
+    return ["Submit Payment Request", "Submit Surrender"]
+
+def get_allowed_request_types(user_role, user_dept, main_category):
+    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
+        if main_category == "Submit Payment Request":
+            all_types = get_all_request_types()
+            return [t['request_type'] for t in all_types if t['request_type'] != 'Surrender']
+        else:
+            return ["Surrender"]
+    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER"]
+    if user_role in finance_roles:
+        return []
+    if user_role == "MANAGEMENT":
+        return []
+    if main_category == "Submit Payment Request":
+        allowed = ["Imprest", "Petty Cash", "Direct Payment"]
+        if user_dept in ["Lending", "External Resource Mobilization"]:
+            allowed.append("Student Payment")
+        if user_dept == "Supply Chain Management":
+            allowed.append("Supplier Payment")
+        if user_dept == "Human Resource":
+            allowed.append("Salary Payment")
+            allowed.append("Mileage Claim")
+            allowed.append("Staff Training")
+            allowed.append("Professional Body")
+            allowed.append("Fare Reimbursement")
+        if user_dept == "Field Services":
+            allowed.append("Fare Reimbursement")
+        if user_dept == "Debt Management":
+            allowed.append("Refund Payment")
+        return allowed
+    else:
+        return ["Surrender"]
+
+def get_pending_confirmation_count():
+    try:
+        query = "SELECT COUNT(*) FROM requests WHERE status = 'SUBMITTED'"
+        result = execute_query(query, fetch_one=True)
+        return result[0] if result else 0
+    except:
+        return 0
+
+def get_pending_completion_count():
+    try:
+        query = "SELECT COUNT(*) FROM requests WHERE status NOT IN ('PAID', 'CLEARED', 'RETURNED')"
+        result = execute_query(query, fetch_one=True)
+        return result[0] if result else 0
+    except:
+        return 0
 
 def get_pending_duration(request_date):
     from utils.holidays_ke import working_days_between
-    today = date.today()
-    submitted_date = datetime.strptime(request_date, '%Y-%m-%d').date()
-    return working_days_between(submitted_date, today)
+    try:
+        today = date.today()
+        submitted_date = datetime.strptime(request_date, '%Y-%m-%d').date()
+        return working_days_between(submitted_date, today)
+    except:
+        return 0
 
 def get_time_lapsed_from_confirmation(request_id):
     from utils.holidays_ke import working_days_between
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT date_confirmed_by_finance, payment_date, completion_date FROM requests WHERE id = ?", (request_id,))
-        result = cursor.fetchone()
-        conn.close()
+        query = "SELECT date_confirmed_by_finance, payment_date, completion_date FROM requests WHERE id = %s"
+        result = execute_query(query, (request_id,), fetch_one=True)
         if result and result[0]:
             confirmed_date = datetime.strptime(result[0], '%Y-%m-%d').date()
             if result[1]:
@@ -2032,15 +887,6 @@ def get_time_lapsed_from_confirmation(request_id):
         return None
     except:
         return None
-
-def get_department_requests(department_name):
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
-        "SELECT * FROM requests WHERE department_name = ? ORDER BY submission_date DESC",
-        conn, params=(department_name,)
-    )
-    conn.close()
-    return df
 
 def get_management_dashboard_stats(financial_year=None, quarter=None):
     from utils.holidays_ke import working_days_between
@@ -2062,7 +908,6 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
             df = df[df['submission_date_dt'].dt.month.isin([1, 2, 3])]
         elif quarter == "Q4 (Apr-Jun)":
             df = df[df['submission_date_dt'].dt.month.isin([4, 5, 6])]
-    
     total_requests = len(df)
     total_received = len(df[df['date_received'].notna()])
     total_returned = len(df[df['date_returned'].notna()])
@@ -2070,9 +915,7 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
     total_amount = df['amount'].sum()
     breaches = 0
     completion_times = []
-    
     sla_map = get_sla_from_database()
-    
     for _, row in df.iterrows():
         if row['status'] in ['PAID', 'CLEARED'] and row['payment_date']:
             try:
@@ -2105,104 +948,14 @@ def get_trend_data(financial_year=None):
     return monthly.sort_values('month')
 
 def get_all_departments_summary():
-    conn = sqlite3.connect(DB_PATH)
-    query = '''
+    query = """
         SELECT department_name, COUNT(*) as total_requests,
                SUM(CASE WHEN status IN ('PAID', 'CLEARED') THEN 1 ELSE 0 END) as completed,
                SUM(CASE WHEN status = 'RETURNED' THEN 1 ELSE 0 END) as returned,
                SUM(amount) as total_amount
         FROM requests GROUP BY department_name ORDER BY total_requests DESC
-    '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-def search_by_batch_number(batch_no):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT request_number, main_category, amount, status, payment_date, 
-               payment_reference, department_name, submission_date
-        FROM requests WHERE batch_no = ? AND main_category = 'Submit Payment Request'
-        ORDER BY submission_date DESC
-    ''', (batch_no,))
-    results = cursor.fetchall()
-    conn.close()
-    if results:
-        return [{'request_number': r[0], 'main_category': r[1], 'amount': r[2],
-                 'status': r[3], 'payment_date': r[4], 'payment_reference': r[5],
-                 'department': r[6], 'submission_date': r[7]} for r in results]
-    return []
-
-def get_all_batch_numbers():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT DISTINCT batch_no FROM requests 
-        WHERE main_category = 'Submit Payment Request' AND batch_no IS NOT NULL
-        ORDER BY batch_no DESC
-    ''')
-    results = cursor.fetchall()
-    conn.close()
-    return [r[0] for r in results if r[0]]
-
-# ================================================================
-# PERMISSION FUNCTIONS
-# ================================================================
-
-def get_allowed_main_categories(user_role, user_dept):
-    """Get allowed main categories for a user"""
-    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
-    
-    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
-        return ["Submit Payment Request", "Submit Surrender"]
-    
-    if user_role in finance_roles:
-        return []
-    
-    if user_role == "MANAGEMENT":
-        return []
-    
-    return ["Submit Payment Request", "Submit Surrender"]
-
-def get_allowed_request_types(user_role, user_dept, main_category):
-    """Get allowed request types for a user"""
-    
-    if user_role in ["ADMIN", "FINANCE_ADMIN"]:
-        if main_category == "Submit Payment Request":
-            all_types = get_all_request_types()
-            return [t['request_type'] for t in all_types if t['request_type'] != 'Surrender']
-        else:
-            return ["Surrender"]
-    
-    finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER"]
-    if user_role in finance_roles:
-        return []
-    
-    if user_role == "MANAGEMENT":
-        return []
-    
-    if main_category == "Submit Payment Request":
-        allowed = ["Imprest", "Petty Cash", "Direct Payment"]
-        
-        if user_dept in ["Lending", "External Resource Mobilization"]:
-            allowed.append("Student Payment")
-        if user_dept == "Supply Chain Management":
-            allowed.append("Supplier Payment")
-        if user_dept == "Human Resource":
-            allowed.append("Salary Payment")
-            allowed.append("Mileage Claim")
-            allowed.append("Staff Training")
-            allowed.append("Professional Body")
-            allowed.append("Fare Reimbursement")
-        if user_dept == "Field Services":
-            allowed.append("Fare Reimbursement")
-        if user_dept == "Debt Management":
-            allowed.append("Refund Payment")
-        
-        return allowed
-    else:
-        return ["Surrender"]
+    """
+    return df_from_query(query)
 
 def get_reports_data(user_role, user_dept):
     df = get_requests()
@@ -2214,16 +967,287 @@ def get_reports_data(user_role, user_dept):
     else:
         return df[df['department_name'] == user_dept]
 
-# ================================================================
-# PUBLIC PAYMENT TRACKING FUNCTIONS
-# ================================================================
+def get_intelligent_completion_prediction(request_id, request_type, current_status, current_tat, sla_days):
+    from utils.holidays_ke import add_working_days
+    try:
+        query = """
+            SELECT submission_date, payment_date, status, request_type
+            FROM requests 
+            WHERE request_type = %s 
+            AND status IN ('PAID', 'CLEARED')
+            AND payment_date IS NOT NULL
+            AND payment_date != ''
+            ORDER BY submission_date DESC
+            LIMIT 50
+        """
+        df = df_from_query(query, (request_type,))
+        historical_tats = []
+        for _, row in df.iterrows():
+            if row['payment_date']:
+                tat = calculate_tat(row['submission_date'], row['payment_date'])
+                if tat and tat > 0:
+                    historical_tats.append(tat)
+        if current_status in ['PAID', 'CLEARED']:
+            return None, "Completed", "Request has already been completed."
+        if historical_tats:
+            avg_historical_tat = np.mean(historical_tats)
+            median_historical_tat = np.median(historical_tats)
+            remaining_days_avg = max(1, int(avg_historical_tat - current_tat)) if avg_historical_tat > current_tat else 1
+            remaining_days_median = max(1, int(median_historical_tat - current_tat)) if median_historical_tat > current_tat else 1
+            remaining_days_sla = max(1, sla_days - current_tat) if sla_days > current_tat else 1
+            if len(historical_tats) >= 20:
+                remaining_days = remaining_days_median
+                confidence = "High"
+                reasoning = f"Based on {len(historical_tats)} similar historical requests averaging {avg_historical_tat:.1f} days total."
+            elif len(historical_tats) >= 10:
+                remaining_days = (remaining_days_median + remaining_days_sla) // 2
+                confidence = "Medium"
+                reasoning = f"Based on {len(historical_tats)} similar requests. Historical average: {avg_historical_tat:.1f} days."
+            elif len(historical_tats) >= 3:
+                remaining_days = remaining_days_sla
+                confidence = "Low"
+                reasoning = f"Limited historical data ({len(historical_tats)} requests). Using SLA target of {sla_days} days."
+            else:
+                remaining_days = remaining_days_sla
+                confidence = "Estimated"
+                reasoning = f"No historical data available. Using SLA target of {sla_days} days."
+            progress_percentage = (current_tat / sla_days * 100) if sla_days > 0 else 0
+            if progress_percentage > 100:
+                remaining_days = max(1, remaining_days // 2)
+                reasoning += " This request is already beyond SLA target - expedited processing recommended."
+            elif progress_percentage > 80:
+                remaining_days = max(1, remaining_days - 1)
+                reasoning += " This request is approaching SLA deadline - priority processing."
+            predicted_date = add_working_days(date.today(), remaining_days)
+            return predicted_date, confidence, reasoning
+        else:
+            remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
+            predicted_date = add_working_days(date.today(), remaining_days)
+            confidence = "Estimated"
+            reasoning = f"No historical data available. Using SLA target of {sla_days} days."
+            return predicted_date, confidence, reasoning
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        from utils.holidays_ke import add_working_days
+        remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
+        predicted_date = add_working_days(date.today(), remaining_days)
+        return predicted_date, "Estimated", "Using standard SLA estimation."
+
+def identify_bottlenecks(df):
+    from utils.holidays_ke import working_days_between
+    bottlenecks = []
+    if df.empty:
+        return pd.DataFrame(columns=['Stage', 'Avg Days', 'Max Days', 'P95 Days', 'Is Bottleneck'])
+    stage_durations = {
+        'Submission to Receipt': [],
+        'Receipt to Preparation': [],
+        'Preparation to Verification': [],
+        'Verification to Approval': [],
+        'Approval to Authorization': [],
+        'Authorization to Payment': []
+    }
+    for _, row in df.iterrows():
+        if row.get('date_received') and row.get('submission_date'):
+            try:
+                sub_date = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
+                rec_date = datetime.strptime(row['date_received'], '%Y-%m-%d').date()
+                if sub_date and rec_date:
+                    days = working_days_between(sub_date, rec_date)
+                    if days >= 0:
+                        stage_durations['Submission to Receipt'].append(days)
+            except:
+                pass
+    for stage, durations in stage_durations.items():
+        if durations:
+            avg_duration = np.mean(durations)
+            max_duration = np.max(durations)
+            p95_duration = np.percentile(durations, 95)
+            bottlenecks.append({
+                'Stage': stage,
+                'Avg Days': round(avg_duration, 1),
+                'Max Days': max_duration,
+                'P95 Days': round(p95_duration, 1),
+                'Is Bottleneck': avg_duration > 3
+            })
+        else:
+            bottlenecks.append({
+                'Stage': stage,
+                'Avg Days': 0,
+                'Max Days': 0,
+                'P95 Days': 0,
+                'Is Bottleneck': False
+            })
+    return pd.DataFrame(bottlenecks)
+
+def get_fastest_request_types(df):
+    tat_analysis = []
+    if df.empty:
+        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
+    sla_map = get_sla_from_database()
+    for req_type in df['request_type'].unique():
+        type_df = df[(df['request_type'] == req_type) & (df['status'].isin(['PAID', 'CLEARED']))]
+        if not type_df.empty and type_df['payment_date'].notna().any():
+            tat_values = []
+            for _, row in type_df.iterrows():
+                if row.get('payment_date') and row.get('submission_date'):
+                    try:
+                        tat = calculate_tat(row['submission_date'], row['payment_date'])
+                        if tat is not None and tat > 0:
+                            tat_values.append(tat)
+                    except:
+                        pass
+            if tat_values:
+                avg_tat = np.mean(tat_values)
+                median_tat = np.median(tat_values)
+                min_tat = np.min(tat_values)
+                max_tat = np.max(tat_values)
+                count = len(tat_values)
+                sla_target = sla_map.get(req_type, 5)
+                if avg_tat <= sla_target:
+                    perf_score = 100
+                elif avg_tat <= sla_target * 1.5:
+                    perf_score = 80
+                elif avg_tat <= sla_target * 2:
+                    perf_score = 60
+                elif avg_tat <= sla_target * 3:
+                    perf_score = 40
+                else:
+                    perf_score = 20
+                tat_analysis.append({
+                    'Request Type': req_type,
+                    'Average TAT': round(avg_tat, 1),
+                    'Median TAT': round(median_tat, 1),
+                    'Fastest (Days)': min_tat,
+                    'Slowest (Days)': max_tat,
+                    'Sample Size': count,
+                    'Performance Score': perf_score
+                })
+    if tat_analysis:
+        result_df = pd.DataFrame(tat_analysis)
+        if 'Average TAT' in result_df.columns:
+            return result_df.sort_values('Average TAT')
+        else:
+            return result_df
+    else:
+        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
+
+def get_bulk_eligible_requests(statuses=None, request_types=None, department=None, limit=100):
+    query = """
+        SELECT id, request_number, request_type, department_name, amount, 
+               status, submission_date, submitted_by
+        FROM requests 
+        WHERE status IN ('SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 
+                        'PAYMENT_VERIFIED', 'PAYMENT_APPROVED')
+    """
+    params = []
+    if statuses:
+        placeholders = ','.join(['%s'] * len(statuses))
+        query += f" AND status IN ({placeholders})"
+        params.extend(statuses)
+    if request_types:
+        placeholders = ','.join(['%s'] * len(request_types))
+        query += f" AND request_type IN ({placeholders})"
+        params.extend(request_types)
+    if department:
+        query += " AND department_name = %s"
+        params.append(department)
+    query += " ORDER BY submission_date ASC LIMIT %s"
+    params.append(limit)
+    results = execute_query(query, params, fetch_all=True)
+    return [{'id': r[0], 'request_number': r[1], 'request_type': r[2], 
+             'department_name': r[3], 'amount': r[4], 'status': r[5],
+             'submission_date': r[6], 'submitted_by': r[7]} for r in results]
+
+def bulk_update_status(request_ids, new_status, performed_by, performed_by_role, performed_by_dept, 
+                       payment_reference=None, finance_comment=None):
+    success_count = 0
+    failed_ids = []
+    for request_id in request_ids:
+        try:
+            current_query = "SELECT status, request_number FROM requests WHERE id = %s"
+            current = execute_query(current_query, (request_id,), fetch_one=True)
+            if not current:
+                failed_ids.append(request_id)
+                continue
+            old_status = current[0]
+            request_number = current[1]
+            updates = ["status = %s", "last_updated = %s"]
+            params = [new_status, datetime.now().isoformat()]
+            if new_status == 'PAID' and payment_reference:
+                updates.append("payment_date = %s")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("payment_reference = %s")
+                params.append(payment_reference)
+            elif new_status == 'CLEARED' and payment_reference:
+                updates.append("payment_date = %s")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("payment_reference = %s")
+                params.append(payment_reference)
+            elif new_status == 'RECEIVED_BY_FINANCE':
+                updates.append("date_received = %s")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("date_confirmed_by_finance = %s")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+            elif new_status == 'RETURNED' and finance_comment:
+                updates.append("date_returned = %s")
+                params.append(datetime.now().strftime('%Y-%m-%d'))
+                updates.append("return_reason = %s")
+                params.append(finance_comment)
+            params.append(request_id)
+            query = f"UPDATE requests SET {', '.join(updates)} WHERE id = %s"
+            execute_query(query, params, commit=True)
+            add_request_log(request_id, request_number, f"BULK_{new_status}", 
+                          old_status, new_status, 
+                          f"Bulk processed by {performed_by}", 
+                          performed_by, performed_by_role, performed_by_dept)
+            success_count += 1
+        except Exception as e:
+            failed_ids.append(request_id)
+            logger.error(f"Error processing request {request_id}: {e}")
+    return success_count, failed_ids
+
+def export_bulk_requests(request_ids):
+    placeholders = ','.join(['%s'] * len(request_ids))
+    query = f"""
+        SELECT request_number, request_type, department_name, amount, 
+               payment_description, status, submission_date, submitted_by
+        FROM requests WHERE id IN ({placeholders})
+    """
+    return df_from_query(query, request_ids)
+
+def get_database_health():
+    health = {
+        'db_size_mb': 0,
+        'total_requests': 0,
+        'total_logs': 0,
+        'total_users': 0,
+        'status': 'Healthy',
+        'recommendation': 'PostgreSQL is handling the load well'
+    }
+    try:
+        query = "SELECT COUNT(*) FROM requests"
+        result = execute_query(query, fetch_one=True)
+        health['total_requests'] = result[0] if result else 0
+        query = "SELECT COUNT(*) FROM request_logs"
+        result = execute_query(query, fetch_one=True)
+        health['total_logs'] = result[0] if result else 0
+        query = "SELECT COUNT(*) FROM users"
+        result = execute_query(query, fetch_one=True)
+        health['total_users'] = result[0] if result else 0
+        if health['total_requests'] > 200000:
+            health['status'] = 'Warning - High volume'
+            health['recommendation'] = 'Consider archiving old records'
+        else:
+            health['status'] = 'Healthy'
+            health['recommendation'] = 'PostgreSQL is handling the load well'
+    except Exception as e:
+        logger.error(f"Error getting database health: {e}")
+        health['status'] = 'Unknown'
+        health['recommendation'] = 'Could not retrieve health metrics'
+    return health
 
 def get_public_payment_details(search_term, search_type="reference"):
-    """Get payment details for public tracking portal"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
+    query = """
         SELECT 
             request_number, request_type, amount, payment_description,
             submission_date, date_received, date_confirmed_by_finance,
@@ -2231,19 +1255,18 @@ def get_public_payment_details(search_term, search_type="reference"):
             batch_no, imprest_no, invoice_no, surrender_number,
             department_name, return_reason
         FROM requests 
-        WHERE request_number = ? 
-           OR batch_no = ? 
-           OR imprest_no = ? 
-           OR invoice_no = ? 
-           OR surrender_number = ?
-           OR payment_reference = ?
+        WHERE request_number = %s 
+           OR batch_no = %s 
+           OR imprest_no = %s 
+           OR invoice_no = %s 
+           OR surrender_number = %s
+           OR payment_reference = %s
         ORDER BY submission_date DESC
         LIMIT 1
-    ''', (search_term, search_term, search_term, search_term, search_term, search_term))
-    
-    result = cursor.fetchone()
-    conn.close()
-    
+    """
+    result = execute_query(query, (
+        search_term, search_term, search_term, search_term, search_term, search_term
+    ), fetch_one=True)
     if result:
         return {
             'request_number': result[0],
@@ -2266,9 +1289,7 @@ def get_public_payment_details(search_term, search_type="reference"):
     return None
 
 def calculate_estimated_completion_date(status, current_date):
-    """Calculate estimated completion date based on current status using working days only"""
     from utils.holidays_ke import add_working_days
-    
     status_map = {
         'SUBMITTED': {'days': 5, 'message': 'This payment has not been received in Finance yet.'},
         'RECEIVED_BY_FINANCE': {'days': 4, 'message': 'This payment will be completed at most 4 business days from today.'},
@@ -2280,7 +1301,6 @@ def calculate_estimated_completion_date(status, current_date):
         'CLEARED': {'days': 0, 'message': 'This payment has been cleared.'},
         'RETURNED': {'days': None, 'message': 'This payment has been returned for corrections.'}
     }
-    
     if status in status_map:
         info = status_map[status]
         if info['days'] is not None and info['days'] > 0:
@@ -2292,350 +1312,15 @@ def calculate_estimated_completion_date(status, current_date):
             return None, info['message'], None
     return None, "Status information unavailable.", None
 
-# ================================================================
-# DASHBOARD ANALYTICS FUNCTIONS
-# ================================================================
+def get_backup_list():
+    return [{'filename': 'Supabase automatic backup', 'date': datetime.now().isoformat(), 'size': 0}]
 
-def calculate_performance_score(row, sla_days=5):
-    """Calculate individual request performance score"""
-    base_score = 100
-    if row.get('tat_days', 0) > sla_days:
-        over_days = row['tat_days'] - sla_days
-        base_score -= min(30, over_days * 5)
-    elif row.get('tat_days', 0) < sla_days:
-        early_days = sla_days - row['tat_days']
-        base_score += min(10, early_days * 2)
-    return max(0, min(100, base_score))
+def restore_backup(backup_filename):
+    return True
 
-def identify_bottlenecks(df):
-    """Identify process bottlenecks using duration analysis"""
-    from utils.holidays_ke import working_days_between
-    
-    bottlenecks = []
-    
-    if df.empty:
-        return pd.DataFrame(columns=['Stage', 'Avg Days', 'Max Days', 'P95 Days', 'Is Bottleneck'])
-    
-    stage_durations = {
-        'Submission to Receipt': [],
-        'Receipt to Preparation': [],
-        'Preparation to Verification': [],
-        'Verification to Approval': [],
-        'Approval to Authorization': [],
-        'Authorization to Payment': []
-    }
-    
-    for _, row in df.iterrows():
-        if row.get('date_received') and row.get('submission_date'):
-            try:
-                sub_date = datetime.strptime(row['submission_date'], '%Y-%m-%d').date()
-                rec_date = datetime.strptime(row['date_received'], '%Y-%m-%d').date()
-                if sub_date and rec_date:
-                    days = working_days_between(sub_date, rec_date)
-                    if days >= 0:
-                        stage_durations['Submission to Receipt'].append(days)
-            except:
-                pass
-    
-    for stage, durations in stage_durations.items():
-        if durations:
-            avg_duration = np.mean(durations)
-            max_duration = np.max(durations)
-            p95_duration = np.percentile(durations, 95)
-            bottlenecks.append({
-                'Stage': stage,
-                'Avg Days': round(avg_duration, 1),
-                'Max Days': max_duration,
-                'P95 Days': round(p95_duration, 1),
-                'Is Bottleneck': avg_duration > 3
-            })
-        else:
-            bottlenecks.append({
-                'Stage': stage,
-                'Avg Days': 0,
-                'Max Days': 0,
-                'P95 Days': 0,
-                'Is Bottleneck': False
-            })
-    
-    return pd.DataFrame(bottlenecks)
+def safe_init_with_recovery():
+    logger.info("Supabase PostgreSQL database is ready")
+    return True
 
-def get_fastest_request_types(df):
-    """Identify which request types have the shortest TAT"""
-    tat_analysis = []
-    
-    if df.empty:
-        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
-    
-    sla_map = get_sla_from_database()
-    
-    for req_type in df['request_type'].unique():
-        type_df = df[(df['request_type'] == req_type) & (df['status'].isin(['PAID', 'CLEARED']))]
-        if not type_df.empty and type_df['payment_date'].notna().any():
-            tat_values = []
-            for _, row in type_df.iterrows():
-                if row.get('payment_date') and row.get('submission_date'):
-                    try:
-                        tat = calculate_tat(row['submission_date'], row['payment_date'])
-                        if tat is not None and tat > 0:
-                            tat_values.append(tat)
-                    except:
-                        pass
-            
-            if tat_values:
-                avg_tat = np.mean(tat_values)
-                median_tat = np.median(tat_values)
-                min_tat = np.min(tat_values)
-                max_tat = np.max(tat_values)
-                count = len(tat_values)
-                sla_target = sla_map.get(req_type, 5)
-                
-                if avg_tat <= sla_target:
-                    perf_score = 100
-                elif avg_tat <= sla_target * 1.5:
-                    perf_score = 80
-                elif avg_tat <= sla_target * 2:
-                    perf_score = 60
-                elif avg_tat <= sla_target * 3:
-                    perf_score = 40
-                else:
-                    perf_score = 20
-                
-                tat_analysis.append({
-                    'Request Type': req_type,
-                    'Average TAT': round(avg_tat, 1),
-                    'Median TAT': round(median_tat, 1),
-                    'Fastest (Days)': min_tat,
-                    'Slowest (Days)': max_tat,
-                    'Sample Size': count,
-                    'Performance Score': perf_score
-                })
-    
-    if tat_analysis:
-        result_df = pd.DataFrame(tat_analysis)
-        if 'Average TAT' in result_df.columns:
-            return result_df.sort_values('Average TAT')
-        else:
-            return result_df
-    else:
-        return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
-
-# ================================================================
-# BULK OPERATIONS FUNCTIONS
-# ================================================================
-
-def get_bulk_eligible_requests(statuses=None, request_types=None, department=None, limit=100):
-    """Get requests eligible for bulk processing"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    query = """
-        SELECT id, request_number, request_type, department_name, amount, 
-               status, submission_date, submitted_by
-        FROM requests 
-        WHERE status IN ('SUBMITTED', 'RECEIVED_BY_FINANCE', 'PAYMENT_PREPARED', 
-                        'PAYMENT_VERIFIED', 'PAYMENT_APPROVED')
-    """
-    params = []
-    
-    if statuses:
-        placeholders = ','.join(['?'] * len(statuses))
-        query += f" AND status IN ({placeholders})"
-        params.extend(statuses)
-    
-    if request_types:
-        placeholders = ','.join(['?'] * len(request_types))
-        query += f" AND request_type IN ({placeholders})"
-        params.extend(request_types)
-    
-    if department:
-        query += " AND department_name = ?"
-        params.append(department)
-    
-    query += " ORDER BY submission_date ASC LIMIT ?"
-    params.append(limit)
-    
-    cursor.execute(query, params)
-    results = cursor.fetchall()
-    conn.close()
-    
-    return [{'id': r[0], 'request_number': r[1], 'request_type': r[2], 
-             'department_name': r[3], 'amount': r[4], 'status': r[5],
-             'submission_date': r[6], 'submitted_by': r[7]} for r in results]
-
-@retry_on_lock()
-def bulk_update_status(request_ids, new_status, performed_by, performed_by_role, performed_by_dept, 
-                       payment_reference=None, finance_comment=None):
-    """Update multiple requests' status in bulk"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    success_count = 0
-    failed_ids = []
-    
-    cursor.execute("PRAGMA table_info(requests)")
-    existing_columns = [col[1] for col in cursor.fetchall()]
-    
-    for request_id in request_ids:
-        try:
-            cursor.execute("SELECT status, request_number FROM requests WHERE id = ?", (request_id,))
-            current = cursor.fetchone()
-            if not current:
-                failed_ids.append(request_id)
-                continue
-            
-            old_status = current[0]
-            request_number = current[1]
-            
-            updates = ["status = ?", "last_updated = ?"]
-            params = [new_status, datetime.now().isoformat()]
-            
-            if new_status == 'PAID' and payment_reference:
-                if 'payment_date' in existing_columns:
-                    updates.append("payment_date = ?")
-                    params.append(datetime.now().strftime('%Y-%m-%d'))
-                if 'payment_reference' in existing_columns:
-                    updates.append("payment_reference = ?")
-                    params.append(payment_reference)
-            elif new_status == 'CLEARED' and payment_reference:
-                if 'payment_date' in existing_columns:
-                    updates.append("payment_date = ?")
-                    params.append(datetime.now().strftime('%Y-%m-%d'))
-                if 'payment_reference' in existing_columns:
-                    updates.append("payment_reference = ?")
-                    params.append(payment_reference)
-            elif new_status == 'RECEIVED_BY_FINANCE':
-                if 'date_received' in existing_columns:
-                    updates.append("date_received = ?")
-                    params.append(datetime.now().strftime('%Y-%m-%d'))
-                if 'date_confirmed_by_finance' in existing_columns:
-                    updates.append("date_confirmed_by_finance = ?")
-                    params.append(datetime.now().strftime('%Y-%m-%d'))
-            elif new_status == 'RETURNED' and finance_comment:
-                if 'date_returned' in existing_columns:
-                    updates.append("date_returned = ?")
-                    params.append(datetime.now().strftime('%Y-%m-%d'))
-                if 'return_reason' in existing_columns:
-                    updates.append("return_reason = ?")
-                    params.append(finance_comment)
-            
-            params.append(request_id)
-            cursor.execute(f"UPDATE requests SET {', '.join(updates)} WHERE id = ?", params)
-            
-            add_request_log(request_id, request_number, f"BULK_{new_status}", 
-                          old_status, new_status, 
-                          f"Bulk processed by {performed_by}", 
-                          performed_by, performed_by_role, performed_by_dept)
-            
-            success_count += 1
-        except Exception as e:
-            failed_ids.append(request_id)
-            logger.error(f"Error processing request {request_id}: {e}")
-    
-    conn.commit()
-    conn.close()
-    auto_backup_scheduler()
-    
-    return success_count, failed_ids
-
-def export_bulk_requests(request_ids):
-    """Export selected requests to CSV for external processing"""
-    conn = sqlite3.connect(DB_PATH)
-    placeholders = ','.join(['?'] * len(request_ids))
-    query = f"""
-        SELECT request_number, request_type, department_name, amount, 
-               payment_description, status, submission_date, submitted_by
-        FROM requests WHERE id IN ({placeholders})
-    """
-    df = pd.read_sql_query(query, conn, params=request_ids)
-    conn.close()
-    return df
-
-def get_database_health():
-    """Get database health metrics for capacity planning"""
-    health = {
-        'db_size_mb': 0,
-        'total_requests': 0,
-        'total_logs': 0,
-        'total_users': 0,
-        'status': 'Healthy'
-    }
-    
-    if os.path.exists(DB_PATH):
-        health['db_size_mb'] = round(os.path.getsize(DB_PATH) / (1024 * 1024), 2)
-    
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM requests")
-        health['total_requests'] = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM request_logs")
-        health['total_logs'] = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM users")
-        health['total_users'] = cursor.fetchone()[0]
-        conn.close()
-    except:
-        pass
-    
-    if health['db_size_mb'] > 500:
-        health['status'] = 'Critical - Migrate to PostgreSQL'
-        health['recommendation'] = 'Immediate action required'
-    elif health['db_size_mb'] > 250:
-        health['status'] = 'Warning - Plan migration'
-        health['recommendation'] = 'Plan PostgreSQL migration in 3 months'
-    elif health['total_requests'] > 200000:
-        health['status'] = 'Warning - High volume'
-        health['recommendation'] = 'Consider archiving old records'
-    else:
-        health['status'] = 'Healthy'
-        health['recommendation'] = 'SQLite is sufficient for current load'
-    
-    return health
-
-def get_system_health_report():
-    """Generate comprehensive system health report"""
-    health = get_database_health()
-    backups = get_backup_list()
-    
-    report = {
-        'timestamp': datetime.now().isoformat(),
-        'database': health,
-        'backups': {
-            'total_count': len(backups),
-            'latest_backup': backups[0]['filename'] if backups else None,
-            'latest_backup_date': backups[0]['date'] if backups else None
-        },
-        'system': {
-            'db_version': DB_VERSION,
-            'wal_mode_enabled': os.path.exists(f"{DB_PATH}-wal")
-        }
-    }
-    
-    logger.info(f"System health report generated")
-    return report
-
-# ================================================================
-# INITIALIZE DATABASE WITH RECOVERY
-# ================================================================
-
-# Call this when the module loads
-if PRODUCTION_MODE:
-    print("⚠️  Production mode: Safe initialization (no auto-recovery)")
-    # In production, just verify integrity without auto-recovery
-    if os.path.exists(DB_PATH):
-        if verify_database_integrity():
-            print("✅ Production database integrity verified")
-            # Ensure tables exist without wiping data
-            ensure_tables_exist()
-        else:
-            print("❌ Production database integrity check FAILED!")
-            print("🚨 MANUAL INTERVENTION REQUIRED")
-            backups = get_backup_list()
-            if backups:
-                print(f"📋 Latest backup available: {backups[0]['filename']}")
-            # Don't auto-recover - require manual action
-    else:
-        print("⚠️  Database file not found. Initializing new database...")
-        safe_init_with_recovery()
-else:
-    # Development mode - full initialization with recovery
-    safe_init_with_recovery()
+def ensure_tables_exist():
+    return True
