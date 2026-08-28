@@ -3485,6 +3485,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     with tab1:
         st.subheader("👥 User Management")
         users_df = get_all_users()
+        st.write(f"DEBUG: Found {len(users_df)} users")
         st.dataframe(users_df, use_container_width=True, hide_index=True)
         
         with st.expander("🗑️ Delete User"):
