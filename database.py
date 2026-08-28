@@ -8,49 +8,39 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from functools import wraps
 
-# ================================================================
-# LOAD DATABASE_URL - MORE ROBUST
-# ================================================================
-DATABASE_URL = None
-
-# Try 1: Load from .env file
 try:
     from dotenv import load_dotenv
     load_dotenv()
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    if DATABASE_URL:
-        print(f"🔍 Loaded DATABASE_URL from .env: {DATABASE_URL[:30]}...")
-except:
+except ImportError:
     pass
 
-# Try 2: Load from Streamlit secrets
+try:
+    import streamlit as st
+    DATABASE_URL = st.secrets.get("DATABASE_URL")
+    PRODUCTION_MODE = st.secrets.get("PRODUCTION_MODE", "False")
+except:
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False')
+
 if not DATABASE_URL:
     try:
         import streamlit as st
-        DATABASE_URL = st.secrets.get("DATABASE_URL")
-        if DATABASE_URL:
-            print(f"🔍 Loaded DATABASE_URL from secrets: {DATABASE_URL[:30]}...")
+        if hasattr(st, 'secrets'):
+            DATABASE_URL = st.secrets.get("DATABASE_URL")
     except:
         pass
 
-# Try 3: Check environment variable directly
 if not DATABASE_URL:
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    if DATABASE_URL:
-        print(f"🔍 Loaded DATABASE_URL from os.environ: {DATABASE_URL[:30]}...")
-
-# Try 4: Hardcode for testing (REPLACE WITH YOUR ACTUAL CONNECTION STRING)
-if not DATABASE_URL:
-   
-    DATABASE_URL = "postgresql://postgres:Helb@2025Secure!@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
-    print("USING HARDCODED DATABASE_URL FOR TESTING!")
+    # ⚠️ REPLACE WITH YOUR ACTUAL SUPABASE CONNECTION STRING ⚠️
+    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
+    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
 if not DATABASE_URL:
-    raise ValueError("❌ DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
+    raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
 
-print(f"✅ DATABASE_URL loaded successfully: {DATABASE_URL[:30]}...")
+print(f"✅ DATABASE_URL loaded")
 
-PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
+PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
 
 if PRODUCTION_MODE:
     print("=" * 60)
@@ -84,9 +74,9 @@ logger = setup_logging()
 
 def get_connection():
     try:
-        print(f"🔍 get_connection: Connecting to database...")
+        print(f"🔍 get_connection: Connecting...")
         conn = psycopg2.connect(DATABASE_URL)
-        print(f"🔍 get_connection: Connected successfully!")
+        print(f"🔍 get_connection: Connected!")
         return conn
     except Exception as e:
         print(f"❌ get_connection error: {e}")
@@ -120,141 +110,53 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
         if conn:
             conn.close()
 
-def df_from_query(query, params=None):
-    conn = None
-    try:
-        print(f"🔍 df_from_query: Executing query...")
-        conn = get_connection()
-        print(f"🔍 df_from_query: Connection obtained, reading query...")
-        df = pd.read_sql_query(query, conn, params=params)
-        print(f"🔍 df_from_query: Query successful, got {len(df)} rows")
-        return df
-    except Exception as e:
-        print(f"❌ df_from_query error: {e}")
-        logger.error(f"DataFrame query error: {e}")
-        return pd.DataFrame()
-    finally:
-        if conn:
-            conn.close()
-            print(f"🔍 df_from_query: Connection closed")
-
-def calculate_tat(submission_date, payment_date=None):
-    from utils.holidays_ke import working_days_between
-    try:
-        sub_date = datetime.strptime(submission_date, '%Y-%m-%d').date()
-        if payment_date:
-            pay_date = datetime.strptime(payment_date, '%Y-%m-%d').date()
-            return working_days_between(sub_date, pay_date)
-        else:
-            today = date.today()
-            return working_days_between(sub_date, today)
-    except:
-        return 0
-
-def get_next_count():
-    try:
-        query = "SELECT COUNT(*) FROM requests"
-        result = execute_query(query, fetch_one=True)
-        return result[0] + 1 if result else 1
-    except:
-        return 1
-
-def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
-    try:
-        query = """
-            INSERT INTO audit_logs (
-                timestamp, operation, table_name, record_id, "user", 
-                details, before_state, after_state
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        params = (
-            datetime.now().isoformat(),
-            operation,
-            table_name,
-            record_id,
-            user or 'SYSTEM',
-            json.dumps(details) if details else None,
-            json.dumps(before_state) if before_state else None,
-            json.dumps(after_state) if after_state else None
-        )
-        execute_query(query, params, commit=True)
-        logger.info(f"AUDIT: {operation} on {table_name}/{record_id} by {user}")
-    except Exception as e:
-        logger.error(f"Audit log failed: {e}")
-
-def add_request_log(request_id, request_number, action, status_from, status_to, 
-                    comment, performed_by, performed_by_role, performed_by_dept, details=None):
-    try:
-        query = """
-            INSERT INTO request_logs (
-                request_id, request_number, action, status_from, status_to,
-                comment, performed_by, performed_by_role, performed_by_dept,
-                timestamp, details
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-        params = (
-            request_id, request_number, action, status_from, status_to,
-            comment, performed_by, performed_by_role, performed_by_dept,
-            datetime.now().isoformat(), details
-        )
-        execute_query(query, params, commit=True)
-    except Exception as e:
-        logger.error(f"Error adding log: {e}")
-
-def get_request_logs(request_id):
-    try:
-        query = """
-            SELECT * FROM request_logs 
-            WHERE request_id = %s 
-            ORDER BY timestamp ASC
-        """
-        results = execute_query(query, (request_id,), fetch_all=True)
-        if results:
-            columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
-                       'status_to', 'comment', 'performed_by', 'performed_by_role', 
-                       'performed_by_dept', 'timestamp', 'details']
-            return [dict(zip(columns, log)) for log in results]
-        return []
-    except Exception as e:
-        logger.error(f"Error getting logs: {e}")
-        return []
-
 # ================================================================
-# FIXED: get_all_users with direct connection test
+# FIXED: get_all_users - USES DIRECT CONNECTION
 # ================================================================
 def get_all_users():
     try:
-        print("🔍 get_all_users: Starting...")
+        print("🔍 get_all_users: Starting direct connection...")
         
-        query = """
-            SELECT u.username, u.role, d.name as department, u.full_name,
-                   u.can_receive_requests, u.can_process_stages, u.can_release_payments,
-                   u.created_at, u.is_active
-            FROM users u
-            LEFT JOIN departments d ON u.department_id = d.id
-            ORDER BY u.username
-        """
-        
-        print(f"🔍 get_all_users: Executing query...")
-        
-        # Try direct connection first
+        # Use direct connection, no df_from_query
         conn = None
         try:
-            print(f"🔍 get_all_users: Attempting direct connection...")
             conn = psycopg2.connect(DATABASE_URL)
-            print(f"🔍 get_all_users: Direct connection successful")
+            print(f"🔍 get_all_users: Connected!")
+            
+            # Simple query
+            query = """
+                SELECT username, role, full_name,
+                       can_receive_requests, can_process_stages, can_release_payments,
+                       created_at, is_active
+                FROM users
+                ORDER BY username
+            """
+            
+            print(f"🔍 get_all_users: Executing query...")
             df = pd.read_sql_query(query, conn)
             print(f"🔍 get_all_users: Query returned {len(df)} rows")
+            
             conn.close()
+            
+            # Add department column (will be populated separately if needed)
+            df['department'] = None
+            
+            # Reorder columns to match expected format
+            df = df[['username', 'role', 'department', 'full_name', 
+                    'can_receive_requests', 'can_process_stages', 
+                    'can_release_payments', 'created_at', 'is_active']]
+            
+            print(f"🔍 get_all_users: Returning {len(df)} users")
             return df
+            
         except Exception as e:
-            print(f"❌ get_all_users: Direct connection failed: {e}")
+            print(f"❌ get_all_users: Connection failed: {e}")
             if conn:
                 conn.close()
-            # Fallback to df_from_query
-            result = df_from_query(query)
-            print(f"🔍 get_all_users: df_from_query returned {len(result)} rows")
-            return result
+            # Return empty DataFrame
+            return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
+                                          'can_receive_requests', 'can_process_stages', 
+                                          'can_release_payments', 'created_at', 'is_active'])
             
     except Exception as e:
         print(f"❌ get_all_users error: {e}")
@@ -264,71 +166,118 @@ def get_all_users():
                                       'can_receive_requests', 'can_process_stages', 
                                       'can_release_payments', 'created_at', 'is_active'])
 
-def get_user_by_username(username):
-    query = """
-        SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
-               u.can_receive_requests, u.can_process_stages, u.can_release_payments,
-               u.created_at, u.last_login, u.is_active
-        FROM users u
-        LEFT JOIN departments d ON u.department_id = d.id
-        WHERE u.username = %s
-    """
-    return execute_query(query, (username,), fetch_one=True)
-
-def authenticate_user(username, password):
+# ================================================================
+# FIXED: get_departments - USES DIRECT CONNECTION
+# ================================================================
+def get_departments():
     try:
-        print(f"🔍 AUTH DEBUG: Attempting login for username='{username}'")
-        print(f"🔍 AUTH DEBUG: Password length: {len(password)} characters")
+        print("🔍 get_departments: Starting direct connection...")
         
-        # First, check if user exists with these credentials
-        check_query = "SELECT id, username, role, full_name, department_id, is_active FROM users WHERE username = %s AND password = %s"
-        user_check = execute_query(check_query, (username, password), fetch_one=True)
-        print(f"🔍 AUTH DEBUG: User check result: {user_check}")
-        
-        if not user_check:
-            print(f"❌ AUTH DEBUG: User '{username}' not found with that password")
-            return None
-        
-        if user_check[5] != 1:
-            print(f"❌ AUTH DEBUG: User '{username}' is inactive (is_active = {user_check[5]})")
-            return None
-        
-        # Now get full user info with department
+        # Use direct connection, no df_from_query
+        conn = None
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            print(f"🔍 get_departments: Connected!")
+            
+            query = "SELECT id, name FROM departments ORDER BY name"
+            
+            print(f"🔍 get_departments: Executing query...")
+            df = pd.read_sql_query(query, conn)
+            print(f"🔍 get_departments: Query returned {len(df)} rows")
+            
+            conn.close()
+            return df
+            
+        except Exception as e:
+            print(f"❌ get_departments: Connection failed: {e}")
+            if conn:
+                conn.close()
+            return pd.DataFrame(columns=['id', 'name'])
+            
+    except Exception as e:
+        print(f"❌ get_departments error: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame(columns=['id', 'name'])
+
+# ================================================================
+# FIXED: get_user_by_username
+# ================================================================
+def get_user_by_username(username):
+    try:
         query = """
-            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
-                   COALESCE(d.is_finance_dept, 0) as is_finance_dept,
-                   u.can_receive_requests, u.can_process_stages, u.can_release_payments
+            SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
+                   u.can_receive_requests, u.can_process_stages, u.can_release_payments,
+                   u.created_at, u.last_login, u.is_active
             FROM users u
             LEFT JOIN departments d ON u.department_id = d.id
-            WHERE u.username = %s AND u.password = %s AND u.is_active = 1
+            WHERE u.username = %s
         """
-        user = execute_query(query, (username, password), fetch_one=True)
-        print(f"🔍 AUTH DEBUG: Full user query result: {user}")
-        
-        if user:
-            update_query = "UPDATE users SET last_login = %s WHERE username = %s"
-            execute_query(update_query, (datetime.now().isoformat(), username), commit=True)
-            print(f"✅ AUTH DEBUG: User '{username}' authenticated successfully!")
-        else:
-            print(f"❌ AUTH DEBUG: User '{username}' not found in full query - possible department issue")
-        
-        return user
+        return execute_query(query, (username,), fetch_one=True)
     except Exception as e:
-        logger.error(f"Authentication error: {e}")
-        print(f"❌ AUTH DEBUG: Error: {e}")
+        print(f"❌ get_user_by_username error: {e}")
         return None
 
+# ================================================================
+# FIXED: authenticate_user
+# ================================================================
+def authenticate_user(username, password):
+    try:
+        print(f"🔍 AUTH: Attempting login for '{username}'")
+        
+        # Direct query
+        conn = None
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id, 
+                       COALESCE(d.is_finance_dept, 0) as is_finance_dept,
+                       u.can_receive_requests, u.can_process_stages, u.can_release_payments
+                FROM users u
+                LEFT JOIN departments d ON u.department_id = d.id
+                WHERE u.username = %s AND u.password = %s AND u.is_active = 1
+            """
+            cursor.execute(query, (username, password))
+            user = cursor.fetchone()
+            
+            if user:
+                # Update last login
+                update_query = "UPDATE users SET last_login = %s WHERE username = %s"
+                cursor.execute(update_query, (datetime.now().isoformat(), username))
+                conn.commit()
+                print(f"✅ AUTH: User '{username}' authenticated!")
+            else:
+                print(f"❌ AUTH: User '{username}' not found")
+            
+            cursor.close()
+            conn.close()
+            return user
+            
+        except Exception as e:
+            print(f"❌ AUTH error: {e}")
+            if conn:
+                conn.close()
+            return None
+            
+    except Exception as e:
+        logger.error(f"Authentication error: {e}")
+        print(f"❌ AUTH: Error: {e}")
+        return None
+
+# ================================================================
+# FIXED: create_user
+# ================================================================
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
         print(f"🔍 Creating user: {username}")
-        print(f"🔍 Department ID: {department_id}")
         
-        # First check if user already exists
+        # Check if user exists
         check_query = "SELECT COUNT(*) FROM users WHERE username = %s"
         count_result = execute_query(check_query, (username,), fetch_one=True)
         count = count_result[0] if count_result else 0
-        print(f"🔍 User count for '{username}': {count}")
         
         if count > 0:
             print(f"❌ User '{username}' already exists!")
@@ -350,7 +299,7 @@ def create_user(username, password, role, department_id, full_name,
             datetime.now().isoformat()
         )
         execute_query(query, params, commit=True)
-        print(f"✅ User '{username}' created successfully!")
+        print(f"✅ User '{username}' created!")
         return True
     except Exception as e:
         logger.error(f"Error creating user: {e}")
@@ -416,41 +365,19 @@ def get_user_department(username):
     """
     return execute_query(query, (username,), fetch_one=True)
 
-# ================================================================
-# FIXED: get_departments with direct connection test
-# ================================================================
-def get_departments():
-    try:
-        print("🔍 get_departments: Starting...")
-        query = "SELECT id, name FROM departments ORDER BY name"
-        
-        # Try direct connection first
-        conn = None
-        try:
-            print(f"🔍 get_departments: Attempting direct connection...")
-            conn = psycopg2.connect(DATABASE_URL)
-            print(f"🔍 get_departments: Direct connection successful")
-            df = pd.read_sql_query(query, conn)
-            print(f"🔍 get_departments: Query returned {len(df)} rows")
-            conn.close()
-            return df
-        except Exception as e:
-            print(f"❌ get_departments: Direct connection failed: {e}")
-            if conn:
-                conn.close()
-            result = df_from_query(query)
-            print(f"🔍 get_departments: df_from_query returned {len(result)} rows")
-            return result
-            
-    except Exception as e:
-        print(f"❌ get_departments error: {e}")
-        import traceback
-        traceback.print_exc()
-        return pd.DataFrame(columns=['id', 'name'])
-
 def get_department_requests(department_name):
     query = "SELECT * FROM requests WHERE department_name = %s ORDER BY submission_date DESC"
-    return df_from_query(query, (department_name,))
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query(query, conn, params=(department_name,))
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_department_requests error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def create_department(name, permissions):
     try:
@@ -493,7 +420,17 @@ def delete_department(dept_id):
         return False
 
 def get_products():
-    return df_from_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name")
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_products error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def add_product(name, category, has_payment_type, has_semester):
     try:
@@ -514,7 +451,17 @@ def delete_product(product_id):
         return False
 
 def get_funders():
-    return df_from_query("SELECT id, name FROM funders ORDER BY name")
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query("SELECT id, name FROM funders ORDER BY name", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_funders error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def add_funder(funder_name):
     try:
@@ -535,8 +482,17 @@ def delete_funder(funder_id):
         return False
 
 def get_financial_years():
-    df = df_from_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC")
-    return df['name'].tolist() if not df.empty else []
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
+        conn.close()
+        return df['name'].tolist() if not df.empty else []
+    except Exception as e:
+        print(f"❌ get_financial_years error: {e}")
+        if conn:
+            conn.close()
+        return []
 
 def add_financial_year(year_name):
     try:
@@ -557,8 +513,17 @@ def delete_financial_year(year_id):
         return False
 
 def get_semesters():
-    df = df_from_query("SELECT id, name FROM semesters ORDER BY name")
-    return df['name'].tolist() if not df.empty else []
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
+        conn.close()
+        return df['name'].tolist() if not df.empty else []
+    except Exception as e:
+        print(f"❌ get_semesters error: {e}")
+        if conn:
+            conn.close()
+        return []
 
 def add_semester(semester_name):
     try:
@@ -579,7 +544,17 @@ def delete_semester(semester_id):
         return False
 
 def get_requests():
-    return df_from_query("SELECT * FROM requests ORDER BY submission_date DESC")
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_requests error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def get_request_by_id(request_id):
     query = "SELECT * FROM requests WHERE id = %s"
@@ -750,7 +725,17 @@ def get_returned_requests(department_name):
         WHERE status = 'RETURNED' AND department_name = %s 
         ORDER BY date_returned DESC
     """
-    return df_from_query(query, (department_name,))
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query(query, conn, params=(department_name,))
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_returned_requests error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def get_returned_request_by_id(request_id):
     query = "SELECT * FROM requests WHERE id = %s AND status = 'RETURNED'"
@@ -794,51 +779,63 @@ def resubmit_request(request_id, updated_data):
         return False
 
 def search_payment_records(search_term, search_type="all"):
-    if search_type == "request_number":
-        query = "SELECT * FROM requests WHERE request_number ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "batch_no":
-        query = "SELECT * FROM requests WHERE batch_no ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "imprest_no":
-        query = "SELECT * FROM requests WHERE imprest_no ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "invoice_no":
-        query = "SELECT * FROM requests WHERE invoice_no ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "surrender_number":
-        query = "SELECT * FROM requests WHERE surrender_number ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "payment_reference":
-        query = "SELECT * FROM requests WHERE payment_reference ILIKE %s ORDER BY submission_date DESC"
-        params = (f"%{search_term}%",)
-    elif search_type == "all_names":
-        query = """
-            SELECT * FROM requests 
-            WHERE customer_name ILIKE %s 
-               OR supplier_name ILIKE %s 
-               OR staff_name ILIKE %s
-            ORDER BY submission_date DESC
-        """
-        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    else:
-        query = """
-            SELECT * FROM requests 
-            WHERE request_number ILIKE %s 
-               OR batch_no ILIKE %s 
-               OR imprest_no ILIKE %s 
-               OR invoice_no ILIKE %s 
-               OR surrender_number ILIKE %s
-               OR customer_name ILIKE %s
-               OR supplier_name ILIKE %s
-               OR staff_name ILIKE %s
-               OR payment_reference ILIKE %s
-            ORDER BY submission_date DESC
-        """
-        params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
-                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
-                  f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
-    return df_from_query(query, params)
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        
+        if search_type == "request_number":
+            query = "SELECT * FROM requests WHERE request_number ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "batch_no":
+            query = "SELECT * FROM requests WHERE batch_no ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "imprest_no":
+            query = "SELECT * FROM requests WHERE imprest_no ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "invoice_no":
+            query = "SELECT * FROM requests WHERE invoice_no ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "surrender_number":
+            query = "SELECT * FROM requests WHERE surrender_number ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "payment_reference":
+            query = "SELECT * FROM requests WHERE payment_reference ILIKE %s ORDER BY submission_date DESC"
+            params = (f"%{search_term}%",)
+        elif search_type == "all_names":
+            query = """
+                SELECT * FROM requests 
+                WHERE customer_name ILIKE %s 
+                   OR supplier_name ILIKE %s 
+                   OR staff_name ILIKE %s
+                ORDER BY submission_date DESC
+            """
+            params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+        else:
+            query = """
+                SELECT * FROM requests 
+                WHERE request_number ILIKE %s 
+                   OR batch_no ILIKE %s 
+                   OR imprest_no ILIKE %s 
+                   OR invoice_no ILIKE %s 
+                   OR surrender_number ILIKE %s
+                   OR customer_name ILIKE %s
+                   OR supplier_name ILIKE %s
+                   OR staff_name ILIKE %s
+                   OR payment_reference ILIKE %s
+                ORDER BY submission_date DESC
+            """
+            params = (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                      f"%{search_term}%", f"%{search_term}%", f"%{search_term}%", 
+                      f"%{search_term}%", f"%{search_term}%", f"%{search_term}%")
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ search_payment_records error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def search_by_batch_number(batch_no):
     query = """
@@ -862,6 +859,87 @@ def get_all_batch_numbers():
     """
     results = execute_query(query, fetch_all=True)
     return [r[0] for r in results if r[0]]
+
+def calculate_tat(submission_date, payment_date=None):
+    from utils.holidays_ke import working_days_between
+    try:
+        sub_date = datetime.strptime(submission_date, '%Y-%m-%d').date()
+        if payment_date:
+            pay_date = datetime.strptime(payment_date, '%Y-%m-%d').date()
+            return working_days_between(sub_date, pay_date)
+        else:
+            today = date.today()
+            return working_days_between(sub_date, today)
+    except:
+        return 0
+
+def get_next_count():
+    try:
+        query = "SELECT COUNT(*) FROM requests"
+        result = execute_query(query, fetch_one=True)
+        return result[0] + 1 if result else 1
+    except:
+        return 1
+
+def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
+    try:
+        query = """
+            INSERT INTO audit_logs (
+                timestamp, operation, table_name, record_id, "user", 
+                details, before_state, after_state
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            datetime.now().isoformat(),
+            operation,
+            table_name,
+            record_id,
+            user or 'SYSTEM',
+            json.dumps(details) if details else None,
+            json.dumps(before_state) if before_state else None,
+            json.dumps(after_state) if after_state else None
+        )
+        execute_query(query, params, commit=True)
+        logger.info(f"AUDIT: {operation} on {table_name}/{record_id} by {user}")
+    except Exception as e:
+        logger.error(f"Audit log failed: {e}")
+
+def add_request_log(request_id, request_number, action, status_from, status_to, 
+                    comment, performed_by, performed_by_role, performed_by_dept, details=None):
+    try:
+        query = """
+            INSERT INTO request_logs (
+                request_id, request_number, action, status_from, status_to,
+                comment, performed_by, performed_by_role, performed_by_dept,
+                timestamp, details
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params = (
+            request_id, request_number, action, status_from, status_to,
+            comment, performed_by, performed_by_role, performed_by_dept,
+            datetime.now().isoformat(), details
+        )
+        execute_query(query, params, commit=True)
+    except Exception as e:
+        logger.error(f"Error adding log: {e}")
+
+def get_request_logs(request_id):
+    try:
+        query = """
+            SELECT * FROM request_logs 
+            WHERE request_id = %s 
+            ORDER BY timestamp ASC
+        """
+        results = execute_query(query, (request_id,), fetch_all=True)
+        if results:
+            columns = ['id', 'request_id', 'request_number', 'action', 'status_from', 
+                       'status_to', 'comment', 'performed_by', 'performed_by_role', 
+                       'performed_by_dept', 'timestamp', 'details']
+            return [dict(zip(columns, log)) for log in results]
+        return []
+    except Exception as e:
+        logger.error(f"Error getting logs: {e}")
+        return []
 
 def get_sla_from_database():
     try:
@@ -1101,7 +1179,17 @@ def get_all_departments_summary():
                SUM(amount) as total_amount
         FROM requests GROUP BY department_name ORDER BY total_requests DESC
     """
-    return df_from_query(query)
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ get_all_departments_summary error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def get_reports_data(user_role, user_dept):
     df = get_requests()
@@ -1126,21 +1214,32 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             ORDER BY submission_date DESC
             LIMIT 50
         """
-        df = df_from_query(query, (request_type,))
+        df = get_requests()
+        if df.empty:
+            # Fallback
+            remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
+            predicted_date = add_working_days(date.today(), remaining_days)
+            return predicted_date, "Estimated", "Using SLA estimation."
+        
+        # Filter by request type
+        type_df = df[df['request_type'] == request_type]
         historical_tats = []
-        for _, row in df.iterrows():
-            if row['payment_date']:
+        for _, row in type_df.iterrows():
+            if row['status'] in ['PAID', 'CLEARED'] and row.get('payment_date'):
                 tat = calculate_tat(row['submission_date'], row['payment_date'])
                 if tat and tat > 0:
                     historical_tats.append(tat)
+        
         if current_status in ['PAID', 'CLEARED']:
             return None, "Completed", "Request has already been completed."
+        
         if historical_tats:
             avg_historical_tat = np.mean(historical_tats)
             median_historical_tat = np.median(historical_tats)
             remaining_days_avg = max(1, int(avg_historical_tat - current_tat)) if avg_historical_tat > current_tat else 1
             remaining_days_median = max(1, int(median_historical_tat - current_tat)) if median_historical_tat > current_tat else 1
             remaining_days_sla = max(1, sla_days - current_tat) if sla_days > current_tat else 1
+            
             if len(historical_tats) >= 20:
                 remaining_days = remaining_days_median
                 confidence = "High"
@@ -1157,6 +1256,7 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
                 remaining_days = remaining_days_sla
                 confidence = "Estimated"
                 reasoning = f"No historical data available. Using SLA target of {sla_days} days."
+            
             progress_percentage = (current_tat / sla_days * 100) if sla_days > 0 else 0
             if progress_percentage > 100:
                 remaining_days = max(1, remaining_days // 2)
@@ -1164,6 +1264,7 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
             elif progress_percentage > 80:
                 remaining_days = max(1, remaining_days - 1)
                 reasoning += " This request is approaching SLA deadline - priority processing."
+            
             predicted_date = add_working_days(date.today(), remaining_days)
             return predicted_date, confidence, reasoning
         else:
@@ -1359,7 +1460,17 @@ def export_bulk_requests(request_ids):
                payment_description, status, submission_date, submitted_by
         FROM requests WHERE id IN ({placeholders})
     """
-    return df_from_query(query, request_ids)
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        df = pd.read_sql_query(query, conn, params=request_ids)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"❌ export_bulk_requests error: {e}")
+        if conn:
+            conn.close()
+        return pd.DataFrame()
 
 def get_database_health():
     health = {
