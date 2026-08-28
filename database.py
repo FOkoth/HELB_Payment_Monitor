@@ -8,36 +8,49 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from functools import wraps
 
+# ================================================================
+# LOAD DATABASE_URL - MORE ROBUST
+# ================================================================
+DATABASE_URL = None
+
+# Try 1: Load from .env file
 try:
     from dotenv import load_dotenv
     load_dotenv()
-except ImportError:
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    if DATABASE_URL:
+        print(f"🔍 Loaded DATABASE_URL from .env: {DATABASE_URL[:30]}...")
+except:
     pass
 
-try:
-    import streamlit as st
-    DATABASE_URL = st.secrets.get("DATABASE_URL")
-    PRODUCTION_MODE = st.secrets.get("PRODUCTION_MODE", "False")
-except:
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False')
-
+# Try 2: Load from Streamlit secrets
 if not DATABASE_URL:
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
-            DATABASE_URL = st.secrets.get("DATABASE_URL")
+        DATABASE_URL = st.secrets.get("DATABASE_URL")
+        if DATABASE_URL:
+            print(f"🔍 Loaded DATABASE_URL from secrets: {DATABASE_URL[:30]}...")
     except:
         pass
 
+# Try 3: Check environment variable directly
 if not DATABASE_URL:
-    # TEMPORARY - FOR TESTING ONLY - Remove this after confirming connection works
-    # Replace with your actual connection string from Supabase
-    DATABASE_URL = "postgresql://postgres.YOUR_PROJECT_REF:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
-    print("⚠️  USING HARDCODED DATABASE_URL FOR TESTING!")
-    # raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    if DATABASE_URL:
+        print(f"🔍 Loaded DATABASE_URL from os.environ: {DATABASE_URL[:30]}...")
 
-PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
+# Try 4: Hardcode for testing (REPLACE WITH YOUR ACTUAL CONNECTION STRING)
+if not DATABASE_URL:
+    # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL SUPABASE CONNECTION STRING ⚠️⚠️⚠️
+    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
+    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL FOR TESTING! ⚠️⚠️⚠️")
+
+if not DATABASE_URL:
+    raise ValueError("❌ DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
+
+print(f"✅ DATABASE_URL loaded successfully: {DATABASE_URL[:30]}...")
+
+PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
 
 if PRODUCTION_MODE:
     print("=" * 60)
@@ -45,8 +58,6 @@ if PRODUCTION_MODE:
     print("=" * 60)
 else:
     print("DEVELOPMENT MODE - Connected to Supabase")
-
-print("Connected to Supabase PostgreSQL")
 
 try:
     import psycopg2
@@ -121,7 +132,6 @@ def df_from_query(query, params=None):
     except Exception as e:
         print(f"❌ df_from_query error: {e}")
         logger.error(f"DataFrame query error: {e}")
-        # Return empty DataFrame with a note
         return pd.DataFrame()
     finally:
         if conn:
@@ -210,10 +220,12 @@ def get_request_logs(request_id):
         return []
 
 # ================================================================
-# FIXED: get_all_users with better error handling
+# FIXED: get_all_users with direct connection test
 # ================================================================
 def get_all_users():
     try:
+        print("🔍 get_all_users: Starting...")
+        
         query = """
             SELECT u.username, u.role, d.name as department, u.full_name,
                    u.can_receive_requests, u.can_process_stages, u.can_release_payments,
@@ -222,14 +234,32 @@ def get_all_users():
             LEFT JOIN departments d ON u.department_id = d.id
             ORDER BY u.username
         """
+        
         print(f"🔍 get_all_users: Executing query...")
-        result = df_from_query(query)
-        print(f"🔍 get_all_users: Found {len(result)} users")
-        print(f"🔍 get_all_users: Columns: {result.columns.tolist()}")
-        return result
+        
+        # Try direct connection first
+        conn = None
+        try:
+            print(f"🔍 get_all_users: Attempting direct connection...")
+            conn = psycopg2.connect(DATABASE_URL)
+            print(f"🔍 get_all_users: Direct connection successful")
+            df = pd.read_sql_query(query, conn)
+            print(f"🔍 get_all_users: Query returned {len(df)} rows")
+            conn.close()
+            return df
+        except Exception as e:
+            print(f"❌ get_all_users: Direct connection failed: {e}")
+            if conn:
+                conn.close()
+            # Fallback to df_from_query
+            result = df_from_query(query)
+            print(f"🔍 get_all_users: df_from_query returned {len(result)} rows")
+            return result
+            
     except Exception as e:
         print(f"❌ get_all_users error: {e}")
-        # Return empty DataFrame with correct columns
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
                                       'can_receive_requests', 'can_process_stages', 
                                       'can_release_payments', 'created_at', 'is_active'])
@@ -387,18 +417,35 @@ def get_user_department(username):
     return execute_query(query, (username,), fetch_one=True)
 
 # ================================================================
-# FIXED: get_departments with better error handling
+# FIXED: get_departments with direct connection test
 # ================================================================
 def get_departments():
     try:
+        print("🔍 get_departments: Starting...")
         query = "SELECT id, name FROM departments ORDER BY name"
-        print(f"🔍 get_departments: Executing query...")
-        result = df_from_query(query)
-        print(f"🔍 get_departments: Found {len(result)} departments")
-        print(f"🔍 get_departments: Columns: {result.columns.tolist()}")
-        return result
+        
+        # Try direct connection first
+        conn = None
+        try:
+            print(f"🔍 get_departments: Attempting direct connection...")
+            conn = psycopg2.connect(DATABASE_URL)
+            print(f"🔍 get_departments: Direct connection successful")
+            df = pd.read_sql_query(query, conn)
+            print(f"🔍 get_departments: Query returned {len(df)} rows")
+            conn.close()
+            return df
+        except Exception as e:
+            print(f"❌ get_departments: Direct connection failed: {e}")
+            if conn:
+                conn.close()
+            result = df_from_query(query)
+            print(f"🔍 get_departments: df_from_query returned {len(result)} rows")
+            return result
+            
     except Exception as e:
         print(f"❌ get_departments error: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame(columns=['id', 'name'])
 
 def get_department_requests(department_name):
