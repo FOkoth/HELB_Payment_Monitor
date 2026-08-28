@@ -1033,37 +1033,64 @@ def display_tat_by_request_type(data_scope="All Data"):
 # ================================================================
 # LOGIN SCREEN
 # ================================================================
-if submitted:
-    # ============================================================
-    # TEMPORARY BYPASS - Remove this after testing!
-    # Allows ANY login with username and password
-    # ============================================================
-    if username and password:
-        st.session_state.authenticated = True
-        st.session_state.user_role = "ADMIN"
-        st.session_state.username = username
-        st.session_state.user_dept = "Finance"
-        st.session_state.user_dept_id = None
-        st.session_state.is_finance = True
-        st.session_state.full_name = "Temporary Admin"
-        st.success(f"✅ Logged in as {username} (Temporary Bypass Mode)")
-        st.rerun()
-    else:
-        st.error("❌ Please enter username and password")
+if not st.session_state.authenticated:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if helb_logo_base64:
+            logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 100px; height: auto; margin-bottom: 1rem;">'
+        else:
+            logo_html = '<div class="login-logo">🏦</div>'
+        
+        st.markdown(f"""
+        <div class='login-container'>
+            {logo_html}
+            <h1 class='login-title'>HIGHER EDUCATION LOANS BOARD</h1>
+            <p class='login-subtitle'>Payment & Surrender Monitoring System</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login", use_container_width=True)
+        
+        # Process login OUTSIDE the form
+        if submitted:
+            # ============================================================
+            # TEMPORARY BYPASS - Remove this after testing!
+            # Allows ANY login with username and password
+            # ============================================================
+            if username and password:
+                st.session_state.authenticated = True
+                st.session_state.user_role = "ADMIN"
+                st.session_state.username = username
+                st.session_state.user_dept = "Finance"
+                st.session_state.user_dept_id = None
+                st.session_state.is_finance = True
+                st.session_state.full_name = "Temporary Admin"
+                st.success(f"✅ Logged in as {username}")
+                st.rerun()
+            else:
+                st.error("❌ Please enter username and password")
+            
+            # ============================================================
+            # ORIGINAL AUTHENTICATION CODE - Commented out for testing
+            # Uncomment this when the bypass is removed
+            # ============================================================
+            # user = authenticate_user(username, password)
+            # if user:
+            #     st.session_state.authenticated = True
+            #     st.session_state.user_role = user[1]
+            #     st.session_state.username = user[0]
+            #     st.session_state.user_dept = user[2] if user[2] else "No Department"
+            #     st.session_state.user_dept_id = user[4] if user[4] else None
+            #     st.session_state.is_finance = user[5] == 1 if len(user) > 5 else False
+            #     st.session_state.full_name = user[3]
+            #     st.rerun()
+            # else:
+            #     st.error("❌ Invalid credentials")
     
-    # COMMENTED OUT - Original authentication code
-    # user = authenticate_user(username, password)
-    # if user:
-    #     st.session_state.authenticated = True
-    #     st.session_state.user_role = user[1]
-    #     st.session_state.username = user[0]
-    #     st.session_state.user_dept = user[2] if user[2] else "No Department"
-    #     st.session_state.user_dept_id = user[4] if user[4] else None
-    #     st.session_state.is_finance = user[5] == 1 if len(user) > 5 else False
-    #     st.session_state.full_name = user[3]
-    #     st.rerun()
-    # else:
-    #     st.error("❌ Invalid credentials")
+    st.stop()
 # ================================================================
 # PASSWORD CHANGE
 # ================================================================
