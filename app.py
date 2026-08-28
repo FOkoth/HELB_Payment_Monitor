@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import sqlite3
 from datetime import datetime, date, timedelta
 import numpy as np
 import calendar
@@ -56,7 +55,7 @@ from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
 
 # ================================================================
-# DATABASE STATE CHECK - CRITICAL FOR DATA PROTECTION
+# DATABASE STATE CHECK - UPDATED FOR SUPABASE
 # ================================================================
 
 def check_database_state():
@@ -65,66 +64,35 @@ def check_database_state():
         users_df = get_all_users()
         
         if users_df.empty:
-            # Database might have been wiped
-            st.error("⚠️ DATABASE WARNING: No users found! Data may have been lost.")
-            st.warning("This could be due to a database reset. Please check backups.")
+            # Database might be empty (new installation or no data)
+            st.warning("⚠️ No users found in the database. This might be a fresh installation.")
+            st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
             
-            # Check if in production mode
-            if PRODUCTION_MODE:
-                st.error("🚨 PRODUCTION MODE: Database appears empty! Contact administrator immediately.")
-            
-            # Show available backups
+            # Show available backups info
             try:
                 backups = get_backup_list()
                 if backups:
                     st.info("📋 Available backups:")
-                    for b in backups[:5]:
+                    for b in backups[:3]:
                         st.write(f"- {b['filename']} ({b['date']})")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("🔄 Recover Latest Backup", type="primary"):
-                            with st.spinner("Recovering from backup..."):
-                                if restore_backup(backups[0]['filename']):
-                                    st.success("✅ Database recovered successfully! Please refresh.")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Recovery failed. Check logs.")
-                    with col2:
-                        if not PRODUCTION_MODE:
-                            if st.button("🔄 Reinitialize Database (Dev Only)", type="secondary"):
-                                with st.spinner("Reinitializing database..."):
-                                    safe_init_with_recovery()
-                                    st.success("✅ Database reinitialized! Please refresh.")
-                                    st.rerun()
-                else:
-                    st.warning("⚠️ No backups found. Data may be permanently lost.")
-                    
-                    if not PRODUCTION_MODE:
-                        if st.button("🔄 Initialize Fresh Database (Dev Only)", type="secondary"):
-                            with st.spinner("Initializing database..."):
-                                safe_init_with_recovery()
-                                st.success("✅ Database initialized! Please refresh.")
-                                st.rerun()
             except Exception as e:
                 st.error(f"Error checking backups: {e}")
             
-            return False
-        
-        # Check if requests exist (warn but don't stop)
-        try:
-            requests_df = get_requests()
-            if requests_df.empty:
-                st.info("ℹ️ No requests found in the database. You can start by creating your first request.")
-        except:
-            pass
-        
-        return True
+            # Button to check again
+            if st.button("🔄 Check Again", type="primary"):
+                st.rerun()
+            
+            # Allow user to continue to login screen
+            st.info("If you have inserted default data, click 'Check Again' or refresh the page.")
+            return True  # Return True so app doesn't stop
+        else:
+            st.success(f"✅ Database ready: {len(users_df)} users found")
+            return True
+            
     except Exception as e:
         st.error(f"❌ Database error: {str(e)}")
-        if PRODUCTION_MODE:
-            st.error("🚨 Production mode: Please contact administrator immediately!")
-        return False
+        st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
+        return True  # Return True to allow user to see the error and fix it
 
 # ================================================================
 # LOAD HELB LOGO
@@ -153,14 +121,22 @@ st.set_page_config(
 )
 
 # ================================================================
-# RUN DATABASE STATE CHECK BEFORE ANYTHING ELSE
+# RUN DATABASE STATE CHECK BEFORE ANYTHING ELSE - UPDATED FOR SUPABASE
 # ================================================================
-# Initialize database first
-safe_init_with_recovery()
+# For Supabase, just test connection
+try:
+    users_df = get_all_users()
+    print(f"Connected to Supabase. Found {len(users_df)} users")
+except Exception as e:
+    st.error(f"❌ Database connection error: {str(e)}")
+    st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
+    st.stop()
 
-# Then check if database has data (critical for production)
+# Check if database has data (warn but don't stop)
 if not check_database_state():
-    st.stop()  # Stop execution if database is empty and can't be recovered
+    st.warning("⚠️ Database is empty. Please insert default data in Supabase SQL Editor.")
+    st.info("💡 Run the SQL script provided in the documentation to populate default data.")
+    # Don't stop - allow user to see the warning
 
 # ================================================================
 # CUSTOM CSS - Executive Edition
@@ -722,13 +698,12 @@ def display_approval_stages(request_id, main_category):
     else:
         stages = ['Received', 'First Verification', 'Second Verification', 'Approval', 'Posting', 'Cleared']
     
-    conn = sqlite3.connect("helb_data.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT status FROM requests WHERE id = ?", (request_id,))
-    result = cursor.fetchone()
-    conn.close()
-    if not result:
+    # Get status from database using the request_id
+    request = get_request_by_id(request_id)
+    if not request:
         return
+    
+    status = request.get('status', '')
     
     status_map = {
         'RECEIVED_BY_FINANCE': 'Received',
@@ -743,7 +718,7 @@ def display_approval_stages(request_id, main_category):
         'SURRENDER_POSTING': 'Posting',
         'CLEARED': 'Cleared'
     }
-    current_stage = status_map.get(result[0], '')
+    current_stage = status_map.get(status, '')
     
     cols = st.columns(len(stages))
     for i, stage in enumerate(stages):
@@ -2082,13 +2057,15 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            # Get department_id for selected department
-            conn = sqlite3.connect("helb_data.db")
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM departments WHERE name = ?", (selected_dept,))
-            dept_result = cursor.fetchone()
-            dept_id = dept_result[0] if dept_result else st.session_state.user_dept_id
-            conn.close()
+            # Get department_id for selected department from database
+            dept_df = get_departments()
+            dept_id = None
+            if not dept_df.empty:
+                dept_row = dept_df[dept_df['name'] == selected_dept]
+                if not dept_row.empty:
+                    dept_id = dept_row.iloc[0]['id']
+            if dept_id is None:
+                dept_id = st.session_state.user_dept_id
             
             # Student Payment - Regular (Lending)
             if main_category == "Submit Payment Request" and selected_type == "Student Payment" and selected_dept != "External Resource Mobilization":
@@ -3614,13 +3591,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     st.write(f"• {product['name']} ({product['category']})")
                 with col2:
                     if st.button(f"🗑️ Delete", key=f"del_product_{idx}"):
-                        conn = sqlite3.connect("helb_data.db")
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM products WHERE name = ?", (product['name'],))
-                        prod_id = cursor.fetchone()
-                        conn.close()
-                        if prod_id:
-                            delete_product(prod_id[0])
+                        if delete_product(product['id']):
                             st.success(f"Product '{product['name']}' deleted!")
                             st.rerun()
         else:
@@ -3674,20 +3645,11 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     with tab5:
         st.subheader("📅 Financial Year Management")
         
-        conn = sqlite3.connect("helb_data.db")
-        years_df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
-        conn.close()
+        years_df = get_financial_years()
         
-        if not years_df.empty:
-            for _, year in years_df.iterrows():
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"• {year['name']}")
-                with col2:
-                    if st.button(f"🗑️ Delete", key=f"del_year_{year['id']}"):
-                        delete_financial_year(year['id'])
-                        st.success(f"Financial Year '{year['name']}' deleted!")
-                        st.rerun()
+        if years_df:
+            for year_name in years_df:
+                st.write(f"• {year_name}")
         else:
             st.info("No financial years added yet.")
         
@@ -3707,20 +3669,11 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.markdown("---")
         st.subheader("📚 Semester Management")
         
-        conn = sqlite3.connect("helb_data.db")
-        sems_df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
-        conn.close()
+        sems = get_semesters()
         
-        if not sems_df.empty:
-            for _, sem in sems_df.iterrows():
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"• {sem['name']}")
-                with col2:
-                    if st.button(f"🗑️ Delete", key=f"del_sem_{sem['id']}"):
-                        delete_semester(sem['id'])
-                        st.success(f"Semester '{sem['name']}' deleted!")
-                        st.rerun()
+        if sems:
+            for sem in sems:
+                st.write(f"• {sem}")
         else:
             st.info("No semesters added yet.")
         
@@ -3787,22 +3740,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         </p>
         """, unsafe_allow_html=True)
         
-        if capacity_percent > 70:
-            with st.expander("📖 PostgreSQL Migration Guide", expanded=True):
-                st.markdown("""
-                **When to Migrate to PostgreSQL:**
-                - Database size exceeds 500MB
-                - More than 200,000 requests in the system
-                - Experiencing frequent "database is locked" errors
-                
-                **Migration Steps:**
-                1. Install PostgreSQL: `sudo apt install postgresql`
-                2. Create database: `createdb helb_db`
-                3. Export current data: Use the backup feature
-                4. Import to PostgreSQL: Use pgloader or manual import
-                5. Update connection string in database.py
-                """)
-        
         if health['total_requests'] > 100000:
             st.warning("📦 Consider archiving records older than 3 years to improve performance.")
     
@@ -3811,24 +3748,21 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.markdown("Configure Service Level Agreement (SLA) targets for each request type")
         st.info("💡 **SLA Target** = Maximum allowed working days for completion. TAT exceeding this is a breach.")
         
-        # Get current SLA settings
         sla_configs = get_all_request_types()
         
         if not sla_configs:
             st.warning("No SLA configurations found. Please check database.")
         else:
-            # Display current SLA settings in a nice table
             sla_data = []
             for item in sla_configs:
                 req_type = item['request_type']
                 sla_days = item['sla_days']
-                # Determine color based on SLA days
                 if sla_days <= 3:
-                    color = "#00843D"  # Green - Fast
+                    color = "#00843D"
                 elif sla_days <= 5:
-                    color = "#FFB81C"  # Yellow/Gold - Medium
+                    color = "#FFB81C"
                 else:
-                    color = "#F59E0B"  # Orange - Slow
+                    color = "#F59E0B"
                 
                 sla_data.append({
                     'Request Type': req_type,
@@ -3887,7 +3821,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             - 🔴 Red: SLA Breach
             """)
             
-            # Show current SLA distribution chart
             sla_for_chart = [item['sla_days'] for item in sla_configs]
             types_for_chart = [item['request_type'] for item in sla_configs]
             
@@ -3919,7 +3852,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         st.markdown("Add, edit, or delete request types in the system")
         st.warning("⚠️ **Caution:** Deleting a request type will remove it from the system. Existing requests with this type will still be accessible but may not have SLA targets.")
         
-        # Get current request types
         current_types = get_all_request_types()
         
         if current_types:
@@ -3954,7 +3886,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
             
             if st.form_submit_button("Add Request Type"):
                 if new_req_type:
-                    # Check if already exists
                     existing = [t['request_type'] for t in current_types]
                     if new_req_type in existing:
                         st.error(f"❌ Request type '{new_req_type}' already exists!")
@@ -3986,7 +3917,6 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     
                     if st.button("Update Request Type", type="primary"):
                         if new_name != current_data['request_type']:
-                            # Check if new name already exists
                             if new_name in [t['request_type'] for t in current_types if t['request_type'] != selected_edit]:
                                 st.error(f"❌ Request type '{new_name}' already exists!")
                             else:
