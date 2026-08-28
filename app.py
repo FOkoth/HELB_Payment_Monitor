@@ -49,7 +49,7 @@ from database import (
     export_bulk_requests, get_database_health, get_sla_from_database,
     get_intelligent_completion_prediction, get_all_request_types,
     add_request_type, update_request_type, delete_request_type, update_sla_days,
-    get_backup_list, restore_backup
+    get_backup_list, restore_backup, get_request_by_id
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -63,42 +63,30 @@ def check_database_state():
     try:
         users_df = get_all_users()
         
-        # Check if users exist
-        if users_df is None or users_df.empty:
-            # Check if we can connect to the database at all
+        if users_df.empty:
+            # Connection works but no users - this is a fresh database
+            st.warning("⚠️ No users found in the database. This might be a fresh installation.")
+            st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
+            
+            # Show available backups info
             try:
-                # Try a simple query to verify connection
-                test_query = "SELECT 1"
-                from database import execute_query
-                result = execute_query(test_query, fetch_one=True)
-                if result:
-                    # Connection works but no users - this is a fresh database
-                    st.warning("⚠️ No users found in the database. This might be a fresh installation.")
-                    st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
-                    
-                    # Show available backups info
-                    try:
-                        backups = get_backup_list()
-                        if backups:
-                            st.info("📋 Available backups:")
-                            for b in backups[:3]:
-                                st.write(f"- {b['filename']} ({b['date']})")
-                    except Exception as e:
-                        pass
-                    
-                    # Show instructions
-                    st.info("📝 To fix this, run the SQL script in Supabase SQL Editor to insert default data.")
-                    st.info("🔑 After inserting data, refresh the page and log in with admin/admin123")
-                    
-                    # Button to check again
-                    if st.button("🔄 Check Again", type="primary"):
-                        st.rerun()
-                    
-                    return False
-            except:
-                # Connection failed
-                st.error("❌ Database connection error. Please check your DATABASE_URL.")
-                return False
+                backups = get_backup_list()
+                if backups:
+                    st.info("📋 Available backups:")
+                    for b in backups[:3]:
+                        st.write(f"- {b['filename']} ({b['date']})")
+            except Exception as e:
+                pass
+            
+            # Show instructions
+            st.info("📝 To fix this, run the SQL script in Supabase SQL Editor to insert default data.")
+            st.info("🔑 After inserting data, refresh the page and log in with admin/admin123")
+            
+            # Button to check again
+            if st.button("🔄 Check Again", type="primary"):
+                st.rerun()
+            
+            return False
         else:
             # Users found - database is ready
             st.success(f"✅ Database ready: {len(users_df)} users found")
@@ -136,9 +124,9 @@ st.set_page_config(
 )
 
 # ================================================================
-# RUN DATABASE STATE CHECK BEFORE ANYTHING ELSE - UPDATED FOR SUPABASE
+# RUN DATABASE STATE CHECK - UPDATED FOR SUPABASE
 # ================================================================
-# For Supabase, just test connection
+# Test connection first
 try:
     users_df = get_all_users()
     print(f"Connected to Supabase. Found {len(users_df)} users")
@@ -147,11 +135,10 @@ except Exception as e:
     st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
     st.stop()
 
-# Check if database has data (warn but don't stop)
+# Check if database has data (warn but don't stop - allows login)
 if not check_database_state():
     st.warning("⚠️ Database is empty. Please insert default data in Supabase SQL Editor.")
     st.info("💡 Run the SQL script provided in the documentation to populate default data.")
-    # Don't stop - allow user to see the warning
 
 # ================================================================
 # CUSTOM CSS - Executive Edition
@@ -618,7 +605,7 @@ if 'selected_year' not in st.session_state:
     st.session_state.selected_year = "All"
 
 # ================================================================
-# FILTER AND HELPER FUNCTIONS (UNCHANGED)
+# FILTER AND HELPER FUNCTIONS
 # ================================================================
 
 def filter_by_filters(df, financial_year, quarter, month, year):
@@ -749,7 +736,7 @@ def refresh_page():
     st.rerun()
 
 # ================================================================
-# REQUEST TYPE TAT ANALYZER - SHOWS ALL RECORDS (FIXED)
+# REQUEST TYPE TAT ANALYZER
 # ================================================================
 
 def display_tat_by_request_type(data_scope="All Data"):
@@ -1043,7 +1030,9 @@ def display_tat_by_request_type(data_scope="All Data"):
         csv = export_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
-# Login Screen
+# ================================================================
+# LOGIN SCREEN
+# ================================================================
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -1078,7 +1067,9 @@ if not st.session_state.authenticated:
                     st.error("❌ Invalid credentials")
     st.stop()
 
-# Password Change
+# ================================================================
+# PASSWORD CHANGE
+# ================================================================
 if st.session_state.show_password_change:
     st.markdown("### 🔐 Change Your Password")
     st.info("Please change your default password for security reasons.")
@@ -1106,7 +1097,9 @@ if st.session_state.show_password_change:
                 st.rerun()
     st.stop()
 
-# Header with Refresh Button
+# ================================================================
+# HEADER WITH REFRESH BUTTON
+# ================================================================
 col_header, col_refresh = st.columns([6, 1])
 with col_header:
     if helb_logo_base64:
@@ -1129,7 +1122,9 @@ with col_refresh:
     if st.button("🔄 Refresh", key="global_refresh"):
         refresh_page()
 
-# Compact Filter Bar
+# ================================================================
+# COMPACT FILTER BAR
+# ================================================================
 st.markdown("<div class='compact-filter'>", unsafe_allow_html=True)
 st.markdown("<p class='filter-label'>📊 FILTERS</p>", unsafe_allow_html=True)
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -1151,7 +1146,9 @@ with col5:
     data_scope = st.selectbox("Data Scope", ["All Data", "Last 30 Days", "Last 90 Days", "This Year"])
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Sidebar
+# ================================================================
+# SIDEBAR
+# ================================================================
 with st.sidebar:
     if helb_logo_base64:
         logo_html = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 60px; height: auto; margin-bottom: 10px;">'
@@ -1209,7 +1206,7 @@ with st.sidebar:
         st.rerun()
 
 # ================================================================
-# DEPARTMENT DASHBOARD (UNCHANGED)
+# DEPARTMENT DASHBOARD
 # ================================================================
 if choice == "📊 Department Dashboard":
     st.markdown("<div class='section-header'>📊 Department Performance Dashboard</div>", unsafe_allow_html=True)
@@ -1360,7 +1357,7 @@ if choice == "📊 Department Dashboard":
             refresh_page()
 
 # ================================================================
-# MANAGEMENT DASHBOARD (UNCHANGED)
+# MANAGEMENT DASHBOARD
 # ================================================================
 elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
@@ -1717,7 +1714,7 @@ elif choice == "📊 TAT by Request Type":
     display_tat_by_request_type(data_scope)
 
 # ================================================================
-# ENHANCED SEARCH PAYMENT RECORDS WITH INTELLIGENT PREDICTIONS
+# SEARCH PAYMENT RECORDS
 # ================================================================
 elif choice == "🔍 Search Payment Records":
     st.markdown("<div class='section-header'>🔍 Intelligent Payment Search</div>", unsafe_allow_html=True)
@@ -2038,9 +2035,8 @@ elif choice == "🔍 Search Payment Records":
     if st.button("🔄 Refresh This Page", key="search_refresh"):
         refresh_page()
 
-
 # ================================================================
-# NEW REQUEST (UPDATED - WITH ON-BEHALF SUBMISSION AND FARE REIMBURSEMENT)
+# NEW REQUEST
 # ================================================================
 elif choice == "📝 New Request":
     st.markdown("<div class='section-header'>📝 Create New Request</div>", unsafe_allow_html=True)
@@ -2515,9 +2511,8 @@ elif choice == "📝 New Request":
     if st.button("🔄 Refresh This Page", key="new_refresh"):
         refresh_page()
 
-
 # ================================================================
-# MY REQUESTS (UNCHANGED)
+# MY REQUESTS
 # ================================================================
 elif choice == "📋 My Requests":
     st.markdown("<div class='section-header'>📋 My Requests</div>", unsafe_allow_html=True)
@@ -2556,9 +2551,8 @@ elif choice == "📋 My Requests":
     if st.button("🔄 Refresh This Page", key="my_refresh"):
         refresh_page()
 
-
 # ================================================================
-# RETURNED REQUESTS (UNCHANGED)
+# RETURNED REQUESTS
 # ================================================================
 elif choice == "↩️ Returned Requests":
     st.markdown("<div class='section-header'>↩️ Returned Requests - Action Required</div>", unsafe_allow_html=True)
@@ -2681,9 +2675,8 @@ elif choice == "↩️ Returned Requests":
     if st.button("🔄 Refresh This Page", key="returned_refresh"):
         refresh_page()
 
-
 # ================================================================
-# APPROVAL QUEUE (UNCHANGED)
+# APPROVAL QUEUE
 # ================================================================
 elif choice == "✅ Approval Queue":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -3260,9 +3253,8 @@ elif choice == "✅ Approval Queue":
     if st.button("🔄 Refresh This Page", key="approval_refresh"):
         refresh_page()
 
-
 # ================================================================
-# BULK OPERATIONS (UNCHANGED)
+# BULK OPERATIONS
 # ================================================================
 elif choice == "⚡ Bulk Operations":
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
@@ -3418,9 +3410,8 @@ elif choice == "⚡ Bulk Operations":
     if st.button("🔄 Refresh This Page", key="bulk_refresh"):
         refresh_page()
 
-
 # ================================================================
-# REPORTS (UNCHANGED)
+# REPORTS
 # ================================================================
 elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
@@ -3459,9 +3450,8 @@ elif choice == "📑 Reports":
     if st.button("🔄 Refresh This Page", key="reports_refresh"):
         refresh_page()
 
-
 # ================================================================
-# ADMIN PANEL (UNCHANGED)
+# ADMIN PANEL
 # ================================================================
 elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     st.markdown("<div class='section-header'>⚙️ Admin Panel</div>", unsafe_allow_html=True)
@@ -3951,7 +3941,7 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
         refresh_page()
 
 # ================================================================
-# CHANGE PASSWORD (UNCHANGED)
+# CHANGE PASSWORD
 # ================================================================
 elif choice == "🔐 Change Password":
     st.markdown("<div class='section-header'>🔐 Change Password</div>", unsafe_allow_html=True)
@@ -3973,8 +3963,9 @@ elif choice == "🔐 Change Password":
     if st.button("🔄 Refresh This Page", key="pwd_refresh"):
         refresh_page()
 
-
-# Footer
+# ================================================================
+# FOOTER
+# ================================================================
 if helb_logo_base64:
     footer_logo = f'<img src="data:image/png;base64,{helb_logo_base64}" style="width: 18px; height: auto; vertical-align: middle; margin-right: 5px;">'
 else:
