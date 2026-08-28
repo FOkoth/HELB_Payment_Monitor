@@ -368,7 +368,15 @@ def get_user_department(username):
     return execute_query(query, (username,), fetch_one=True)
 
 def get_departments():
-    return df_from_query("SELECT id, name FROM departments ORDER BY name")
+    try:
+        query = "SELECT id, name FROM departments ORDER BY name"
+        print(f"🔍 get_departments: Executing query...")
+        result = df_from_query(query)
+        print(f"🔍 get_departments: Found {len(result)} departments")
+        return result
+    except Exception as e:
+        print(f"❌ get_departments error: {e}")
+        return pd.DataFrame(columns=['id', 'name'])
 
 def get_department_requests(department_name):
     query = "SELECT * FROM requests WHERE department_name = %s ORDER BY submission_date DESC"
