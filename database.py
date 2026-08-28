@@ -7,23 +7,39 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, date, timedelta
 from functools import wraps
-from dotenv import load_dotenv
 
-load_dotenv()
-
+# Try loading from .env file (local development)
 try:
-    import psycopg2
-    import psycopg2.extras
+    from dotenv import load_dotenv
+    load_dotenv()
 except ImportError:
-    print("psycopg2-binary not installed. Run: pip install psycopg2-binary")
-    raise
+    pass
 
-DATABASE_URL = os.getenv('DATABASE_URL')
+# Streamlit Cloud secrets support
+try:
+    import streamlit as st
+    # If running on Streamlit Cloud, use secrets
+    DATABASE_URL = st.secrets.get("DATABASE_URL")
+    PRODUCTION_MODE = st.secrets.get("PRODUCTION_MODE", "False")
+except:
+    # Fallback to environment variables
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False')
+
+# If still not found, try hardcoded (only for testing - REMOVE IN PRODUCTION)
+if not DATABASE_URL:
+    # Check if running on Streamlit Cloud
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            DATABASE_URL = st.secrets.get("DATABASE_URL")
+    except:
+        pass
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL not found! Please check your .env file.")
+    raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
 
-PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False').lower() == 'true'
+PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
 
 if PRODUCTION_MODE:
     print("=" * 60)
@@ -33,6 +49,13 @@ else:
     print("DEVELOPMENT MODE - Connected to Supabase")
 
 print("Connected to Supabase PostgreSQL")
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    print("psycopg2-binary not installed. Run: pip install psycopg2-binary")
+    raise
 
 def setup_logging():
     log_dir = "logs"
