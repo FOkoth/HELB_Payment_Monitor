@@ -33,7 +33,7 @@ if not DATABASE_URL:
 if not DATABASE_URL:
     # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL CONNECTION STRING ⚠️⚠️⚠️
     # Go to Supabase → Settings → Database → Connection string → URI
-    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres"
+    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:Helb@2025Secure!@aws-0-region.pooler.supabase.com:5432/postgres"
     print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
 if not DATABASE_URL:
