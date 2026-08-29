@@ -1111,41 +1111,20 @@ if not st.session_state.authenticated:
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Login", use_container_width=True)
         
-        # Process login OUTSIDE the form
         if submitted:
-            # ============================================================
-            # TEMPORARY BYPASS - Remove this after testing!
-            # Allows ANY login with username and password
-            # ============================================================
-            if username and password:
+            # USE DATABASE AUTHENTICATION
+            user = authenticate_user(username, password)
+            if user:
                 st.session_state.authenticated = True
-                st.session_state.user_role = "ADMIN"
-                st.session_state.username = username
-                st.session_state.user_dept = "Finance"
-                st.session_state.user_dept_id = None
-                st.session_state.is_finance = True
-                st.session_state.full_name = "Temporary Admin"
-                st.success(f"✅ Logged in as {username}")
+                st.session_state.user_role = user[1]
+                st.session_state.username = user[0]
+                st.session_state.user_dept = user[2] if user[2] else "No Department"
+                st.session_state.user_dept_id = user[4] if user[4] else None
+                st.session_state.is_finance = user[5] == 1 if len(user) > 5 else False
+                st.session_state.full_name = user[3]
                 st.rerun()
             else:
-                st.error("❌ Please enter username and password")
-            
-            # ============================================================
-            # ORIGINAL AUTHENTICATION CODE - Commented out for testing
-            # Uncomment this when the bypass is removed
-            # ============================================================
-            # user = authenticate_user(username, password)
-            # if user:
-            #     st.session_state.authenticated = True
-            #     st.session_state.user_role = user[1]
-            #     st.session_state.username = user[0]
-            #     st.session_state.user_dept = user[2] if user[2] else "No Department"
-            #     st.session_state.user_dept_id = user[4] if user[4] else None
-            #     st.session_state.is_finance = user[5] == 1 if len(user) > 5 else False
-            #     st.session_state.full_name = user[3]
-            #     st.rerun()
-            # else:
-            #     st.error("❌ Invalid credentials")
+                st.error("❌ Invalid credentials")
     
     st.stop()
 # ================================================================
