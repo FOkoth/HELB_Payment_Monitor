@@ -112,46 +112,28 @@ from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
 
 # ================================================================
-# DATABASE STATE CHECK - UPDATED FOR SUPABASE
+# DATABASE STATE CHECK - FIXED (SILENT VERSION)
 # ================================================================
 
 def check_database_state():
-    """Check if database has data before proceeding - prevents data loss"""
+    """Check if database has data - SILENT CHECK (no warnings on login page)"""
     try:
         users_df = get_all_users()
         
         if users_df.empty:
-            # Connection works but no users - this is a fresh database
-            st.warning("⚠️ No users found in the database. This might be a fresh installation.")
-            st.info("💡 Please ensure you have run the SQL script to insert default data in Supabase.")
-            
-            # Show available backups info
-            try:
-                backups = get_backup_list()
-                if backups:
-                    st.info("📋 Available backups:")
-                    for b in backups[:3]:
-                        st.write(f"- {b['filename']} ({b['date']})")
-            except Exception as e:
-                pass
-            
-            # Show instructions
-            st.info("📝 To fix this, run the SQL script in Supabase SQL Editor to insert default data.")
-            st.info("🔑 After inserting data, refresh the page and log in with admin/admin123")
-            
-            # Button to check again
-            if st.button("🔄 Check Again", type="primary"):
-                st.rerun()
-            
+            # Only show warning if user is already authenticated
+            if st.session_state.get('authenticated', False):
+                st.warning("⚠️ No users found in the database. Please contact administrator.")
             return False
         else:
-            # Users found - database is ready
-            st.success(f"✅ Database ready: {len(users_df)} users found")
+            # Only show success if authenticated
+            if st.session_state.get('authenticated', False):
+                st.success(f"✅ Database ready: {len(users_df)} users found")
             return True
             
     except Exception as e:
-        st.error(f"❌ Database error: {str(e)}")
-        st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
+        if st.session_state.get('authenticated', False):
+            st.error(f"❌ Database error: {str(e)}")
         return False
 
 # ================================================================
@@ -181,7 +163,7 @@ st.set_page_config(
 )
 
 # ================================================================
-# RUN DATABASE STATE CHECK - UPDATED FOR SUPABASE
+# RUN DATABASE STATE CHECK - FIXED
 # ================================================================
 # Test connection first
 try:
@@ -192,10 +174,11 @@ except Exception as e:
     st.info("💡 Please check your DATABASE_URL in .env file or Streamlit secrets.")
     st.stop()
 
-# Check if database has data (warn but don't stop - allows login)
-if not check_database_state():
-    st.warning("⚠️ Database is empty. Please insert default data in Supabase SQL Editor.")
-    st.info("💡 Run the SQL script provided in the documentation to populate default data.")
+# SILENT CHECK - No warnings on login page
+# The check runs but doesn't show warnings until after login
+db_ready = check_database_state()
+# Store in session state for later use
+st.session_state.db_ready = db_ready
 
 # ================================================================
 # CUSTOM CSS - Executive Edition
@@ -660,6 +643,8 @@ if 'selected_month' not in st.session_state:
     st.session_state.selected_month = "All"
 if 'selected_year' not in st.session_state:
     st.session_state.selected_year = "All"
+if 'db_ready' not in st.session_state:
+    st.session_state.db_ready = False
 
 # ================================================================
 # FILTER AND HELPER FUNCTIONS
@@ -1088,7 +1073,7 @@ def display_tat_by_request_type(data_scope="All Data"):
         st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
 # ================================================================
-# LOGIN SCREEN
+# LOGIN SCREEN - FIXED
 # ================================================================
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -1127,6 +1112,7 @@ if not st.session_state.authenticated:
                 st.error("❌ Invalid credentials")
     
     st.stop()
+
 # ================================================================
 # PASSWORD CHANGE
 # ================================================================
