@@ -181,12 +181,10 @@ def get_all_users():
         
         conn.close()
         
-        # If no users found, return fallback users
-        if df.empty:
-            print("⚠️ No users found in database! Using fallback users.")
-            return get_fallback_users()
-        
-        print(f"🔍 get_all_users: Returning {len(df)} users")
+        # ============================================================
+        # FORCE RETURN DATABASE USERS - NO FALLBACK
+        # ============================================================
+        print(f"✅ get_all_users: Returning {len(df)} users from database")
         return df
         
     except Exception as e:
@@ -195,9 +193,14 @@ def get_all_users():
         traceback.print_exc()
         if conn:
             conn.close()
-        # Return fallback users on error
-        print("⚠️ Database error! Using fallback users.")
-        return get_fallback_users()
+        
+        # ============================================================
+        # RETURN EMPTY DATAFRAME ON ERROR - NO FALLBACK
+        # ============================================================
+        print("❌ get_all_users: Database error - returning empty DataFrame")
+        return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
+                                      'can_receive_requests', 'can_process_stages', 
+                                      'can_release_payments', 'created_at', 'is_active'])
 
 # ================================================================
 # get_departments - WITH PERMANENT FALLBACK
@@ -284,11 +287,10 @@ def authenticate_user(username, password):
         user = cursor.fetchone()
         
         if user:
-            # Update last login
             update_query = "UPDATE users SET last_login = %s WHERE username = %s"
             cursor.execute(update_query, (datetime.now().isoformat(), username))
             conn.commit()
-            print(f"✅ AUTH: User '{username}' authenticated from database!")
+            print(f"✅ AUTH: User '{username}' authenticated!")
             cursor.close()
             conn.close()
             return user
@@ -296,66 +298,14 @@ def authenticate_user(username, password):
         cursor.close()
         conn.close()
         
-        # FALLBACK: If no user found, check hardcoded credentials
-        print(f"⚠️ User '{username}' not found in database. Checking fallback...")
+        # ============================================================
+        # ONLY FALLBACK FOR ADMIN (emergency)
+        # ============================================================
+        if username == 'admin' and password == 'admin123':
+            print(f"✅ AUTH: Using emergency admin fallback!")
+            return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
         
-        # Define fallback users
-        fallback_users = {
-            'admin': {
-                'username': 'admin',
-                'role': 'ADMIN',
-                'department': 'Finance',
-                'full_name': 'System Administrator',
-                'department_id': 6,
-                'is_finance': 1,
-                'can_receive': 1,
-                'can_process': 1,
-                'can_release': 1
-            },
-            'test': {
-                'username': 'test',
-                'role': 'DEPARTMENT',
-                'department': 'Lending',
-                'full_name': 'Test User',
-                'department_id': 11,
-                'is_finance': 0,
-                'can_receive': 0,
-                'can_process': 0,
-                'can_release': 0
-            },
-            'finance_user': {
-                'username': 'finance_user',
-                'role': 'FINANCE_RECEIVER',
-                'department': 'Finance',
-                'full_name': 'Finance User',
-                'department_id': 6,
-                'is_finance': 1,
-                'can_receive': 1,
-                'can_process': 0,
-                'can_release': 0
-            }
-        }
-        
-        if username in fallback_users:
-            user_data = fallback_users[username]
-            # Check if password matches
-            if (username == 'admin' and password == 'admin123') or \
-               (username == 'test' and password == 'test123') or \
-               (username == 'finance_user' and password == 'finance123'):
-                print(f"✅ AUTH: Using fallback login for '{username}'!")
-                return (
-                    user_data['username'],
-                    user_data['role'],
-                    user_data['department'],
-                    user_data['full_name'],
-                    user_data['department_id'],
-                    user_data['is_finance'],
-                    user_data['can_receive'],
-                    user_data['can_process'],
-                    user_data['can_release']
-                )
-        
-        print(f"❌ AUTH: User '{username}' not found in fallback")
+        print(f"❌ AUTH: Invalid credentials for '{username}'")
         return None
         
     except Exception as e:
@@ -367,18 +317,10 @@ def authenticate_user(username, password):
         if conn:
             conn.close()
         
-        # FALLBACK: On error, check hardcoded credentials
-        print(f"⚠️ Database error! Checking fallback credentials...")
-        
+        # Emergency fallback only
         if username == 'admin' and password == 'admin123':
-            print(f"✅ AUTH: Using fallback admin login!")
+            print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
-        elif username == 'test' and password == 'test123':
-            print(f"✅ AUTH: Using fallback test login!")
-            return ("test", "DEPARTMENT", "Lending", "Test User", 11, 0, 0, 0, 0)
-        elif username == 'finance_user' and password == 'finance123':
-            print(f"✅ AUTH: Using fallback finance user login!")
-            return ("finance_user", "FINANCE_RECEIVER", "Finance", "Finance User", 6, 1, 1, 0, 0)
         
         return None
 
