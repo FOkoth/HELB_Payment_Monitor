@@ -37,7 +37,7 @@ if not DATABASE_URL:
 if not DATABASE_URL:
     # ⚠️⚠️⚠️ REPLACE YOUR_ACTUAL_PASSWORD with your real password from Supabase ⚠️⚠️⚠️
     # Go to Supabase → Settings → Database → Connection string → Session pooler
-    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_ACTUAL_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:Helb%402025Secure%21@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
     print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
 if not DATABASE_URL:
