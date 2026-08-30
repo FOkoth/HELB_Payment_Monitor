@@ -14,40 +14,25 @@ try:
 except ImportError:
     pass
 
+# ============================================================
+# DATABASE URL - SINGLE SOURCE OF TRUTH
+# ============================================================
+# IMPORTANT: Get this from Supabase → Settings → Database → Connection string
+# Replace with YOUR actual password
+DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
+
+# Try to get from environment or secrets
 try:
     import streamlit as st
-    DATABASE_URL = st.secrets.get("DATABASE_URL")
-    PRODUCTION_MODE = st.secrets.get("PRODUCTION_MODE", "False")
+    DATABASE_URL = st.secrets.get("DATABASE_URL", DATABASE_URL)
 except:
+    pass
+
+if os.getenv('DATABASE_URL'):
     DATABASE_URL = os.getenv('DATABASE_URL')
-    PRODUCTION_MODE = os.getenv('PRODUCTION_MODE', 'False')
 
-if not DATABASE_URL:
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets'):
-            DATABASE_URL = st.secrets.get("DATABASE_URL")
-    except:
-        pass
-
-if not DATABASE_URL:
-    # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL CONNECTION STRING ⚠️⚠️⚠️
-    DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
-    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
-
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
-
-print(f"✅ DATABASE_URL loaded: {DATABASE_URL[:40]}...")
-
-PRODUCTION_MODE = str(PRODUCTION_MODE).lower() == 'true'
-
-if PRODUCTION_MODE:
-    print("=" * 60)
-    print("PRODUCTION MODE ACTIVE - Data protection ENABLED")
-    print("=" * 60)
-else:
-    print("DEVELOPMENT MODE - Connected to Supabase")
+print(f"✅ DATABASE_URL loaded")
+PRODUCTION_MODE = str(os.getenv('PRODUCTION_MODE', 'False')).lower() == 'true'
 
 try:
     import psycopg2
@@ -72,16 +57,28 @@ def setup_logging():
 
 logger = setup_logging()
 
+# ============================================================
+# CONNECTION FUNCTION - WITH SSL AND RETRY
+# ============================================================
 def get_connection():
+    """Get database connection with SSL and retry logic"""
     try:
-        print(f"🔍 get_connection: Connecting...")
-        conn = psycopg2.connect(DATABASE_URL)
-        print(f"🔍 get_connection: Connected!")
+        print(f"🔍 Connecting to Supabase...")
+        # Try with SSL first
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        print(f"✅ Connected to Supabase!")
         return conn
-    except Exception as e:
-        print(f"❌ get_connection error: {e}")
-        logger.error(f"Database connection error: {e}")
-        raise
+    except Exception as e1:
+        print(f"⚠️ SSL connection failed: {e1}")
+        try:
+            # Try without SSL
+            conn = psycopg2.connect(DATABASE_URL)
+            print(f"✅ Connected to Supabase (no SSL)!")
+            return conn
+        except Exception as e2:
+            print(f"❌ All connection attempts failed: {e2}")
+            logger.error(f"Database connection error: {e2}")
+            raise
 
 def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=False):
     conn = None
@@ -110,14 +107,57 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
         if conn:
             conn.close()
 
-# ================================================================
-# get_all_users - NO FALLBACK, ALWAYS RETURNS DATABASE
-# ================================================================
+# ============================================================
+# FALLBACK USERS - ONLY FOR EMERGENCY
+# ============================================================
+def get_fallback_users():
+    """Emergency fallback users - only used when database is completely down"""
+    from datetime import datetime
+    return pd.DataFrame([
+        {
+            'username': 'admin',
+            'role': 'ADMIN',
+            'department': 'Finance',
+            'full_name': 'System Administrator',
+            'can_receive_requests': 1,
+            'can_process_stages': 1,
+            'can_release_payments': 1,
+            'created_at': datetime.now().isoformat(),
+            'is_active': 1
+        },
+        {
+            'username': 'test',
+            'role': 'DEPARTMENT',
+            'department': 'Lending',
+            'full_name': 'Test User',
+            'can_receive_requests': 0,
+            'can_process_stages': 0,
+            'can_release_payments': 0,
+            'created_at': datetime.now().isoformat(),
+            'is_active': 1
+        },
+        {
+            'username': 'finance_user',
+            'role': 'FINANCE_RECEIVER',
+            'department': 'Finance',
+            'full_name': 'Finance User',
+            'can_receive_requests': 1,
+            'can_process_stages': 0,
+            'can_release_payments': 0,
+            'created_at': datetime.now().isoformat(),
+            'is_active': 1
+        }
+    ])
+
+# ============================================================
+# GET ALL USERS - ALWAYS RETURNS DATA
+# ============================================================
 def get_all_users():
+    """Get all users from database, with emergency fallback"""
     conn = None
     try:
         print("🔍 get_all_users: Starting...")
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         print("🔍 get_all_users: Connected!")
         
         query = "SELECT username, role, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active FROM users ORDER BY username"
@@ -134,7 +174,16 @@ def get_all_users():
         
         conn.close()
         
+        # If no users in database, return fallback
+        if df.empty:
+            print("⚠️ get_all_users: Database has no users! Using fallback.")
+            return get_fallback_users()
+        
         print(f"✅ get_all_users: Returning {len(df)} users from database")
+        # Print users for debugging
+        for idx, row in df.iterrows():
+            print(f"   👤 {row['username']} ({row['role']})")
+        
         return df
         
     except Exception as e:
@@ -143,19 +192,18 @@ def get_all_users():
         traceback.print_exc()
         if conn:
             conn.close()
-        print("❌ get_all_users: Database error - returning empty DataFrame")
-        return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
-                                      'can_receive_requests', 'can_process_stages', 
-                                      'can_release_payments', 'created_at', 'is_active'])
+        # EMERGENCY FALLBACK - Keep the app running
+        print("⚠️ get_all_users: Database unavailable! Using emergency fallback.")
+        return get_fallback_users()
 
-# ================================================================
-# get_departments - WITH FALLBACK (for display)
-# ================================================================
+# ============================================================
+# GET DEPARTMENTS
+# ============================================================
 def get_departments():
     conn = None
     try:
         print("🔍 get_departments: Starting...")
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         print("🔍 get_departments: Connected!")
         
         query = "SELECT id, name FROM departments ORDER BY name"
@@ -173,18 +221,34 @@ def get_departments():
         traceback.print_exc()
         if conn:
             conn.close()
-        return pd.DataFrame(columns=['id', 'name'])
+        # Fallback departments
+        print("⚠️ get_departments: Using fallback departments.")
+        return pd.DataFrame([
+            {'id': 6, 'name': 'Finance'},
+            {'id': 11, 'name': 'Lending'},
+            {'id': 7, 'name': 'Human Resource'},
+            {'id': 8, 'name': 'ICT'},
+            {'id': 12, 'name': 'Strategy'},
+            {'id': 1, 'name': "CEO's Office"},
+            {'id': 2, 'name': 'Corporate Communication'},
+            {'id': 3, 'name': 'Debt Management'},
+            {'id': 4, 'name': 'External Resource Mobilization'},
+            {'id': 5, 'name': 'Field Services'},
+            {'id': 9, 'name': 'Internal Audit'},
+            {'id': 10, 'name': 'Legal Services'},
+            {'id': 13, 'name': 'Supply Chain Management'}
+        ])
 
-# ================================================================
-# authenticate_user - ONLY ADMIN FALLBACK
-# ================================================================
+# ============================================================
+# AUTHENTICATE USER - WITH EMERGENCY FALLBACK
+# ============================================================
 def authenticate_user(username, password):
     conn = None
     cursor = None
     try:
         print(f"🔍 AUTH: Attempting login for '{username}'")
         
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         cursor = conn.cursor()
         
         query = """
@@ -202,7 +266,7 @@ def authenticate_user(username, password):
             update_query = "UPDATE users SET last_login = %s WHERE username = %s"
             cursor.execute(update_query, (datetime.now().isoformat(), username))
             conn.commit()
-            print(f"✅ AUTH: User '{username}' authenticated!")
+            print(f"✅ AUTH: User '{username}' authenticated from database!")
             cursor.close()
             conn.close()
             return user
@@ -210,7 +274,7 @@ def authenticate_user(username, password):
         cursor.close()
         conn.close()
         
-        # Emergency admin fallback
+        # EMERGENCY FALLBACK - Only for admin
         if username == 'admin' and password == 'admin123':
             print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
@@ -227,15 +291,16 @@ def authenticate_user(username, password):
         if conn:
             conn.close()
         
+        # EMERGENCY FALLBACK - Only for admin
         if username == 'admin' and password == 'admin123':
             print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
         
         return None
 
-# ================================================================
-# get_user_by_username - WITH FALLBACK
-# ================================================================
+# ============================================================
+# GET USER BY USERNAME - WITH EMERGENCY FALLBACK
+# ============================================================
 def get_user_by_username(username):
     try:
         query = """
@@ -251,7 +316,7 @@ def get_user_by_username(username):
         if result:
             return result
         
-        # Fallback for admin only
+        # Emergency fallback
         if username == 'admin':
             return ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
                     datetime.now().isoformat(), datetime.now().isoformat(), 1)
@@ -265,9 +330,9 @@ def get_user_by_username(username):
                     datetime.now().isoformat(), datetime.now().isoformat(), 1)
         return None
 
-# ================================================================
-# get_user_permissions - WITH FALLBACK
-# ================================================================
+# ============================================================
+# GET USER PERMISSIONS - WITH EMERGENCY FALLBACK
+# ============================================================
 def get_user_permissions(username):
     try:
         query = """
@@ -285,14 +350,15 @@ def get_user_permissions(username):
     except Exception as e:
         print(f"❌ get_user_permissions error: {e}")
     
+    # Emergency fallback
     if username == 'admin':
         return {'can_receive': True, 'can_process': True, 'can_release': True, 'role': 'ADMIN'}
     
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
-# ================================================================
-# ALL OTHER FUNCTIONS (unchanged)
-# ================================================================
+# ============================================================
+# ALL OTHER FUNCTIONS - UNCHANGED
+# ============================================================
 
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
@@ -377,7 +443,7 @@ def get_department_requests(department_name):
     query = "SELECT * FROM requests WHERE department_name = %s ORDER BY submission_date DESC"
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query(query, conn, params=(department_name,))
         conn.close()
         return df
@@ -430,7 +496,7 @@ def delete_department(dept_id):
 def get_products():
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT id, name, category, has_payment_type, has_semester FROM products WHERE is_active = 1 ORDER BY name", conn)
         conn.close()
         return df
@@ -461,7 +527,7 @@ def delete_product(product_id):
 def get_funders():
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT id, name FROM funders ORDER BY name", conn)
         conn.close()
         return df
@@ -492,7 +558,7 @@ def delete_funder(funder_id):
 def get_financial_years():
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT id, name FROM financial_years WHERE is_active = 1 ORDER BY name DESC", conn)
         conn.close()
         return df['name'].tolist() if not df.empty else []
@@ -523,7 +589,7 @@ def delete_financial_year(year_id):
 def get_semesters():
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT id, name FROM semesters ORDER BY name", conn)
         conn.close()
         return df['name'].tolist() if not df.empty else []
@@ -554,7 +620,7 @@ def delete_semester(semester_id):
 def get_requests():
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
         conn.close()
         return df
@@ -735,7 +801,7 @@ def get_returned_requests(department_name):
     """
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query(query, conn, params=(department_name,))
         conn.close()
         return df
@@ -789,7 +855,7 @@ def resubmit_request(request_id, updated_data):
 def search_payment_records(search_term, search_type="all"):
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         
         if search_type == "request_number":
             query = "SELECT * FROM requests WHERE request_number ILIKE %s ORDER BY submission_date DESC"
@@ -1189,7 +1255,7 @@ def get_all_departments_summary():
     """
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query(query, conn)
         conn.close()
         return df
@@ -1468,7 +1534,7 @@ def export_bulk_requests(request_ids):
     """
     conn = None
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = get_connection()
         df = pd.read_sql_query(query, conn, params=request_ids)
         conn.close()
         return df
