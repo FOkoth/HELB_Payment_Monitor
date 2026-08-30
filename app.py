@@ -1073,7 +1073,7 @@ def display_tat_by_request_type(data_scope="All Data"):
         st.download_button("📥 Export TAT Analysis", csv, f"tat_analysis_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
 
 # ================================================================
-# LOGIN SCREEN - WITH EMERGENCY BYPASS
+# LOGIN SCREEN
 # ================================================================
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -1092,12 +1092,12 @@ if not st.session_state.authenticated:
         """, unsafe_allow_html=True)
         
         # ============================================================
-        # EMERGENCY BYPASS - USE THIS TO LOGIN NOW
+        # EMERGENCY LOGIN - ADD THIS RIGHT HERE
         # ============================================================
         st.markdown("---")
-        st.warning("🚨 EMERGENCY LOGIN - Click below to bypass authentication")
+        st.warning("🔑 Emergency Login - Click below to bypass database authentication")
         
-        if st.button("🔓 Emergency Login as Admin", type="primary", use_container_width=True):
+        if st.button("🚪 Emergency Login as Admin", type="primary", use_container_width=True):
             st.session_state.authenticated = True
             st.session_state.user_role = "ADMIN"
             st.session_state.username = "admin"
@@ -1108,7 +1108,7 @@ if not st.session_state.authenticated:
             st.rerun()
         
         st.markdown("---")
-        st.markdown("### Or login normally:")
+        st.markdown("### Login with Database")
         
         with st.form("login_form"):
             username = st.text_input("Username")
@@ -1116,7 +1116,6 @@ if not st.session_state.authenticated:
             submitted = st.form_submit_button("Login", use_container_width=True)
         
         if submitted:
-            # TRY DATABASE AUTHENTICATION
             user = authenticate_user(username, password)
             if user:
                 st.session_state.authenticated = True
@@ -1128,7 +1127,7 @@ if not st.session_state.authenticated:
                 st.session_state.full_name = user[3]
                 st.rerun()
             else:
-                st.error("❌ Invalid credentials. Use Emergency Login button above.")
+                st.error("❌ Invalid credentials. Use Emergency Login above.")
     
     st.stop()
 
