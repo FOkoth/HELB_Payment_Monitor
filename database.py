@@ -32,7 +32,6 @@ if not DATABASE_URL:
 
 if not DATABASE_URL:
     # ⚠️⚠️⚠️ REPLACE THIS WITH YOUR ACTUAL CONNECTION STRING ⚠️⚠️⚠️
-    # Go to Supabase → Settings → Database → Connection string → URI
     DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
     print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
@@ -112,50 +111,7 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
             conn.close()
 
 # ================================================================
-# FALLBACK USERS - PERMANENT FIX
-# ================================================================
-
-def get_fallback_users():
-    """Return hardcoded users if database is empty"""
-    from datetime import datetime
-    return pd.DataFrame([
-        {
-            'username': 'admin',
-            'role': 'ADMIN',
-            'department': 'Finance',
-            'full_name': 'System Administrator',
-            'can_receive_requests': 1,
-            'can_process_stages': 1,
-            'can_release_payments': 1,
-            'created_at': datetime.now().isoformat(),
-            'is_active': 1
-        },
-        {
-            'username': 'test',
-            'role': 'DEPARTMENT',
-            'department': 'Lending',
-            'full_name': 'Test User',
-            'can_receive_requests': 0,
-            'can_process_stages': 0,
-            'can_release_payments': 0,
-            'created_at': datetime.now().isoformat(),
-            'is_active': 1
-        },
-        {
-            'username': 'finance_user',
-            'role': 'FINANCE_RECEIVER',
-            'department': 'Finance',
-            'full_name': 'Finance User',
-            'can_receive_requests': 1,
-            'can_process_stages': 0,
-            'can_release_payments': 0,
-            'created_at': datetime.now().isoformat(),
-            'is_active': 1
-        }
-    ])
-
-# ================================================================
-# get_all_users - WITH PERMANENT FALLBACK
+# get_all_users - NO FALLBACK, ALWAYS RETURNS DATABASE
 # ================================================================
 def get_all_users():
     conn = None
@@ -164,26 +120,20 @@ def get_all_users():
         conn = psycopg2.connect(DATABASE_URL)
         print("🔍 get_all_users: Connected!")
         
-        # Simple query without joins
         query = "SELECT username, role, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active FROM users ORDER BY username"
         
         print(f"🔍 get_all_users: Executing query...")
         df = pd.read_sql_query(query, conn)
         print(f"🔍 get_all_users: Query returned {len(df)} rows")
         
-        # Add department column (will be empty)
         df['department'] = None
         
-        # Reorder columns
         df = df[['username', 'role', 'department', 'full_name', 
                 'can_receive_requests', 'can_process_stages', 
                 'can_release_payments', 'created_at', 'is_active']]
         
         conn.close()
         
-        # ============================================================
-        # FORCE RETURN DATABASE USERS - NO FALLBACK
-        # ============================================================
         print(f"✅ get_all_users: Returning {len(df)} users from database")
         return df
         
@@ -193,17 +143,13 @@ def get_all_users():
         traceback.print_exc()
         if conn:
             conn.close()
-        
-        # ============================================================
-        # RETURN EMPTY DATAFRAME ON ERROR - NO FALLBACK
-        # ============================================================
         print("❌ get_all_users: Database error - returning empty DataFrame")
         return pd.DataFrame(columns=['username', 'role', 'department', 'full_name', 
                                       'can_receive_requests', 'can_process_stages', 
                                       'can_release_payments', 'created_at', 'is_active'])
 
 # ================================================================
-# get_departments - WITH PERMANENT FALLBACK
+# get_departments - WITH FALLBACK (for display)
 # ================================================================
 def get_departments():
     conn = None
@@ -218,25 +164,6 @@ def get_departments():
         df = pd.read_sql_query(query, conn)
         print(f"🔍 get_departments: Query returned {len(df)} rows")
         
-        # If no departments found, return fallback departments
-        if df.empty:
-            print("⚠️ No departments found! Using fallback departments.")
-            df = pd.DataFrame([
-                {'id': 6, 'name': 'Finance'},
-                {'id': 11, 'name': 'Lending'},
-                {'id': 7, 'name': 'Human Resource'},
-                {'id': 8, 'name': 'ICT'},
-                {'id': 12, 'name': 'Strategy'},
-                {'id': 1, 'name': "CEO's Office"},
-                {'id': 2, 'name': 'Corporate Communication'},
-                {'id': 3, 'name': 'Debt Management'},
-                {'id': 4, 'name': 'External Resource Mobilization'},
-                {'id': 5, 'name': 'Field Services'},
-                {'id': 9, 'name': 'Internal Audit'},
-                {'id': 10, 'name': 'Legal Services'},
-                {'id': 13, 'name': 'Supply Chain Management'}
-            ])
-        
         conn.close()
         return df
         
@@ -246,25 +173,10 @@ def get_departments():
         traceback.print_exc()
         if conn:
             conn.close()
-        # Return fallback departments on error
-        return pd.DataFrame([
-            {'id': 6, 'name': 'Finance'},
-            {'id': 11, 'name': 'Lending'},
-            {'id': 7, 'name': 'Human Resource'},
-            {'id': 8, 'name': 'ICT'},
-            {'id': 12, 'name': 'Strategy'},
-            {'id': 1, 'name': "CEO's Office"},
-            {'id': 2, 'name': 'Corporate Communication'},
-            {'id': 3, 'name': 'Debt Management'},
-            {'id': 4, 'name': 'External Resource Mobilization'},
-            {'id': 5, 'name': 'Field Services'},
-            {'id': 9, 'name': 'Internal Audit'},
-            {'id': 10, 'name': 'Legal Services'},
-            {'id': 13, 'name': 'Supply Chain Management'}
-        ])
+        return pd.DataFrame(columns=['id', 'name'])
 
 # ================================================================
-# authenticate_user - WITH PERMANENT FALLBACK
+# authenticate_user - ONLY ADMIN FALLBACK
 # ================================================================
 def authenticate_user(username, password):
     conn = None
@@ -298,11 +210,9 @@ def authenticate_user(username, password):
         cursor.close()
         conn.close()
         
-        # ============================================================
-        # ONLY FALLBACK FOR ADMIN (emergency)
-        # ============================================================
+        # Emergency admin fallback
         if username == 'admin' and password == 'admin123':
-            print(f"✅ AUTH: Using emergency admin fallback!")
+            print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
         
         print(f"❌ AUTH: Invalid credentials for '{username}'")
@@ -317,7 +227,6 @@ def authenticate_user(username, password):
         if conn:
             conn.close()
         
-        # Emergency fallback only
         if username == 'admin' and password == 'admin123':
             print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
@@ -325,11 +234,10 @@ def authenticate_user(username, password):
         return None
 
 # ================================================================
-# get_user_by_username - WITH PERMANENT FALLBACK
+# get_user_by_username - WITH FALLBACK
 # ================================================================
 def get_user_by_username(username):
     try:
-        # First try database
         query = """
             SELECT u.username, u.role, d.name as department_name, u.full_name, u.department_id,
                    u.can_receive_requests, u.can_process_stages, u.can_release_payments,
@@ -343,42 +251,22 @@ def get_user_by_username(username):
         if result:
             return result
         
-        # Fallback: Return hardcoded user data
-        print(f"⚠️ User '{username}' not found in database. Using fallback data.")
-        
-        fallback_users = {
-            'admin': ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
-                     datetime.now().isoformat(), datetime.now().isoformat(), 1),
-            'test': ('test', 'DEPARTMENT', 'Lending', 'Test User', 11, 0, 0, 0, 
-                    datetime.now().isoformat(), datetime.now().isoformat(), 1),
-            'finance_user': ('finance_user', 'FINANCE_RECEIVER', 'Finance', 'Finance User', 6, 1, 0, 0, 
-                           datetime.now().isoformat(), datetime.now().isoformat(), 1)
-        }
-        
-        if username in fallback_users:
-            return fallback_users[username]
+        # Fallback for admin only
+        if username == 'admin':
+            return ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
+                    datetime.now().isoformat(), datetime.now().isoformat(), 1)
         
         return None
         
     except Exception as e:
         print(f"❌ get_user_by_username error: {e}")
-        
-        # Fallback on error
-        fallback_users = {
-            'admin': ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
-                     datetime.now().isoformat(), datetime.now().isoformat(), 1),
-            'test': ('test', 'DEPARTMENT', 'Lending', 'Test User', 11, 0, 0, 0, 
-                    datetime.now().isoformat(), datetime.now().isoformat(), 1),
-            'finance_user': ('finance_user', 'FINANCE_RECEIVER', 'Finance', 'Finance User', 6, 1, 0, 0, 
-                           datetime.now().isoformat(), datetime.now().isoformat(), 1)
-        }
-        
-        if username in fallback_users:
-            return fallback_users[username]
+        if username == 'admin':
+            return ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
+                    datetime.now().isoformat(), datetime.now().isoformat(), 1)
         return None
 
 # ================================================================
-# get_user_permissions - WITH PERMANENT FALLBACK
+# get_user_permissions - WITH FALLBACK
 # ================================================================
 def get_user_permissions(username):
     try:
@@ -397,27 +285,20 @@ def get_user_permissions(username):
     except Exception as e:
         print(f"❌ get_user_permissions error: {e}")
     
-    # Fallback permissions
-    fallback_perms = {
-        'admin': {'can_receive': True, 'can_process': True, 'can_release': True, 'role': 'ADMIN'},
-        'test': {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'},
-        'finance_user': {'can_receive': True, 'can_process': False, 'can_release': False, 'role': 'FINANCE_RECEIVER'}
-    }
-    
-    if username in fallback_perms:
-        return fallback_perms[username]
+    if username == 'admin':
+        return {'can_receive': True, 'can_process': True, 'can_release': True, 'role': 'ADMIN'}
     
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
 # ================================================================
-# create_user
+# ALL OTHER FUNCTIONS (unchanged)
 # ================================================================
+
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
         print(f"🔍 Creating user: {username}")
         
-        # Check if user exists
         check_query = "SELECT COUNT(*) FROM users WHERE username = %s"
         count_result = execute_query(check_query, (username,), fetch_one=True)
         count = count_result[0] if count_result else 0
@@ -426,7 +307,6 @@ def create_user(username, password, role, department_id, full_name,
             print(f"❌ User '{username}' already exists!")
             return False
         
-        # Insert the user
         query = """
             INSERT INTO users (
                 username, password, role, department_id, full_name, 
@@ -1344,12 +1224,10 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
         """
         df = get_requests()
         if df.empty:
-            # Fallback
             remaining_days = max(1, sla_days - current_tat) if sla_days > current_tat else 1
             predicted_date = add_working_days(date.today(), remaining_days)
             return predicted_date, "Estimated", "Using SLA estimation."
         
-        # Filter by request type
         type_df = df[df['request_type'] == request_type]
         historical_tats = []
         for _, row in type_df.iterrows():
