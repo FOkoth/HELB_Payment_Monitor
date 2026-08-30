@@ -19,7 +19,7 @@ except ImportError:
 # ============================================================
 # IMPORTANT: Get this from Supabase → Settings → Database → Connection string
 # Replace with YOUR actual password
-DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:Helb%402025Secure%21@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
 
 #DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
 
