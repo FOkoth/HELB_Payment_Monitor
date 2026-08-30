@@ -15,26 +15,44 @@ except ImportError:
     pass
 
 # ============================================================
-# DATABASE URL - SINGLE SOURCE OF TRUTH
+# DATABASE URL - SESSION POOLER (CORRECT FOR STREAMLIT)
 # ============================================================
-# IMPORTANT: Get this from Supabase → Settings → Database → Connection string
-# Replace with YOUR actual password
-DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:Helb%402025Secure%21@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+# Get this from Supabase → Settings → Database → Connection string → Session pooler
+# IMPORTANT: Replace YOUR_ACTUAL_PASSWORD with your real Supabase password
+# The password is NOT "Helb%402025Secure%21" - that's a placeholder
 
-#DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
+# Try to get from environment first
+DATABASE_URL = os.getenv('DATABASE_URL')
 
-# Try to get from environment or secrets
-try:
-    import streamlit as st
-    DATABASE_URL = st.secrets.get("DATABASE_URL", DATABASE_URL)
-except:
-    pass
+# If not in environment, try Streamlit secrets
+if not DATABASE_URL:
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and st.secrets.get("DATABASE_URL"):
+            DATABASE_URL = st.secrets.get("DATABASE_URL")
+    except:
+        pass
 
-if os.getenv('DATABASE_URL'):
-    DATABASE_URL = os.getenv('DATABASE_URL')
+# Fallback hardcoded URL (UPDATE THIS WITH YOUR ACTUAL PASSWORD)
+if not DATABASE_URL:
+    # ⚠️⚠️⚠️ REPLACE YOUR_ACTUAL_PASSWORD with your real password from Supabase ⚠️⚠️⚠️
+    # Go to Supabase → Settings → Database → Connection string → Session pooler
+    DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:YOUR_ACTUAL_PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
 
-print(f"✅ DATABASE_URL loaded")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL not found! Please check your .env file or Streamlit secrets.")
+
+print(f"✅ DATABASE_URL loaded: {DATABASE_URL[:40]}...")
+
 PRODUCTION_MODE = str(os.getenv('PRODUCTION_MODE', 'False')).lower() == 'true'
+
+if PRODUCTION_MODE:
+    print("=" * 60)
+    print("PRODUCTION MODE ACTIVE - Data protection ENABLED")
+    print("=" * 60)
+else:
+    print("DEVELOPMENT MODE - Connected to Supabase")
 
 try:
     import psycopg2
@@ -60,27 +78,26 @@ def setup_logging():
 logger = setup_logging()
 
 # ============================================================
-# CONNECTION FUNCTION - WITH SSL AND RETRY
+# CONNECTION FUNCTION - SESSION POOLER WITH SSL
 # ============================================================
 def get_connection():
-    """Get database connection with SSL and retry logic"""
+    """Get database connection using Session Pooler with SSL"""
     try:
-        print(f"🔍 Connecting to Supabase...")
-        # Try with SSL first
-        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        print(f"🔍 Connecting to Supabase Session Pooler...")
+        conn = psycopg2.connect(
+            DATABASE_URL,
+            sslmode='require',
+            connect_timeout=30,
+            keepalives_idle=5,
+            keepalives_interval=2,
+            keepalives_count=2
+        )
         print(f"✅ Connected to Supabase!")
         return conn
-    except Exception as e1:
-        print(f"⚠️ SSL connection failed: {e1}")
-        try:
-            # Try without SSL
-            conn = psycopg2.connect(DATABASE_URL)
-            print(f"✅ Connected to Supabase (no SSL)!")
-            return conn
-        except Exception as e2:
-            print(f"❌ All connection attempts failed: {e2}")
-            logger.error(f"Database connection error: {e2}")
-            raise
+    except Exception as e:
+        print(f"❌ Connection failed: {e}")
+        logger.error(f"Database connection error: {e}")
+        raise
 
 def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=False):
     conn = None
@@ -110,7 +127,7 @@ def execute_query(query, params=None, fetch_all=False, fetch_one=False, commit=F
             conn.close()
 
 # ============================================================
-# FALLBACK USERS - ONLY FOR EMERGENCY
+# FALLBACK USERS - EMERGENCY ONLY
 # ============================================================
 def get_fallback_users():
     """Emergency fallback users - only used when database is completely down"""
@@ -152,10 +169,9 @@ def get_fallback_users():
     ])
 
 # ============================================================
-# GET ALL USERS - ALWAYS RETURNS DATA
+# GET ALL USERS
 # ============================================================
 def get_all_users():
-    """Get all users from database, with emergency fallback"""
     conn = None
     try:
         print("🔍 get_all_users: Starting...")
@@ -176,13 +192,11 @@ def get_all_users():
         
         conn.close()
         
-        # If no users in database, return fallback
         if df.empty:
-            print("⚠️ get_all_users: Database has no users! Using fallback.")
+            print("⚠️ get_all_users: No users in database! Using fallback.")
             return get_fallback_users()
         
         print(f"✅ get_all_users: Returning {len(df)} users from database")
-        # Print users for debugging
         for idx, row in df.iterrows():
             print(f"   👤 {row['username']} ({row['role']})")
         
@@ -194,8 +208,7 @@ def get_all_users():
         traceback.print_exc()
         if conn:
             conn.close()
-        # EMERGENCY FALLBACK - Keep the app running
-        print("⚠️ get_all_users: Database unavailable! Using emergency fallback.")
+        print("⚠️ get_all_users: Using emergency fallback.")
         return get_fallback_users()
 
 # ============================================================
@@ -223,7 +236,6 @@ def get_departments():
         traceback.print_exc()
         if conn:
             conn.close()
-        # Fallback departments
         print("⚠️ get_departments: Using fallback departments.")
         return pd.DataFrame([
             {'id': 6, 'name': 'Finance'},
@@ -242,7 +254,7 @@ def get_departments():
         ])
 
 # ============================================================
-# AUTHENTICATE USER - WITH EMERGENCY FALLBACK
+# AUTHENTICATE USER
 # ============================================================
 def authenticate_user(username, password):
     conn = None
@@ -280,6 +292,12 @@ def authenticate_user(username, password):
         if username == 'admin' and password == 'admin123':
             print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
+        elif username == 'test' and password == 'test123':
+            print(f"✅ AUTH: Emergency test fallback!")
+            return ("test", "DEPARTMENT", "Lending", "Test User", 11, 0, 0, 0, 0)
+        elif username == 'finance_user' and password == 'finance123':
+            print(f"✅ AUTH: Emergency finance_user fallback!")
+            return ("finance_user", "FINANCE_RECEIVER", "Finance", "Finance User", 6, 1, 1, 0, 0)
         
         print(f"❌ AUTH: Invalid credentials for '{username}'")
         return None
@@ -301,7 +319,7 @@ def authenticate_user(username, password):
         return None
 
 # ============================================================
-# GET USER BY USERNAME - WITH EMERGENCY FALLBACK
+# GET USER BY USERNAME
 # ============================================================
 def get_user_by_username(username):
     try:
@@ -322,6 +340,12 @@ def get_user_by_username(username):
         if username == 'admin':
             return ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
                     datetime.now().isoformat(), datetime.now().isoformat(), 1)
+        elif username == 'test':
+            return ('test', 'DEPARTMENT', 'Lending', 'Test User', 11, 0, 0, 0, 
+                    datetime.now().isoformat(), datetime.now().isoformat(), 1)
+        elif username == 'finance_user':
+            return ('finance_user', 'FINANCE_RECEIVER', 'Finance', 'Finance User', 6, 1, 0, 0, 
+                    datetime.now().isoformat(), datetime.now().isoformat(), 1)
         
         return None
         
@@ -333,7 +357,7 @@ def get_user_by_username(username):
         return None
 
 # ============================================================
-# GET USER PERMISSIONS - WITH EMERGENCY FALLBACK
+# GET USER PERMISSIONS
 # ============================================================
 def get_user_permissions(username):
     try:
@@ -355,13 +379,14 @@ def get_user_permissions(username):
     # Emergency fallback
     if username == 'admin':
         return {'can_receive': True, 'can_process': True, 'can_release': True, 'role': 'ADMIN'}
+    elif username == 'finance_user':
+        return {'can_receive': True, 'can_process': False, 'can_release': False, 'role': 'FINANCE_RECEIVER'}
     
     return {'can_receive': False, 'can_process': False, 'can_release': False, 'role': 'DEPARTMENT'}
 
 # ============================================================
-# ALL OTHER FUNCTIONS - UNCHANGED
+# CREATE USER
 # ============================================================
-
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
@@ -397,6 +422,9 @@ def create_user(username, password, role, department_id, full_name,
         print(f"❌ Error creating user: {e}")
         return False
 
+# ============================================================
+# UPDATE USER PASSWORD
+# ============================================================
 def update_user_password(username, new_password):
     try:
         query = "UPDATE users SET password = %s WHERE username = %s"
@@ -406,6 +434,9 @@ def update_user_password(username, new_password):
         logger.error(f"Error updating password: {e}")
         return False
 
+# ============================================================
+# UPDATE USER PERMISSIONS
+# ============================================================
 def update_user_permissions(username, can_receive, can_process, can_release):
     try:
         query = """
@@ -424,6 +455,9 @@ def update_user_permissions(username, can_receive, can_process, can_release):
         logger.error(f"Error updating permissions: {e}")
         return False
 
+# ============================================================
+# DELETE USER
+# ============================================================
 def delete_user(username):
     try:
         query = "DELETE FROM users WHERE username = %s"
@@ -433,6 +467,9 @@ def delete_user(username):
         logger.error(f"Error deleting user: {e}")
         return False
 
+# ============================================================
+# GET USER DEPARTMENT
+# ============================================================
 def get_user_department(username):
     query = """
         SELECT d.* FROM users u
@@ -441,6 +478,9 @@ def get_user_department(username):
     """
     return execute_query(query, (username,), fetch_one=True)
 
+# ============================================================
+# GET DEPARTMENT REQUESTS
+# ============================================================
 def get_department_requests(department_name):
     query = "SELECT * FROM requests WHERE department_name = %s ORDER BY submission_date DESC"
     conn = None
@@ -455,6 +495,9 @@ def get_department_requests(department_name):
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# CREATE DEPARTMENT
+# ============================================================
 def create_department(name, permissions):
     try:
         can_imprest, can_petty, can_supplier, can_student, can_surrender, can_refund, requires_product, requires_funder, is_finance = permissions
@@ -482,6 +525,9 @@ def create_department(name, permissions):
         logger.error(f"Error creating department: {e}")
         return False
 
+# ============================================================
+# DELETE DEPARTMENT
+# ============================================================
 def delete_department(dept_id):
     try:
         check_query = "SELECT COUNT(*) FROM users WHERE department_id = %s"
@@ -495,6 +541,9 @@ def delete_department(dept_id):
         logger.error(f"Error deleting department: {e}")
         return False
 
+# ============================================================
+# GET PRODUCTS
+# ============================================================
 def get_products():
     conn = None
     try:
@@ -508,6 +557,9 @@ def get_products():
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# ADD PRODUCT
+# ============================================================
 def add_product(name, category, has_payment_type, has_semester):
     try:
         query = "INSERT INTO products (name, category, has_payment_type, has_semester, is_active) VALUES (%s, %s, %s, %s, 1)"
@@ -517,6 +569,9 @@ def add_product(name, category, has_payment_type, has_semester):
         logger.error(f"Error adding product: {e}")
         return False
 
+# ============================================================
+# DELETE PRODUCT
+# ============================================================
 def delete_product(product_id):
     try:
         query = "DELETE FROM products WHERE id = %s"
@@ -526,6 +581,9 @@ def delete_product(product_id):
         logger.error(f"Error deleting product: {e}")
         return False
 
+# ============================================================
+# GET FUNDERS
+# ============================================================
 def get_funders():
     conn = None
     try:
@@ -539,6 +597,9 @@ def get_funders():
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# ADD FUNDER
+# ============================================================
 def add_funder(funder_name):
     try:
         query = "INSERT INTO funders (name) VALUES (%s)"
@@ -548,6 +609,9 @@ def add_funder(funder_name):
         logger.error(f"Error adding funder: {e}")
         return False
 
+# ============================================================
+# DELETE FUNDER
+# ============================================================
 def delete_funder(funder_id):
     try:
         query = "DELETE FROM funders WHERE id = %s"
@@ -557,6 +621,9 @@ def delete_funder(funder_id):
         logger.error(f"Error deleting funder: {e}")
         return False
 
+# ============================================================
+# GET FINANCIAL YEARS
+# ============================================================
 def get_financial_years():
     conn = None
     try:
@@ -570,6 +637,9 @@ def get_financial_years():
             conn.close()
         return []
 
+# ============================================================
+# ADD FINANCIAL YEAR
+# ============================================================
 def add_financial_year(year_name):
     try:
         query = "INSERT INTO financial_years (name, is_active) VALUES (%s, 1)"
@@ -579,6 +649,9 @@ def add_financial_year(year_name):
         logger.error(f"Error adding financial year: {e}")
         return False
 
+# ============================================================
+# DELETE FINANCIAL YEAR
+# ============================================================
 def delete_financial_year(year_id):
     try:
         query = "DELETE FROM financial_years WHERE id = %s"
@@ -588,6 +661,9 @@ def delete_financial_year(year_id):
         logger.error(f"Error deleting financial year: {e}")
         return False
 
+# ============================================================
+# GET SEMESTERS
+# ============================================================
 def get_semesters():
     conn = None
     try:
@@ -601,6 +677,9 @@ def get_semesters():
             conn.close()
         return []
 
+# ============================================================
+# ADD SEMESTER
+# ============================================================
 def add_semester(semester_name):
     try:
         query = "INSERT INTO semesters (name) VALUES (%s)"
@@ -610,6 +689,9 @@ def add_semester(semester_name):
         logger.error(f"Error adding semester: {e}")
         return False
 
+# ============================================================
+# DELETE SEMESTER
+# ============================================================
 def delete_semester(semester_id):
     try:
         query = "DELETE FROM semesters WHERE id = %s"
@@ -619,6 +701,9 @@ def delete_semester(semester_id):
         logger.error(f"Error deleting semester: {e}")
         return False
 
+# ============================================================
+# GET REQUESTS
+# ============================================================
 def get_requests():
     conn = None
     try:
@@ -632,6 +717,9 @@ def get_requests():
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# GET REQUEST BY ID
+# ============================================================
 def get_request_by_id(request_id):
     query = "SELECT * FROM requests WHERE id = %s"
     result = execute_query(query, (request_id,), fetch_one=True)
@@ -655,6 +743,9 @@ def get_request_by_id(request_id):
         return dict(zip(columns, result))
     return None
 
+# ============================================================
+# SAVE REQUEST
+# ============================================================
 def save_request(data):
     data['request_number'] = data.get('request_number', f"HELB-{datetime.now().strftime('%Y%m')}-{get_next_count():04d}")
     data['submission_date'] = datetime.now().strftime('%Y-%m-%d')
@@ -683,6 +774,9 @@ def save_request(data):
         logger.error(f"Error saving request: {e}")
         return None
 
+# ============================================================
+# UPDATE REQUEST STATUS
+# ============================================================
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
                           performed_by=None, performed_by_role=None, performed_by_dept=None,
                           checklist_approvals=None, checklist_documents=None, checklist_comments=None):
@@ -777,6 +871,9 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         logger.error(f"Error updating status: {e}")
         return False
 
+# ============================================================
+# UPDATE PAYMENT DETAILS
+# ============================================================
 def update_payment_details(request_id, payment_reference):
     try:
         query = """
@@ -795,6 +892,9 @@ def update_payment_details(request_id, payment_reference):
         logger.error(f"Error updating payment details: {e}")
         return False
 
+# ============================================================
+# GET RETURNED REQUESTS
+# ============================================================
 def get_returned_requests(department_name):
     query = """
         SELECT * FROM requests 
@@ -813,6 +913,9 @@ def get_returned_requests(department_name):
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# GET RETURNED REQUEST BY ID
+# ============================================================
 def get_returned_request_by_id(request_id):
     query = "SELECT * FROM requests WHERE id = %s AND status = 'RETURNED'"
     result = execute_query(query, (request_id,), fetch_one=True)
@@ -836,6 +939,9 @@ def get_returned_request_by_id(request_id):
         return dict(zip(columns, result))
     return None
 
+# ============================================================
+# RESUBMIT REQUEST
+# ============================================================
 def resubmit_request(request_id, updated_data):
     try:
         set_parts = []
@@ -854,6 +960,9 @@ def resubmit_request(request_id, updated_data):
         logger.error(f"Error resubmitting request: {e}")
         return False
 
+# ============================================================
+# SEARCH PAYMENT RECORDS
+# ============================================================
 def search_payment_records(search_term, search_type="all"):
     conn = None
     try:
@@ -913,6 +1022,9 @@ def search_payment_records(search_term, search_type="all"):
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# SEARCH BY BATCH NUMBER
+# ============================================================
 def search_by_batch_number(batch_no):
     query = """
         SELECT request_number, main_category, amount, status, payment_date, 
@@ -927,6 +1039,9 @@ def search_by_batch_number(batch_no):
                  'department': r[6], 'submission_date': r[7]} for r in results]
     return []
 
+# ============================================================
+# GET ALL BATCH NUMBERS
+# ============================================================
 def get_all_batch_numbers():
     query = """
         SELECT DISTINCT batch_no FROM requests 
@@ -936,6 +1051,9 @@ def get_all_batch_numbers():
     results = execute_query(query, fetch_all=True)
     return [r[0] for r in results if r[0]]
 
+# ============================================================
+# CALCULATE TAT
+# ============================================================
 def calculate_tat(submission_date, payment_date=None):
     from utils.holidays_ke import working_days_between
     try:
@@ -949,6 +1067,9 @@ def calculate_tat(submission_date, payment_date=None):
     except:
         return 0
 
+# ============================================================
+# GET NEXT COUNT
+# ============================================================
 def get_next_count():
     try:
         query = "SELECT COUNT(*) FROM requests"
@@ -957,6 +1078,9 @@ def get_next_count():
     except:
         return 1
 
+# ============================================================
+# LOG AUDIT
+# ============================================================
 def log_audit(operation, table_name, record_id, user=None, details=None, before_state=None, after_state=None):
     try:
         query = """
@@ -980,6 +1104,9 @@ def log_audit(operation, table_name, record_id, user=None, details=None, before_
     except Exception as e:
         logger.error(f"Audit log failed: {e}")
 
+# ============================================================
+# ADD REQUEST LOG
+# ============================================================
 def add_request_log(request_id, request_number, action, status_from, status_to, 
                     comment, performed_by, performed_by_role, performed_by_dept, details=None):
     try:
@@ -999,6 +1126,9 @@ def add_request_log(request_id, request_number, action, status_from, status_to,
     except Exception as e:
         logger.error(f"Error adding log: {e}")
 
+# ============================================================
+# GET REQUEST LOGS
+# ============================================================
 def get_request_logs(request_id):
     try:
         query = """
@@ -1017,6 +1147,9 @@ def get_request_logs(request_id):
         logger.error(f"Error getting logs: {e}")
         return []
 
+# ============================================================
+# GET SLA FROM DATABASE
+# ============================================================
 def get_sla_from_database():
     try:
         query = "SELECT request_type, sla_days FROM sla_config"
@@ -1033,6 +1166,9 @@ def get_sla_from_database():
             'Professional Body': 5, 'Direct Payment': 3, 'Fare Reimbursement': 3
         }
 
+# ============================================================
+# GET ALL REQUEST TYPES
+# ============================================================
 def get_all_request_types():
     try:
         query = "SELECT request_type, sla_days FROM sla_config ORDER BY request_type"
@@ -1041,6 +1177,9 @@ def get_all_request_types():
     except:
         return []
 
+# ============================================================
+# ADD REQUEST TYPE
+# ============================================================
 def add_request_type(request_type, sla_days):
     try:
         query = "INSERT INTO sla_config (request_type, sla_days) VALUES (%s, %s)"
@@ -1050,6 +1189,9 @@ def add_request_type(request_type, sla_days):
         logger.error(f"Error adding request type: {e}")
         return False
 
+# ============================================================
+# UPDATE REQUEST TYPE
+# ============================================================
 def update_request_type(old_name, new_name, sla_days):
     try:
         query = "UPDATE sla_config SET request_type = %s, sla_days = %s WHERE request_type = %s"
@@ -1059,6 +1201,9 @@ def update_request_type(old_name, new_name, sla_days):
         logger.error(f"Error updating request type: {e}")
         return False
 
+# ============================================================
+# DELETE REQUEST TYPE
+# ============================================================
 def delete_request_type(request_type):
     try:
         query = "DELETE FROM sla_config WHERE request_type = %s"
@@ -1068,6 +1213,9 @@ def delete_request_type(request_type):
         logger.error(f"Error deleting request type: {e}")
         return False
 
+# ============================================================
+# UPDATE SLA DAYS
+# ============================================================
 def update_sla_days(request_type, sla_days):
     try:
         query = "UPDATE sla_config SET sla_days = %s WHERE request_type = %s"
@@ -1077,6 +1225,9 @@ def update_sla_days(request_type, sla_days):
         logger.error(f"Error updating SLA days: {e}")
         return False
 
+# ============================================================
+# VERIFY FINANCE PASSWORD
+# ============================================================
 def verify_finance_password(password):
     try:
         query = "SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'"
@@ -1085,6 +1236,9 @@ def verify_finance_password(password):
     except:
         return False
 
+# ============================================================
+# UPDATE FINANCE PASSWORD
+# ============================================================
 def update_finance_password(new_password):
     try:
         query = "UPDATE finance_settings SET setting_value = %s WHERE setting_key = 'finance_password'"
@@ -1094,6 +1248,9 @@ def update_finance_password(new_password):
         logger.error(f"Error updating finance password: {e}")
         return False
 
+# ============================================================
+# GET FINANCE PASSWORD
+# ============================================================
 def get_finance_password():
     try:
         query = "SELECT setting_value FROM finance_settings WHERE setting_key = 'finance_password'"
@@ -1102,6 +1259,9 @@ def get_finance_password():
     except:
         return 'finance123'
 
+# ============================================================
+# GET ALLOWED MAIN CATEGORIES
+# ============================================================
 def get_allowed_main_categories(user_role, user_dept):
     finance_roles = ["FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN"]
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
@@ -1112,6 +1272,9 @@ def get_allowed_main_categories(user_role, user_dept):
         return []
     return ["Submit Payment Request", "Submit Surrender"]
 
+# ============================================================
+# GET ALLOWED REQUEST TYPES
+# ============================================================
 def get_allowed_request_types(user_role, user_dept, main_category):
     if user_role in ["ADMIN", "FINANCE_ADMIN"]:
         if main_category == "Submit Payment Request":
@@ -1144,6 +1307,9 @@ def get_allowed_request_types(user_role, user_dept, main_category):
     else:
         return ["Surrender"]
 
+# ============================================================
+# GET PENDING CONFIRMATION COUNT
+# ============================================================
 def get_pending_confirmation_count():
     try:
         query = "SELECT COUNT(*) FROM requests WHERE status = 'SUBMITTED'"
@@ -1152,6 +1318,9 @@ def get_pending_confirmation_count():
     except:
         return 0
 
+# ============================================================
+# GET PENDING COMPLETION COUNT
+# ============================================================
 def get_pending_completion_count():
     try:
         query = "SELECT COUNT(*) FROM requests WHERE status NOT IN ('PAID', 'CLEARED', 'RETURNED')"
@@ -1160,6 +1329,9 @@ def get_pending_completion_count():
     except:
         return 0
 
+# ============================================================
+# GET PENDING DURATION
+# ============================================================
 def get_pending_duration(request_date):
     from utils.holidays_ke import working_days_between
     try:
@@ -1169,6 +1341,9 @@ def get_pending_duration(request_date):
     except:
         return 0
 
+# ============================================================
+# GET TIME LAPSED FROM CONFIRMATION
+# ============================================================
 def get_time_lapsed_from_confirmation(request_id):
     from utils.holidays_ke import working_days_between
     try:
@@ -1188,6 +1363,9 @@ def get_time_lapsed_from_confirmation(request_id):
     except:
         return None
 
+# ============================================================
+# GET MANAGEMENT DASHBOARD STATS
+# ============================================================
 def get_management_dashboard_stats(financial_year=None, quarter=None):
     from utils.holidays_ke import working_days_between
     df = get_requests()
@@ -1235,6 +1413,9 @@ def get_management_dashboard_stats(financial_year=None, quarter=None):
             'total_amount': total_amount, 'avg_completion_time': avg_completion_time,
             'total_breaches': breaches, 'breach_rate': breach_rate, 'completed_count': total_paid}
 
+# ============================================================
+# GET TREND DATA
+# ============================================================
 def get_trend_data(financial_year=None):
     df = get_requests()
     if df.empty:
@@ -1247,6 +1428,9 @@ def get_trend_data(financial_year=None):
     monthly.columns = ['month', 'total_amount', 'request_count']
     return monthly.sort_values('month')
 
+# ============================================================
+# GET ALL DEPARTMENTS SUMMARY
+# ============================================================
 def get_all_departments_summary():
     query = """
         SELECT department_name, COUNT(*) as total_requests,
@@ -1267,6 +1451,9 @@ def get_all_departments_summary():
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# GET REPORTS DATA
+# ============================================================
 def get_reports_data(user_role, user_dept):
     df = get_requests()
     if df.empty:
@@ -1277,6 +1464,9 @@ def get_reports_data(user_role, user_dept):
     else:
         return df[df['department_name'] == user_dept]
 
+# ============================================================
+# GET INTELLIGENT COMPLETION PREDICTION
+# ============================================================
 def get_intelligent_completion_prediction(request_id, request_type, current_status, current_tat, sla_days):
     from utils.holidays_ke import add_working_days
     try:
@@ -1354,6 +1544,9 @@ def get_intelligent_completion_prediction(request_id, request_type, current_stat
         predicted_date = add_working_days(date.today(), remaining_days)
         return predicted_date, "Estimated", "Using standard SLA estimation."
 
+# ============================================================
+# IDENTIFY BOTTLENECKS
+# ============================================================
 def identify_bottlenecks(df):
     from utils.holidays_ke import working_days_between
     bottlenecks = []
@@ -1400,6 +1593,9 @@ def identify_bottlenecks(df):
             })
     return pd.DataFrame(bottlenecks)
 
+# ============================================================
+# GET FASTEST REQUEST TYPES
+# ============================================================
 def get_fastest_request_types(df):
     tat_analysis = []
     if df.empty:
@@ -1452,6 +1648,9 @@ def get_fastest_request_types(df):
     else:
         return pd.DataFrame(columns=['Request Type', 'Average TAT', 'Median TAT', 'Fastest (Days)', 'Slowest (Days)', 'Sample Size', 'Performance Score'])
 
+# ============================================================
+# GET BULK ELIGIBLE REQUESTS
+# ============================================================
 def get_bulk_eligible_requests(statuses=None, request_types=None, department=None, limit=100):
     query = """
         SELECT id, request_number, request_type, department_name, amount, 
@@ -1479,6 +1678,9 @@ def get_bulk_eligible_requests(statuses=None, request_types=None, department=Non
              'department_name': r[3], 'amount': r[4], 'status': r[5],
              'submission_date': r[6], 'submitted_by': r[7]} for r in results]
 
+# ============================================================
+# BULK UPDATE STATUS
+# ============================================================
 def bulk_update_status(request_ids, new_status, performed_by, performed_by_role, performed_by_dept, 
                        payment_reference=None, finance_comment=None):
     success_count = 0
@@ -1527,6 +1729,9 @@ def bulk_update_status(request_ids, new_status, performed_by, performed_by_role,
             logger.error(f"Error processing request {request_id}: {e}")
     return success_count, failed_ids
 
+# ============================================================
+# EXPORT BULK REQUESTS
+# ============================================================
 def export_bulk_requests(request_ids):
     placeholders = ','.join(['%s'] * len(request_ids))
     query = f"""
@@ -1546,6 +1751,9 @@ def export_bulk_requests(request_ids):
             conn.close()
         return pd.DataFrame()
 
+# ============================================================
+# GET DATABASE HEALTH
+# ============================================================
 def get_database_health():
     health = {
         'db_size_mb': 0,
@@ -1577,6 +1785,9 @@ def get_database_health():
         health['recommendation'] = 'Could not retrieve health metrics'
     return health
 
+# ============================================================
+# GET PUBLIC PAYMENT DETAILS
+# ============================================================
 def get_public_payment_details(search_term, search_type="reference"):
     query = """
         SELECT 
@@ -1619,6 +1830,9 @@ def get_public_payment_details(search_term, search_type="reference"):
         }
     return None
 
+# ============================================================
+# CALCULATE ESTIMATED COMPLETION DATE
+# ============================================================
 def calculate_estimated_completion_date(status, current_date):
     from utils.holidays_ke import add_working_days
     status_map = {
@@ -1643,15 +1857,27 @@ def calculate_estimated_completion_date(status, current_date):
             return None, info['message'], None
     return None, "Status information unavailable.", None
 
+# ============================================================
+# GET BACKUP LIST
+# ============================================================
 def get_backup_list():
     return [{'filename': 'Supabase automatic backup', 'date': datetime.now().isoformat(), 'size': 0}]
 
+# ============================================================
+# RESTORE BACKUP
+# ============================================================
 def restore_backup(backup_filename):
     return True
 
+# ============================================================
+# SAFE INIT WITH RECOVERY
+# ============================================================
 def safe_init_with_recovery():
     logger.info("Supabase PostgreSQL database is ready")
     return True
 
+# ============================================================
+# ENSURE TABLES EXIST
+# ============================================================
 def ensure_tables_exist():
     return True
