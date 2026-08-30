@@ -21,6 +21,8 @@ except ImportError:
 # Replace with YOUR actual password
 DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
 
+#DATABASE_URL = "postgresql://postgres:Helb%402025Secure%21@db.zbgkjyhootmctohnngiq.supabase.co:5432/postgres"
+
 # Try to get from environment or secrets
 try:
     import streamlit as st
