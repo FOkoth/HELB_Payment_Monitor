@@ -539,6 +539,12 @@ def save_request(data):
         data['submission_date'] = datetime.now().strftime('%Y-%m-%d')
         data['last_updated'] = datetime.now().isoformat()
         
+        # Ensure submitted_by is set correctly
+        if 'submitted_by' not in data or not data['submitted_by']:
+            data['submitted_by'] = 'admin'  # Fallback
+        
+        print(f"🔍 Saving request with submitted_by: '{data['submitted_by']}'")
+        
         columns = list(data.keys())
         placeholders = ', '.join(['%s'] * len(columns))
         columns_str = ', '.join(columns)
@@ -550,6 +556,14 @@ def save_request(data):
         if request_id:
             add_request_log(request_id, data.get('request_number'), "SUBMITTED", None, "SUBMITTED",
                            "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
+            print(f"✅ Request saved with ID: {request_id}")
+            
+            # Clear cache so My Requests shows new data
+            try:
+                get_requests_cached.clear()
+            except:
+                pass
+            
             return data.get('request_number')
         return None
     except Exception as e:
@@ -637,6 +651,12 @@ def update_request_status(request_id, status, finance_comment=None, return_reaso
         params.append(request_id)
         query = f"UPDATE requests SET {', '.join(updates)} WHERE id = %s"
         execute_query(query, params, commit=True)
+        
+        # Clear cache so My Requests shows updated data
+        try:
+            get_requests_cached.clear()
+        except:
+            pass
         
         if action:
             add_request_log(request_id, request_number, action, old_status, status,
