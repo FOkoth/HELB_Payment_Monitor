@@ -78,12 +78,35 @@ def setup_logging():
 logger = setup_logging()
 
 # ============================================================
+# IMPORT STREAMLIT FOR CACHING
+# ============================================================
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
+# ============================================================
+# CACHE CONFIGURATION
+# ============================================================
+CACHE_TTL = 300  # 5 minutes cache
+
+def cache_clear():
+    """Clear all cached data"""
+    if st:
+        try:
+            get_all_users_cached.clear()
+            get_departments_cached.clear()
+            get_requests_cached.clear()
+            get_sla_cached.clear()
+        except:
+            pass
+
+# ============================================================
 # CONNECTION FUNCTION - SESSION POOLER WITH SSL
 # ============================================================
 def get_connection():
     """Get database connection using Session Pooler with SSL"""
     try:
-        print(f"🔍 Connecting to Supabase Session Pooler...")
         conn = psycopg2.connect(
             DATABASE_URL,
             sslmode='require',
@@ -92,10 +115,8 @@ def get_connection():
             keepalives_interval=2,
             keepalives_count=2
         )
-        print(f"✅ Connected to Supabase!")
         return conn
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
         logger.error(f"Database connection error: {e}")
         raise
 
@@ -169,74 +190,52 @@ def get_fallback_users():
     ])
 
 # ============================================================
-# GET ALL USERS
+# GET ALL USERS - CACHED VERSION
 # ============================================================
+if st:
+    @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+    def get_all_users_cached():
+        """Cached version of get_all_users"""
+        return get_all_users()
+
 def get_all_users():
     conn = None
     try:
-        print("🔍 get_all_users: Starting...")
         conn = get_connection()
-        print("🔍 get_all_users: Connected!")
-        
         query = "SELECT username, role, full_name, can_receive_requests, can_process_stages, can_release_payments, created_at, is_active FROM users ORDER BY username"
-        
-        print(f"🔍 get_all_users: Executing query...")
         df = pd.read_sql_query(query, conn)
-        print(f"🔍 get_all_users: Query returned {len(df)} rows")
-        
         df['department'] = None
-        
         df = df[['username', 'role', 'department', 'full_name', 
                 'can_receive_requests', 'can_process_stages', 
                 'can_release_payments', 'created_at', 'is_active']]
-        
         conn.close()
-        
         if df.empty:
-            print("⚠️ get_all_users: No users in database! Using fallback.")
             return get_fallback_users()
-        
-        print(f"✅ get_all_users: Returning {len(df)} users from database")
-        for idx, row in df.iterrows():
-            print(f"   👤 {row['username']} ({row['role']})")
-        
         return df
-        
     except Exception as e:
-        print(f"❌ get_all_users error: {e}")
-        import traceback
-        traceback.print_exc()
         if conn:
             conn.close()
-        print("⚠️ get_all_users: Using emergency fallback.")
         return get_fallback_users()
 
 # ============================================================
-# GET DEPARTMENTS
+# GET DEPARTMENTS - CACHED VERSION
 # ============================================================
+if st:
+    @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+    def get_departments_cached():
+        """Cached version of get_departments"""
+        return get_departments()
+
 def get_departments():
     conn = None
     try:
-        print("🔍 get_departments: Starting...")
         conn = get_connection()
-        print("🔍 get_departments: Connected!")
-        
-        query = "SELECT id, name FROM departments ORDER BY name"
-        
-        print(f"🔍 get_departments: Executing query...")
-        df = pd.read_sql_query(query, conn)
-        print(f"🔍 get_departments: Query returned {len(df)} rows")
-        
+        df = pd.read_sql_query("SELECT id, name FROM departments ORDER BY name", conn)
         conn.close()
         return df
-        
     except Exception as e:
-        print(f"❌ get_departments error: {e}")
-        import traceback
-        traceback.print_exc()
         if conn:
             conn.close()
-        print("⚠️ get_departments: Using fallback departments.")
         return pd.DataFrame([
             {'id': 6, 'name': 'Finance'},
             {'id': 11, 'name': 'Lending'},
@@ -254,14 +253,42 @@ def get_departments():
         ])
 
 # ============================================================
+# GET REQUESTS - CACHED VERSION
+# ============================================================
+if st:
+    @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+    def get_requests_cached():
+        """Cached version of get_requests"""
+        return get_requests()
+
+def get_requests():
+    conn = None
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        if conn:
+            conn.close()
+        return pd.DataFrame()
+
+# ============================================================
+# GET SLA - CACHED VERSION
+# ============================================================
+if st:
+    @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+    def get_sla_cached():
+        """Cached version of get_sla_from_database"""
+        return get_sla_from_database()
+
+# ============================================================
 # AUTHENTICATE USER
 # ============================================================
 def authenticate_user(username, password):
     conn = None
     cursor = None
     try:
-        print(f"🔍 AUTH: Attempting login for '{username}'")
-        
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -280,7 +307,6 @@ def authenticate_user(username, password):
             update_query = "UPDATE users SET last_login = %s WHERE username = %s"
             cursor.execute(update_query, (datetime.now().isoformat(), username))
             conn.commit()
-            print(f"✅ AUTH: User '{username}' authenticated from database!")
             cursor.close()
             conn.close()
             return user
@@ -290,22 +316,15 @@ def authenticate_user(username, password):
         
         # EMERGENCY FALLBACK - Only for admin
         if username == 'admin' and password == 'admin123':
-            print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
         elif username == 'test' and password == 'test123':
-            print(f"✅ AUTH: Emergency test fallback!")
             return ("test", "DEPARTMENT", "Lending", "Test User", 11, 0, 0, 0, 0)
         elif username == 'finance_user' and password == 'finance123':
-            print(f"✅ AUTH: Emergency finance_user fallback!")
             return ("finance_user", "FINANCE_RECEIVER", "Finance", "Finance User", 6, 1, 1, 0, 0)
         
-        print(f"❌ AUTH: Invalid credentials for '{username}'")
         return None
         
     except Exception as e:
-        print(f"❌ AUTH error: {e}")
-        import traceback
-        traceback.print_exc()
         if cursor:
             cursor.close()
         if conn:
@@ -313,7 +332,6 @@ def authenticate_user(username, password):
         
         # EMERGENCY FALLBACK - Only for admin
         if username == 'admin' and password == 'admin123':
-            print(f"✅ AUTH: Emergency admin fallback!")
             return ("admin", "ADMIN", "Finance", "System Administrator", 6, 1, 1, 1, 1)
         
         return None
@@ -350,7 +368,6 @@ def get_user_by_username(username):
         return None
         
     except Exception as e:
-        print(f"❌ get_user_by_username error: {e}")
         if username == 'admin':
             return ('admin', 'ADMIN', 'Finance', 'System Administrator', 6, 1, 1, 1, 
                     datetime.now().isoformat(), datetime.now().isoformat(), 1)
@@ -374,7 +391,7 @@ def get_user_permissions(username):
                 'role': result[3]
             }
     except Exception as e:
-        print(f"❌ get_user_permissions error: {e}")
+        pass
     
     # Emergency fallback
     if username == 'admin':
@@ -390,8 +407,6 @@ def get_user_permissions(username):
 def create_user(username, password, role, department_id, full_name, 
                 can_receive_requests=0, can_process_stages=0, can_release_payments=0):
     try:
-        print(f"🔍 Creating user: {username}")
-        
         check_query = "SELECT COUNT(*) FROM users WHERE username = %s"
         count_result = execute_query(check_query, (username,), fetch_one=True)
         count = count_result[0] if count_result else 0
@@ -419,7 +434,6 @@ def create_user(username, password, role, department_id, full_name,
         return True
     except Exception as e:
         logger.error(f"Error creating user: {e}")
-        print(f"❌ Error creating user: {e}")
         return False
 
 # ============================================================
@@ -490,7 +504,6 @@ def get_department_requests(department_name):
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ get_department_requests error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -552,7 +565,6 @@ def get_products():
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ get_products error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -592,7 +604,6 @@ def get_funders():
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ get_funders error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -632,7 +643,6 @@ def get_financial_years():
         conn.close()
         return df['name'].tolist() if not df.empty else []
     except Exception as e:
-        print(f"❌ get_financial_years error: {e}")
         if conn:
             conn.close()
         return []
@@ -672,7 +682,6 @@ def get_semesters():
         conn.close()
         return df['name'].tolist() if not df.empty else []
     except Exception as e:
-        print(f"❌ get_semesters error: {e}")
         if conn:
             conn.close()
         return []
@@ -700,22 +709,6 @@ def delete_semester(semester_id):
     except Exception as e:
         logger.error(f"Error deleting semester: {e}")
         return False
-
-# ============================================================
-# GET REQUESTS
-# ============================================================
-def get_requests():
-    conn = None
-    try:
-        conn = get_connection()
-        df = pd.read_sql_query("SELECT * FROM requests ORDER BY submission_date DESC", conn)
-        conn.close()
-        return df
-    except Exception as e:
-        print(f"❌ get_requests error: {e}")
-        if conn:
-            conn.close()
-        return pd.DataFrame()
 
 # ============================================================
 # GET REQUEST BY ID
@@ -908,7 +901,6 @@ def get_returned_requests(department_name):
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ get_returned_requests error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -1017,7 +1009,6 @@ def search_payment_records(search_term, search_type="all"):
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ search_payment_records error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -1446,7 +1437,6 @@ def get_all_departments_summary():
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ get_all_departments_summary error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
@@ -1746,7 +1736,6 @@ def export_bulk_requests(request_ids):
         conn.close()
         return df
     except Exception as e:
-        print(f"❌ export_bulk_requests error: {e}")
         if conn:
             conn.close()
         return pd.DataFrame()
