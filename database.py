@@ -533,10 +533,46 @@ def get_department_requests(department_name):
             conn.close()
         return pd.DataFrame()
 
+def convert_numpy_types(value):
+    """Convert numpy types to Python native types for PostgreSQL compatibility"""
+    if value is None:
+        return None
+    
+    # Handle numpy integer types
+    if hasattr(value, 'item'):
+        try:
+            return value.item()
+        except:
+            return value
+    
+    # Handle numpy array/ndarray
+    if hasattr(value, 'tolist'):
+        try:
+            return value.tolist()
+        except:
+            return value
+    
+    # Handle pandas Series/Index
+    if hasattr(value, 'iloc'):
+        try:
+            return value.iloc[0] if len(value) > 0 else None
+        except:
+            return value
+    
+    # Handle numpy float types
+    if isinstance(value, (np.float64, np.float32)):
+        return float(value)
+    
+    # Handle numpy integer types
+    if isinstance(value, (np.int64, np.int32, np.int16, np.int8)):
+        return int(value)
+    
+    return value
+
 def save_request(data):
     """
     Save a new request with proper error handling and column filtering.
-    This is the FIXED version that correctly handles database columns.
+    This version converts numpy types to Python native types.
     """
     try:
         print(f"🔍 SAVING REQUEST - Type: {data.get('request_type')}, Dept: {data.get('department_name')}")
@@ -562,7 +598,6 @@ def save_request(data):
             data['status'] = 'SUBMITTED'
         
         # Define the exact columns that exist in your database schema
-        # This matches the CREATE TABLE statement for requests
         valid_columns = [
             'request_number', 'request_type', 'main_category', 'department_id',
             'department_name', 'submitted_by', 'submission_date', 'amount',
@@ -579,12 +614,14 @@ def save_request(data):
             'direct_payment_details', 'fare_reimbursement_details', 'completion_date'
         ]
         
-        # Filter data to only include valid columns
+        # Filter data to only include valid columns AND convert numpy types
         filtered_data = {}
         skipped_keys = []
         for key, value in data.items():
             if key in valid_columns:
-                filtered_data[key] = value
+                # Convert numpy types to Python native types
+                converted_value = convert_numpy_types(value)
+                filtered_data[key] = converted_value
             else:
                 skipped_keys.append(key)
         
@@ -595,8 +632,7 @@ def save_request(data):
         required_fields = ['request_number', 'request_type', 'submitted_by', 'submission_date', 'status']
         for field in required_fields:
             if field not in filtered_data:
-                print(f"❌ Missing required field: {field}")
-                # Add it with a default value
+                print(f"⚠️ Missing required field: {field}, adding default")
                 if field == 'status':
                     filtered_data[field] = 'SUBMITTED'
                 elif field == 'submitted_by':
@@ -604,10 +640,8 @@ def save_request(data):
                 elif field == 'submission_date':
                     filtered_data[field] = datetime.now().strftime('%Y-%m-%d')
                 elif field == 'request_number':
-                    # This should already be set
                     continue
                 elif field == 'request_type':
-                    # This should already be set
                     continue
         
         # Convert amount to float if present
@@ -619,7 +653,22 @@ def save_request(data):
         else:
             filtered_data['amount'] = 0.0
         
+        # Convert department_id to int if present
+        if 'department_id' in filtered_data and filtered_data['department_id'] is not None:
+            try:
+                filtered_data['department_id'] = int(filtered_data['department_id'])
+            except (ValueError, TypeError):
+                filtered_data['department_id'] = None
+        
+        # Convert salary_year to int if present
+        if 'salary_year' in filtered_data and filtered_data['salary_year'] is not None:
+            try:
+                filtered_data['salary_year'] = int(filtered_data['salary_year'])
+            except (ValueError, TypeError):
+                filtered_data['salary_year'] = None
+        
         print(f"🔍 Filtered data for insert: {filtered_data}")
+        print(f"🔍 Values types: {[type(v).__name__ for v in filtered_data.values()]}")
         
         # Build the INSERT query
         columns = list(filtered_data.keys())
@@ -628,7 +677,6 @@ def save_request(data):
         query = f"INSERT INTO requests ({columns_str}) VALUES ({placeholders}) RETURNING id"
         
         print(f"🔍 Query: {query[:100]}...")
-        print(f"🔍 Values: {list(filtered_data.values())}")
         
         # Execute the query
         result = execute_query(query, list(filtered_data.values()), fetch_one=True, commit=True)
