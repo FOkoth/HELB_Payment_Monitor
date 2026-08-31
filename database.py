@@ -532,42 +532,128 @@ def get_department_requests(department_name):
             conn.close()
         return pd.DataFrame()
 
-def save_request(data):
-    """Save a new request"""
+def get_table_columns(table_name='requests'):
+    """Get list of columns for a table"""
     try:
-        data['request_number'] = data.get('request_number', f"HELB-{datetime.now().strftime('%Y%m')}-{get_next_count():04d}")
+        query = """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = %s
+        """
+        results = execute_query(query, (table_name,), fetch_all=True)
+        return [row[0] for row in results] if results else []
+    except Exception as e:
+        print(f"❌ get_table_columns error: {e}")
+        return []
+
+def save_request(data):
+    """Save a new request with proper error handling and column filtering"""
+    try:
+        print(f"🔍 SAVING REQUEST - Raw data keys: {list(data.keys())}")
+        
+        # Generate request number if not provided
+        if 'request_number' not in data or not data['request_number']:
+            next_count = get_next_count()
+            data['request_number'] = f"HELB-{datetime.now().strftime('%Y%m')}-{next_count:04d}"
+            print(f"🔍 Generated request_number: {data['request_number']}")
+        
+        # Set default values
         data['submission_date'] = datetime.now().strftime('%Y-%m-%d')
         data['last_updated'] = datetime.now().isoformat()
         
         # Ensure submitted_by is set correctly
         if 'submitted_by' not in data or not data['submitted_by']:
-            data['submitted_by'] = 'admin'  # Fallback
+            data['submitted_by'] = 'admin'
         
-        print(f"🔍 Saving request with submitted_by: '{data['submitted_by']}'")
+        # Ensure status is set
+        if 'status' not in data or not data['status']:
+            data['status'] = 'SUBMITTED'
         
-        columns = list(data.keys())
+        print(f"🔍 Data before column filtering: {data}")
+        
+        # Get existing columns from database
+        existing_columns = get_table_columns('requests')
+        if not existing_columns:
+            print("❌ Could not retrieve table columns!")
+            # Fallback: try a direct insert with known columns
+            existing_columns = [
+                'request_number', 'request_type', 'main_category', 'department_id',
+                'department_name', 'submitted_by', 'submission_date', 'amount',
+                'payment_description', 'financial_year', 'status', 'last_updated'
+            ]
+        
+        print(f"🔍 Existing columns in DB: {existing_columns}")
+        
+        # Filter data to only include existing columns
+        filtered_data = {}
+        skipped_keys = []
+        for k, v in data.items():
+            if k in existing_columns:
+                filtered_data[k] = v
+            else:
+                skipped_keys.append(k)
+        
+        if skipped_keys:
+            print(f"⚠️ Skipping unknown columns: {skipped_keys}")
+        
+        # Ensure critical columns are present
+        required_fields = ['request_number', 'request_type', 'submitted_by', 'submission_date', 'status']
+        for field in required_fields:
+            if field not in filtered_data:
+                print(f"❌ Missing required field: {field}")
+                return None
+        
+        # Convert amount to float if needed
+        if 'amount' in filtered_data and filtered_data['amount'] is not None:
+            filtered_data['amount'] = float(filtered_data['amount'])
+        else:
+            filtered_data['amount'] = 0.0
+        
+        print(f"🔍 Filtered data for insert: {filtered_data}")
+        
+        # Build the INSERT query
+        columns = list(filtered_data.keys())
         placeholders = ', '.join(['%s'] * len(columns))
         columns_str = ', '.join(columns)
         query = f"INSERT INTO requests ({columns_str}) VALUES ({placeholders}) RETURNING id"
         
-        result = execute_query(query, list(data.values()), fetch_one=True, commit=True)
+        print(f"🔍 Query: {query}")
+        print(f"🔍 Values: {list(filtered_data.values())}")
+        
+        # Execute
+        result = execute_query(query, list(filtered_data.values()), fetch_one=True, commit=True)
         request_id = result[0] if result else None
         
         if request_id:
-            add_request_log(request_id, data.get('request_number'), "SUBMITTED", None, "SUBMITTED",
-                           "Request submitted", data.get('submitted_by'), "DEPARTMENT", data.get('department_name'))
+            # Add log entry
+            add_request_log(
+                request_id, 
+                data.get('request_number'), 
+                "SUBMITTED", 
+                None, 
+                "SUBMITTED",
+                "Request submitted", 
+                data.get('submitted_by'), 
+                "DEPARTMENT", 
+                data.get('department_name')
+            )
             print(f"✅ Request saved with ID: {request_id}")
             
-            # Clear cache so My Requests shows new data
+            # Clear cache
             try:
                 get_requests_cached.clear()
             except:
                 pass
             
             return data.get('request_number')
-        return None
+        else:
+            print("❌ Failed to get request_id after insert")
+            return None
+            
     except Exception as e:
         print(f"❌ Error saving request: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def update_request_status(request_id, status, finance_comment=None, return_reason=None, 
@@ -1246,12 +1332,32 @@ def calculate_tat(submission_date, payment_date=None):
         return 0
 
 def get_next_count():
+    """Get next count for request number with proper error handling"""
     try:
+        # Try to get max from request_number pattern
+        query = """
+            SELECT MAX(CAST(SUBSTRING(request_number FROM 'HELB-[0-9]{6}-([0-9]{4})') AS INTEGER))
+            FROM requests 
+            WHERE request_number LIKE 'HELB-%'
+        """
+        result = execute_query(query, fetch_one=True)
+        if result and result[0]:
+            count = result[0] + 1
+            print(f"🔍 get_next_count from pattern: {count}")
+            return count
+        
+        # Fallback: count total rows
         query = "SELECT COUNT(*) FROM requests"
         result = execute_query(query, fetch_one=True)
-        return result[0] + 1 if result else 1
-    except:
-        return 1
+        count = result[0] + 1 if result else 1
+        print(f"🔍 get_next_count from count: {count}")
+        return count
+    except Exception as e:
+        print(f"⚠️ get_next_count error: {e}")
+        # Fallback: use timestamp-based count
+        count = int(datetime.now().timestamp()) % 10000 + 1
+        print(f"🔍 get_next_count from timestamp: {count}")
+        return count
 
 def search_by_batch_number(batch_no):
     query = """
