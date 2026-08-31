@@ -112,7 +112,7 @@ from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
 
 # ================================================================
-# DATABASE STATE CHECK - FIXED (SILENT VERSION)
+# DATABASE STATE CHECK 
 # ================================================================
 
 def check_database_state():
@@ -121,14 +121,11 @@ def check_database_state():
         users_df = get_all_users()
         
         if users_df.empty:
-            # Only show warning if user is already authenticated
             if st.session_state.get('authenticated', False):
                 st.warning("⚠️ No users found in the database. Please contact administrator.")
             return False
         else:
-            # Only show success if authenticated
-            if st.session_state.get('authenticated', False):
-                st.success(f"✅ Database ready: {len(users_df)} users found")
+            # REMOVED the success message - silent success
             return True
             
     except Exception as e:
