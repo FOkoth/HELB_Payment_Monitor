@@ -71,7 +71,9 @@ from database import (
     export_bulk_requests, get_database_health, get_sla_from_database,
     get_intelligent_completion_prediction, get_all_request_types,
     add_request_type, update_request_type, delete_request_type, update_sla_days,
-    get_backup_list, restore_backup, get_request_by_id
+    get_backup_list, restore_backup, get_request_by_id,
+    # CACHED VERSIONS
+    get_all_users_cached, get_departments_cached, get_requests_cached, get_sla_cached
 )
 from utils.holidays_ke import working_days_between, add_working_days
 from streamlit_option_menu import option_menu
@@ -83,7 +85,8 @@ from streamlit_option_menu import option_menu
 def check_database_state():
     """Check if database has data - SILENT CHECK (no warnings on login page)"""
     try:
-        users_df = get_all_users()
+        # USE CACHED VERSION
+        users_df = get_all_users_cached()
         
         if users_df.empty:
             if st.session_state.get('authenticated', False):
@@ -127,9 +130,9 @@ st.set_page_config(
 # ================================================================
 # RUN DATABASE STATE CHECK - FIXED
 # ================================================================
-# Test connection first
+# Test connection first - USE CACHED VERSION
 try:
-    users_df = get_all_users()
+    users_df = get_all_users_cached()
     print(f"Connected to Supabase. Found {len(users_df)} users")
 except Exception as e:
     st.error(f"❌ Database connection error: {str(e)}")
@@ -747,8 +750,8 @@ def display_tat_by_request_type(data_scope="All Data"):
     """Display TAT analysis grouped by request type - shows ALL records, not just completed"""
     st.markdown("<div class='section-header'>⏱️ Turnaround Time Analysis by Request Type</div>", unsafe_allow_html=True)
     
-    # Get all requests
-    df_all = get_requests()
+    # Get all requests - USE CACHED VERSION
+    df_all = get_requests_cached()
     
     if df_all.empty:
         st.info("No data available. Submit some requests first.")
@@ -790,8 +793,8 @@ def display_tat_by_request_type(data_scope="All Data"):
         st.info("No data matches your filters.")
         return
     
-    # Get SLA from database (real-time)
-    sla_map = get_sla_from_database()
+    # Get SLA from database (real-time) - USE CACHED VERSION
+    sla_map = get_sla_cached()
     
     results = []
     
@@ -1071,7 +1074,7 @@ if not st.session_state.authenticated:
                 st.session_state.full_name = user[3]
                 st.rerun()
             else:
-                st.error("❌ Invalid credentials. Use Emergency Login above.")
+                st.error("❌ Invalid credentials.")
     
     st.stop()
 
@@ -1371,7 +1374,8 @@ elif choice == "📈 Management Dashboard":
     st.markdown("<div class='section-header'>🏢 Executive Management Dashboard</div>", unsafe_allow_html=True)
     st.markdown("<p style='color:#6B7280; font-size:0.65rem; margin-bottom:0.8rem;'>Enterprise-wide analytics and performance insights</p>", unsafe_allow_html=True)
     
-    df = get_requests()
+    # USE CACHED VERSION
+    df = get_requests_cached()
     
     if data_scope != "All Data" and not df.empty:
         df['submission_date_dt'] = pd.to_datetime(df['submission_date'])
@@ -1399,7 +1403,8 @@ elif choice == "📈 Management Dashboard":
         
         completed_df = df[df['status'].isin(['PAID', 'CLEARED']) & df['payment_date'].notna()]
         sla_compliant = 0
-        sla_map = get_sla_from_database()
+        # USE CACHED VERSION
+        sla_map = get_sla_cached()
         
         for _, row in completed_df.iterrows():
             try:
@@ -1776,8 +1781,8 @@ elif choice == "🔍 Search Payment Records":
             if not results.empty:
                 st.markdown(f"### 📋 Search Results ({len(results)} records found)")
                 
-                # Get real-time SLA from database
-                sla_map = get_sla_from_database()
+                # Get real-time SLA from database - USE CACHED VERSION
+                sla_map = get_sla_cached()
                 
                 for _, row in results.iterrows():
                     entity_name = ""
@@ -1929,7 +1934,8 @@ elif choice == "🔍 Search Payment Records":
                         st.markdown("---")
                         st.markdown("**📊 Similar Requests Performance**")
                         
-                        df_all = get_requests()
+                        # USE CACHED VERSION
+                        df_all = get_requests_cached()
                         similar_completed = df_all[
                             (df_all['request_type'] == row['request_type']) & 
                             (df_all['status'].isin(['PAID', 'CLEARED'])) &
@@ -2056,7 +2062,8 @@ elif choice == "📝 New Request":
     # Department selection for Finance Admins
     selected_dept = st.session_state.user_dept
     if can_submit_on_behalf:
-        departments_list = get_departments()
+        # USE CACHED VERSION
+        departments_list = get_departments_cached()
         dept_options = ["Same as my department"] + departments_list['name'].tolist() if not departments_list.empty else ["Same as my department"]
         dept_choice = st.selectbox("Submitting for Department:", dept_options)
         if dept_choice != "Same as my department":
@@ -2076,8 +2083,8 @@ elif choice == "📝 New Request":
             selected_type = st.selectbox("Select Request Type", allowed_types)
             st.markdown("---")
             
-            # Get department_id for selected department from database
-            dept_df = get_departments()
+            # Get department_id for selected department from database - USE CACHED VERSION
+            dept_df = get_departments_cached()
             dept_id = None
             if not dept_df.empty:
                 dept_row = dept_df[dept_df['name'] == selected_dept]
@@ -2525,7 +2532,8 @@ elif choice == "📝 New Request":
 elif choice == "📋 My Requests":
     st.markdown("<div class='section-header'>📋 My Requests</div>", unsafe_allow_html=True)
     
-    df_all = get_requests()
+    # USE CACHED VERSION
+    df_all = get_requests_cached()
     
     if df_all.empty:
         st.info("No requests found in the database.")
@@ -2691,7 +2699,8 @@ elif choice == "✅ Approval Queue":
     if st.session_state.user_role in finance_roles or st.session_state.user_role == "ADMIN" or st.session_state.is_finance:
         st.markdown("<div class='section-header'>✅ Approval Queue</div>", unsafe_allow_html=True)
         
-        df_all = get_requests()
+        # USE CACHED VERSION
+        df_all = get_requests_cached()
         
         payment_df = df_all[df_all['main_category'] == "Submit Payment Request"]
         payment_counts = {
@@ -3285,7 +3294,8 @@ elif choice == "⚡ Bulk Operations":
                 default=[]
             )
         with col3:
-            departments_list = get_departments()
+            # USE CACHED VERSION
+            departments_list = get_departments_cached()
             dept_names = ["All"] + departments_list['name'].tolist() if not departments_list.empty else ["All"]
             bulk_dept_filter = st.selectbox("Filter by Department", dept_names)
         
@@ -3424,7 +3434,8 @@ elif choice == "⚡ Bulk Operations":
 elif choice == "📑 Reports":
     st.markdown("<div class='section-header'>📑 Reports</div>", unsafe_allow_html=True)
     
-    df_raw = get_requests()
+    # USE CACHED VERSION
+    df_raw = get_requests_cached()
     
     if df_raw.empty:
         st.info("No data available in the database.")
@@ -3468,7 +3479,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     
     with tab1:
         st.subheader("👥 User Management")
-        users_df = get_all_users()
+        # USE CACHED VERSION
+        users_df = get_all_users_cached()
         st.write(f"DEBUG: Found {len(users_df)} users")
         st.dataframe(users_df, use_container_width=True, hide_index=True)
         
@@ -3501,7 +3513,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
                     new_full_name = st.text_input("Full Name *")
                     new_role = st.selectbox("Role *", ["DEPARTMENT", "FINANCE_RECEIVER", "FINANCE_PROCESSOR", "FINANCE_RELEASER", "FINANCE_ADMIN", "MANAGEMENT", "ADMIN"])
                 
-                depts = get_departments()
+                # USE CACHED VERSION
+                depts = get_departments_cached()
                 dept_options = {row['name']: row['id'] for _, row in depts.iterrows()}
                 new_department = st.selectbox("Department", ["None"] + list(dept_options.keys()))
                 
@@ -3572,7 +3585,8 @@ elif choice == "⚙️ Admin Panel" and st.session_state.user_role == "ADMIN":
     
     with tab2:
         st.subheader("🏢 Department Management")
-        depts = get_departments()
+        # USE CACHED VERSION
+        depts = get_departments_cached()
         st.dataframe(depts, use_container_width=True, hide_index=True)
         with st.expander("➕ Add New Department"):
             with st.form("add_dept_form"):
