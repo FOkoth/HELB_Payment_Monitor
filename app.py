@@ -1091,25 +1091,7 @@ if not st.session_state.authenticated:
         </div>
         """, unsafe_allow_html=True)
         
-        # ============================================================
-        # EMERGENCY LOGIN - ADD THIS RIGHT HERE
-        # ============================================================
-        st.markdown("---")
-        st.warning("🔑 Emergency Login - Click below to bypass database authentication")
-        
-        if st.button("🚪 Emergency Login as Admin", type="primary", use_container_width=True):
-            st.session_state.authenticated = True
-            st.session_state.user_role = "ADMIN"
-            st.session_state.username = "admin"
-            st.session_state.user_dept = "Finance"
-            st.session_state.user_dept_id = 6
-            st.session_state.is_finance = True
-            st.session_state.full_name = "System Administrator"
-            st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### Login with Database")
-        
+       
         with st.form("login_form"):
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
