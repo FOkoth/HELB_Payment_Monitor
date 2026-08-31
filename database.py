@@ -1,3 +1,4 @@
+# DATABASE
 import os
 import json
 import time
@@ -532,24 +533,14 @@ def get_department_requests(department_name):
             conn.close()
         return pd.DataFrame()
 
-def get_table_columns(table_name='requests'):
-    """Get list of columns for a table"""
-    try:
-        query = """
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = %s
-        """
-        results = execute_query(query, (table_name,), fetch_all=True)
-        return [row[0] for row in results] if results else []
-    except Exception as e:
-        print(f"❌ get_table_columns error: {e}")
-        return []
-
 def save_request(data):
-    """Save a new request with proper error handling and column filtering"""
+    """
+    Save a new request with proper error handling and column filtering.
+    This is the FIXED version that correctly handles database columns.
+    """
     try:
-        print(f"🔍 SAVING REQUEST - Raw data keys: {list(data.keys())}")
+        print(f"🔍 SAVING REQUEST - Type: {data.get('request_type')}, Dept: {data.get('department_name')}")
+        print(f"🔍 Raw data keys: {list(data.keys())}")
         
         # Generate request number if not provided
         if 'request_number' not in data or not data['request_number']:
@@ -564,48 +555,67 @@ def save_request(data):
         # Ensure submitted_by is set correctly
         if 'submitted_by' not in data or not data['submitted_by']:
             data['submitted_by'] = 'admin'
+            print(f"⚠️ submitted_by not set, using default: admin")
         
         # Ensure status is set
         if 'status' not in data or not data['status']:
             data['status'] = 'SUBMITTED'
         
-        print(f"🔍 Data before column filtering: {data}")
+        # Define the exact columns that exist in your database schema
+        # This matches the CREATE TABLE statement for requests
+        valid_columns = [
+            'request_number', 'request_type', 'main_category', 'department_id',
+            'department_name', 'submitted_by', 'submission_date', 'amount',
+            'payment_description', 'financial_year', 'batch_no', 'product_type',
+            'semester', 'payment_type', 'imprest_no', 'supplier_name', 'invoice_no',
+            'lpo_no', 'salary_month', 'salary_year', 'customer_name', 'customer_id',
+            'surrender_number', 'staff_name', 'funder_name', 'refund_reason',
+            'original_payment_ref', 'previous_imprest_no', 'status', 'finance_comment',
+            'return_reason', 'date_received', 'date_returned', 'finance_check_date',
+            'payment_date', 'payment_reference', 'completed_by', 'completion_notes',
+            'last_updated', 'finance_checklist_approvals', 'finance_checklist_documents',
+            'finance_checklist_comments', 'date_confirmed_by_finance',
+            'mileage_claim_details', 'training_details', 'professional_body',
+            'direct_payment_details', 'fare_reimbursement_details', 'completion_date'
+        ]
         
-        # Get existing columns from database
-        existing_columns = get_table_columns('requests')
-        if not existing_columns:
-            print("❌ Could not retrieve table columns!")
-            # Fallback: try a direct insert with known columns
-            existing_columns = [
-                'request_number', 'request_type', 'main_category', 'department_id',
-                'department_name', 'submitted_by', 'submission_date', 'amount',
-                'payment_description', 'financial_year', 'status', 'last_updated'
-            ]
-        
-        print(f"🔍 Existing columns in DB: {existing_columns}")
-        
-        # Filter data to only include existing columns
+        # Filter data to only include valid columns
         filtered_data = {}
         skipped_keys = []
-        for k, v in data.items():
-            if k in existing_columns:
-                filtered_data[k] = v
+        for key, value in data.items():
+            if key in valid_columns:
+                filtered_data[key] = value
             else:
-                skipped_keys.append(k)
+                skipped_keys.append(key)
         
         if skipped_keys:
             print(f"⚠️ Skipping unknown columns: {skipped_keys}")
         
-        # Ensure critical columns are present
+        # Ensure all required fields are present
         required_fields = ['request_number', 'request_type', 'submitted_by', 'submission_date', 'status']
         for field in required_fields:
             if field not in filtered_data:
                 print(f"❌ Missing required field: {field}")
-                return None
+                # Add it with a default value
+                if field == 'status':
+                    filtered_data[field] = 'SUBMITTED'
+                elif field == 'submitted_by':
+                    filtered_data[field] = 'admin'
+                elif field == 'submission_date':
+                    filtered_data[field] = datetime.now().strftime('%Y-%m-%d')
+                elif field == 'request_number':
+                    # This should already be set
+                    continue
+                elif field == 'request_type':
+                    # This should already be set
+                    continue
         
-        # Convert amount to float if needed
+        # Convert amount to float if present
         if 'amount' in filtered_data and filtered_data['amount'] is not None:
-            filtered_data['amount'] = float(filtered_data['amount'])
+            try:
+                filtered_data['amount'] = float(filtered_data['amount'])
+            except (ValueError, TypeError):
+                filtered_data['amount'] = 0.0
         else:
             filtered_data['amount'] = 0.0
         
@@ -617,10 +627,10 @@ def save_request(data):
         columns_str = ', '.join(columns)
         query = f"INSERT INTO requests ({columns_str}) VALUES ({placeholders}) RETURNING id"
         
-        print(f"🔍 Query: {query}")
+        print(f"🔍 Query: {query[:100]}...")
         print(f"🔍 Values: {list(filtered_data.values())}")
         
-        # Execute
+        # Execute the query
         result = execute_query(query, list(filtered_data.values()), fetch_one=True, commit=True)
         request_id = result[0] if result else None
         
@@ -633,21 +643,22 @@ def save_request(data):
                 None, 
                 "SUBMITTED",
                 "Request submitted", 
-                data.get('submitted_by'), 
+                data.get('submitted_by', 'admin'), 
                 "DEPARTMENT", 
-                data.get('department_name')
+                data.get('department_name', 'Unknown')
             )
-            print(f"✅ Request saved with ID: {request_id}")
+            print(f"✅ Request saved successfully! ID: {request_id}, Number: {data.get('request_number')}")
             
-            # Clear cache
+            # Clear all caches to ensure data appears immediately
             try:
                 get_requests_cached.clear()
-            except:
-                pass
+                print("🔍 Cleared get_requests_cached")
+            except Exception as cache_error:
+                print(f"⚠️ Could not clear cache: {cache_error}")
             
             return data.get('request_number')
         else:
-            print("❌ Failed to get request_id after insert")
+            print("❌ Failed to get request_id after insert - no rows returned")
             return None
             
     except Exception as e:
