@@ -30,7 +30,7 @@ if not DATABASE_URL:
 
 if not DATABASE_URL:
     DATABASE_URL = "postgresql://postgres.zbgkjyhootmctohnngiq:Helb%402025Secure%21@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
-    print("⚠️⚠️⚠️ USING HARDCODED DATABASE_URL ⚠️⚠️⚠️")
+    print("USING HARDCODED DATABASE_URL")
 
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not found!")
@@ -626,13 +626,13 @@ def save_request(data):
                 skipped_keys.append(key)
         
         if skipped_keys:
-            print(f"⚠️ Skipping unknown columns: {skipped_keys}")
+            print(f" Skipping unknown columns: {skipped_keys}")
         
         # Ensure all required fields are present
         required_fields = ['request_number', 'request_type', 'submitted_by', 'submission_date', 'status']
         for field in required_fields:
             if field not in filtered_data:
-                print(f"⚠️ Missing required field: {field}, adding default")
+                print(f" Missing required field: {field}, adding default")
                 if field == 'status':
                     filtered_data[field] = 'SUBMITTED'
                 elif field == 'submitted_by':
@@ -702,7 +702,7 @@ def save_request(data):
                 get_requests_cached.clear()
                 print("🔍 Cleared get_requests_cached")
             except Exception as cache_error:
-                print(f"⚠️ Could not clear cache: {cache_error}")
+                print(f" Could not clear cache: {cache_error}")
             
             return data.get('request_number')
         else:
@@ -889,7 +889,7 @@ def resubmit_request(request_id, updated_data):
         execute_query(query, values, commit=True)
         return True
     except Exception as e:
-        print(f"❌ Error resubmitting request: {e}")
+        print(f" Error resubmitting request: {e}")
         return False
 
 def search_payment_records(search_term, search_type="all"):
